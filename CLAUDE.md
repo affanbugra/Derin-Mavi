@@ -34,6 +34,56 @@ Sen bu projede **teknik danışman + yazılım geliştirme ortağısın.** Amaç
 
 ---
 
+## 🔧 EKİP ÇALIŞMA KURALLARI (Git akışı + katkı — HERKES OKUR, İSTİSNASIZ)
+
+> Bu bölüm takımın refahı ve işleyişi içindir. Kod ortak; bir kişinin dikkatsizliği herkesin
+> işini bozabilir. Aşağıdakiler **kural**, öneri değil.
+
+**1. ASLA doğrudan `main`'e commit/push YAPMA.**
+- Her geliştirme kendi **alt branch'inde (feature branch)** yapılır:
+  ```bash
+  git checkout main && git pull           # önce güncel main'i al
+  git checkout -b özellik/kısa-ad         # örn: özellik/gimbal-matematigi
+  # ...çalış, commit at...
+  git push -u origin özellik/kısa-ad
+  ```
+- `main` her zaman **çalışan, kararlı** sürümdür. Bozuk/yarım kod `main`'e girmez.
+
+**2. `main`'e BİRLEŞTİRMEDEN (merge) ÖNCE mutlaka SOR / EMİN OL.**
+- GitHub'da **Pull Request (PR)** aç, kendi başına merge etme.
+- Merge etmeden önce ekibe sor: *"Bu değişikliği main'e alıyorum, herkesin haberi var mı?
+  Kimsenin üstünde çalıştığı bir yeri bozuyor mu? Emin miyiz?"*
+- En az **1 ekip arkadaşı gözden geçirip onaylamadan** merge YOK. Özellikle algı çekirdeği
+  (`algi.py`), arayüz (`arayuz_qt.py`) ve kontrol (`kontrol.py/protokol.py`) gibi ortak kalpler
+  değişiyorsa iki kez düşün — bunlar herkesin bağlı olduğu tek kaynaklardır.
+
+**3. HER PC'de çalışacak şekilde yaz (taşınabilirlik — bkz. ilke 7).**
+- **Makineye özel MUTLAK yol YAZMA** (`C:\Users\...`, `D:\Masaüstü\...`). Her yol `__file__`'a
+  görelidir (`os.path.join(HERE, ...)`). Kamera/model/kontrolcü çalışma anında bulunur veya env
+  ile geçilir (`DERINMAVI_CAM/MODEL/ESP/FOCAL`).
+- **Yeni bir kütüphane kullandıysan `requirements.txt`'e EKLE.** Yoksa "bende çalışıyordu"
+  olur, başkasında patlar. Sürüm sınırını da yaz (`paket>=x.y`).
+- Yeni özelliği push etmeden önce **temiz kafayla dene**: uygulama açılıyor mu, hata veriyor mu?
+
+**4. Commit hijyeni.**
+- Anlamlı Türkçe commit mesajı yaz (ne yaptığını söyle: "gimbal PD kontrolü eklendi" gibi,
+  "değişiklik" / "fix" değil).
+- **Repoya girmemesi gerekenleri commit etme:** model dosyaları (`*.pt/.onnx`), veri setleri,
+  `__pycache__`, kişisel/gizli dosyalar. `.gitignore` bunları zaten tutar — zorla eklemeye çalışma.
+- Push'tan önce **`git pull` (veya `git pull --rebase`)** yap; çakışmayı dikkatle çöz, körü
+  körüne "kabul et" deme (birinin emeğini silebilirsin).
+
+**5. İletişim.**
+- Bir dosyanın üstünde uzun çalışacaksan ekibe haber ver (aynı yeri iki kişi değiştirince
+  çakışma çıkar). Büyük mimari değişikliği önce konuş, sonra kodla.
+- Bir şeyi netleştirdinse/değiştirdiysen bu **CLAUDE.md yaşayan dokümandır** — ilgili yeri güncelle.
+
+**6. Gizlilik.** Repo şu an public. Şartname/KTR gibi gizli belgeler, şifreler, kişisel veri
+**asla** commit edilmez (`.gitignore` PDF/3mf/Analiz'i zaten engeller). Emin değilsen sorma
+değil — önce sor, sonra push.
+
+---
+
 ## 1. Yarışma takvimi (kritik tarihler)
 
 | Tarih | Olay | Durum |

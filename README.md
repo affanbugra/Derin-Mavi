@@ -113,11 +113,15 @@ Gerçek donanım gelince `DERINMAVI_ESP=COM<n>` yeterlidir, uygulama kodu deği�
 
 ---
 
-## Katkı ve model paylaşımı
+## Katkı ve ekip çalışması (ÖNEMLİ)
 
+- **Doğrudan `main`'e push YOK.** Her geliştirme alt branch'te yapılır, `main`'e almadan önce
+  **Pull Request açılır ve ekibe sorulur** ("herkesin haberi var mı, emin miyiz?"). En az 1
+  kişi onaylamadan merge edilmez. Kural detayı: [CLAUDE.md → Ekip Çalışma Kuralları](CLAUDE.md).
+- **Her PC'de çalışsın:** makineye özel mutlak yol yazma; yeni kütüphane kullandıysan
+  `requirements.txt`'e ekle. Kodda her yol `__file__`'a görelidir → indir-çalıştır.
 - Model dosyaları (`*.pt`, `*.onnx`) ve veri setleri `.gitignore` ile repoya **girmez** —
   herkes kendi modelini lokalde tutar veya ekiple ayrı bir kanaldan paylaşır.
-- Kodda makineye özel yol yoktur; her yol `__file__`'a görelidir → indir-çalıştır.
 
 ---
 
