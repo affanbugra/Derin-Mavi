@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
+    QSlider, QStyle, QStyleOptionSlider, QMessageBox,
 )
 
 import algi
@@ -69,6 +70,61 @@ TXT = "#0b1620"; TXT2 = "#2c4560"; TXT3 = "#527088"
 BLUE = "#1258a8"; RED = "#bf2020"; GRN = "#158750"; AMB = "#8e5c08"
 F = "'Public Sans','Segoe UI',sans-serif"
 FM = "Consolas,'Courier New',monospace"
+
+
+# =====================================================================
+#  Ayar paneli — kaydiricilar + "oneri" isaretli
+# =====================================================================
+COZUNURLUK_SECENEK = [416, 512, 640, 960]
+
+# (key, baslik, tip, min, max, oneri, aciklama)
+#   tip "yuzde": slider degeri /100 (0.xx) · "kare": tam sayi · "secim": COZUNURLUK_SECENEK indeksi
+AYAR_TANIM = [
+    ("hassasiyet", "Hassasiyet", "yuzde", 15, 60, 25,
+     "Model bir nesneyi 'gördü' saymak için ne kadar emin olmalı.\n\n"
+     "↑ ARTTIRIRSAN: sadece net nesneler yakalanır, boşa/yanlış kutu azalır — ama zayıf ya da "
+     "uzaktaki nesneleri kaçırabilir.\n"
+     "↓ AZALTIRSAN: zayıf/uzak nesneleri de yakalar — ama arka plana yanlış kutu atma riski artar."),
+    ("gosterim", "Gösterim eşiği", "yuzde", 20, 60, 35,
+     "Yeni bir kutunun ekranda BELİRMESİ için gereken güven. (Bir kez takibe giren nesne, bunun "
+     "altına düşse bile gösterilmeye devam eder — titremesin diye.)\n\n"
+     "↑ ARTTIRIRSAN: sadece emin olunan nesneler belirir, ekran daha temiz olur.\n"
+     "↓ AZALTIRSAN: nesneler daha çabuk belirir — ama yanıp sönen/hayalet kutu görülebilir."),
+    ("kararlilik", "Kutu kararlılığı", "kare", 10, 90, 30,
+     "Bir nesne bir an görünmez olursa kutusu kaç kare boyunca hafızada tutulsun (hemen kaybolmasın diye).\n\n"
+     "↑ ARTTIRIRSAN: kısa kayıplarda kutu kaybolmaz, takip daha kararlı olur — ama gerçekten kadraj "
+     "dışına çıkan nesne biraz geç silinir.\n"
+     "↓ AZALTIRSAN: giden nesne hızlı silinir — ama kutu daha çok titreyip kopabilir."),
+    ("cozunurluk", "Çözünürlük", "secim", 0, len(COZUNURLUK_SECENEK) - 1, 640,
+     "Modele verilen görüntü çözünürlüğü — HIZ ile UZAK NESNE görme arasındaki denge.\n\n"
+     "↑ BÜYÜTÜRSEN (960): uzak/küçük nesneleri (15 m) daha iyi görür — ama FPS düşer, sistem yavaşlar.\n"
+     "↓ KÜÇÜLTÜRSEN (416): daha akıcı ve hızlı olur — ama uzaktaki nesnede zayıflar."),
+]
+
+
+class OneriSlider(QSlider):
+    """Yatay kaydirici; track uzerinde 'oneri' (varsayilan) konumunu kucuk bir nokta ile gosterir."""
+    def __init__(self, oneri_val, parent=None):
+        super().__init__(Qt.Horizontal, parent)
+        self.oneri_val = oneri_val
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        rng = self.maximum() - self.minimum()
+        if rng <= 0:
+            return
+        opt = QStyleOptionSlider()
+        self.initStyleOption(opt)
+        groove = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
+        oran = (self.oneri_val - self.minimum()) / rng
+        x = groove.x() + int(round(groove.width() * oran))
+        y = groove.center().y()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(GRN))
+        p.drawEllipse(x - 3, y - 8, 6, 6)   # groove'un biraz ustunde kucuk yesil "oneri" noktasi
+        p.end()
 
 
 # =====================================================================
@@ -342,6 +398,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("DERİN MAVİ — Görev Kontrol İstasyonu")
         self.mod = "Otonom"
         self.asama = "Aşama 3"
+        self._ayar_yukle()   # kayitli ayarlar varsa algi.AYAR'a yukle (sliderlar bunu okur)
 
         # Icerik tuvali: yuksekligi sabit 900, GENISLIGI EKRANIN ORANINA gore ayarlanir.
         # Boylece her ekranda (16:9, 16:10, ultrawide...) yan bosluk (letterbox) KALMAZ.
@@ -576,6 +633,9 @@ class MainWindow(QMainWindow):
         self.video.setAlignment(Qt.AlignCenter)
         cl.addWidget(self.video)
 
+        # kamera sol ustune ⚙ Ayarlar butonu + acilir panel (video uzerinde)
+        self._ayar_overlay_kur(self.cam)
+
         v.addWidget(self.cam)
 
         # --- sistem durumu (ASAMAYA DUYARLI) ---
@@ -668,6 +728,149 @@ class MainWindow(QMainWindow):
         v.addWidget(bilgi)
         v.addStretch(1)
         return w
+
+    # ================= AYAR PANELI (canli goruntu isleme ayarlari) =================
+    def _ayar_overlay_kur(self, parent):
+        """Kamera sol ustune ⚙ butonu + acilir ayar paneli koyar (video uzerinde overlay)."""
+        self.ayar_sliderlar = {}   # key -> (slider, tip)
+
+        self.ayar_btn = QPushButton("⚙", parent)
+        self.ayar_btn.setObjectName("ayarbtn")
+        self.ayar_btn.setFixedSize(34, 34)
+        self.ayar_btn.setCursor(Qt.PointingHandCursor)
+        self.ayar_btn.setToolTip("Görüntü işleme ayarları")
+        self.ayar_btn.move(10, 10)
+        self.ayar_btn.clicked.connect(self._ayar_toggle)
+
+        self.ayar_panel = QFrame(parent)
+        self.ayar_panel.setObjectName("ayarpanel")
+        self.ayar_panel.setFixedWidth(320)
+        self.ayar_panel.move(10, 52)
+        pv = QVBoxLayout(self.ayar_panel)
+        pv.setContentsMargins(16, 13, 16, 13)
+        pv.setSpacing(11)
+
+        bas = QLabel("⚙  GÖRÜNTÜ İŞLEME AYARLARI")
+        bas.setObjectName("ayarbaslik")
+        pv.addWidget(bas)
+
+        for tanim in AYAR_TANIM:
+            self._ayar_satiri(pv, tanim)
+
+        alt = QHBoxLayout()
+        self.ayar_sifirla_btn = QPushButton("↺ Sıfırla")
+        self.ayar_sifirla_btn.setObjectName("ayaralt")
+        self.ayar_sifirla_btn.setCursor(Qt.PointingHandCursor)
+        self.ayar_sifirla_btn.clicked.connect(self._ayar_sifirla)
+        self.ayar_kaydet_btn = QPushButton("Kaydet")
+        self.ayar_kaydet_btn.setObjectName("ayarkaydet")
+        self.ayar_kaydet_btn.setCursor(Qt.PointingHandCursor)
+        self.ayar_kaydet_btn.clicked.connect(self._ayar_kaydet)
+        alt.addWidget(self.ayar_sifirla_btn)
+        alt.addStretch(1)
+        alt.addWidget(self.ayar_kaydet_btn)
+        pv.addLayout(alt)
+
+        self.ayar_panel.setVisible(False)
+        self.ayar_panel.adjustSize()
+        self.ayar_btn.raise_()
+
+    def _ayar_satiri(self, layout, tanim):
+        key, baslik, tip, mn, mx, oneri, aciklama = tanim
+        ust = QHBoxLayout()
+        ust.setSpacing(6)
+        lab = QLabel(baslik)
+        lab.setObjectName("ayarlbl")
+        info = QPushButton("!")
+        info.setObjectName("ayarinfo")
+        info.setFixedSize(16, 16)
+        info.setCursor(Qt.PointingHandCursor)
+        info.clicked.connect(lambda _, b=baslik, a=aciklama: self._ayar_bilgi(b, a))
+        deger = QLabel()
+        deger.setObjectName("ayardeg")
+        ust.addWidget(lab)
+        ust.addWidget(info)
+        ust.addStretch(1)
+        ust.addWidget(deger)
+        layout.addLayout(ust)
+
+        if tip == "secim":
+            sl = OneriSlider(COZUNURLUK_SECENEK.index(oneri))
+            sl.setMinimum(0)
+            sl.setMaximum(len(COZUNURLUK_SECENEK) - 1)
+            sl.setValue(COZUNURLUK_SECENEK.index(int(algi.AYAR[key])))
+        else:
+            sl = OneriSlider(oneri)
+            sl.setMinimum(mn)
+            sl.setMaximum(mx)
+            sl.setValue(int(round(algi.AYAR[key] * 100)) if tip == "yuzde" else int(algi.AYAR[key]))
+        sl.setObjectName("ayarsl")
+        sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger: self._ayar_degisti(k, t, val, d))
+        layout.addWidget(sl)
+        self.ayar_sliderlar[key] = (sl, tip)
+        self._ayar_deger_yaz(tip, sl.value(), deger)
+
+    def _ayar_deger_yaz(self, tip, val, lbl):
+        if tip == "yuzde":
+            lbl.setText(f"{val / 100:.2f}")
+        elif tip == "secim":
+            lbl.setText(f"{COZUNURLUK_SECENEK[val]} px")
+        else:
+            lbl.setText(f"{val} kare")
+
+    def _ayar_degisti(self, key, tip, val, deger_lbl):
+        if tip == "yuzde":
+            algi.ayar_guncelle(**{key: val / 100.0})
+        elif tip == "secim":
+            algi.ayar_guncelle(**{key: COZUNURLUK_SECENEK[val]})
+        else:
+            algi.ayar_guncelle(**{key: int(val)})
+        self._ayar_deger_yaz(tip, val, deger_lbl)
+
+    def _ayar_bilgi(self, baslik, aciklama):
+        QMessageBox.information(self, baslik, aciklama)
+
+    def _ayar_toggle(self):
+        gorunur = not self.ayar_panel.isVisible()
+        self.ayar_panel.setVisible(gorunur)
+        if gorunur:
+            self.ayar_panel.raise_()
+
+    def _ayar_sifirla(self):
+        algi.ayar_guncelle(**algi.VARSAYILAN_AYAR)
+        for key, (sl, tip) in self.ayar_sliderlar.items():
+            v = algi.VARSAYILAN_AYAR[key]
+            if tip == "yuzde":
+                sl.setValue(int(round(v * 100)))
+            elif tip == "secim":
+                sl.setValue(COZUNURLUK_SECENEK.index(int(v)))
+            else:
+                sl.setValue(int(v))
+
+    def _ayar_dosya(self):
+        return os.path.join(HERE, "ayarlar.json")
+
+    def _ayar_yukle(self):
+        import json
+        p = os.path.join(HERE, "ayarlar.json")
+        if os.path.isfile(p):
+            try:
+                with open(p, encoding="utf-8") as f:
+                    d = json.load(f)
+                algi.ayar_guncelle(**{k: v for k, v in d.items() if k in algi.AYAR})
+            except Exception:
+                pass
+
+    def _ayar_kaydet(self):
+        import json
+        try:
+            with open(self._ayar_dosya(), "w", encoding="utf-8") as f:
+                json.dump(algi.AYAR, f, ensure_ascii=False, indent=2)
+            self.ayar_kaydet_btn.setText("✓ Kaydedildi")
+            QTimer.singleShot(1500, lambda: self.ayar_kaydet_btn.setText("Kaydet"))
+        except Exception:
+            self.ayar_kaydet_btn.setText("✗ Hata")
+            QTimer.singleShot(1500, lambda: self.ayar_kaydet_btn.setText("Kaydet"))
 
     # ================= SAG KOLON =================
     def _sag_kolon(self):
@@ -1151,6 +1354,31 @@ class MainWindow(QMainWindow):
         #cam {{ background:#c8d0d8; border:1px solid {BD}; border-radius:8px; }}
         #video {{ background:#c8d0d8; border-radius:8px; color:{TXT3}; font-size:15px; }}
         #livet {{ font-size:11px; font-weight:700; color:{RED}; background:transparent; }}
+        /* --- Ayar paneli (kamera uzeri overlay) --- */
+        #ayarbtn {{ background:rgba(15,22,32,0.72); color:#fff; border:1px solid rgba(255,255,255,0.25);
+            border-radius:8px; font-size:17px; }}
+        #ayarbtn:hover {{ background:{BLUE}; border:1px solid {BLUE}; }}
+        #ayarpanel {{ background:rgba(255,255,255,0.97); border:1px solid {BD2}; border-radius:10px; }}
+        #ayarbaslik {{ font-size:11px; font-weight:800; letter-spacing:1px; color:{BLUE};
+            background:transparent; padding-bottom:2px; }}
+        #ayarlbl {{ font-size:12.5px; font-weight:600; color:{TXT}; background:transparent; }}
+        #ayardeg {{ font-size:12.5px; font-weight:700; color:{BLUE}; background:transparent;
+            font-family:{FM}; }}
+        #ayarinfo {{ background:{AMB}; color:#fff; border:none; border-radius:8px;
+            font-size:11px; font-weight:800; }}
+        #ayarinfo:hover {{ background:{RED}; }}
+        #ayarsl {{ height:20px; }}
+        #ayarsl::groove:horizontal {{ height:5px; border-radius:3px; background:{BD}; }}
+        #ayarsl::sub-page:horizontal {{ height:5px; border-radius:3px; background:{BLUE}; }}
+        #ayarsl::handle:horizontal {{ width:15px; height:15px; margin:-6px 0; border-radius:8px;
+            background:#fff; border:2px solid {BLUE}; }}
+        #ayarsl::handle:horizontal:hover {{ border:2px solid {RED}; }}
+        #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:6px;
+            padding:5px 12px; font-size:12px; font-weight:600; }}
+        #ayaralt:hover {{ background:{CARD}; }}
+        #ayarkaydet {{ background:{BLUE}; color:#fff; border:none; border-radius:6px;
+            padding:5px 16px; font-size:12px; font-weight:700; }}
+        #ayarkaydet:hover {{ background:#0e4a90; }}
         #panelk {{ background:{PANEL}; border:1px solid {BD}; border-radius:8px; }}
         #ph {{ font-size:11px; font-weight:600; letter-spacing:1px; color:{TXT3};
             padding-bottom:7px; border-bottom:1px solid {BD}; background:transparent; }}

@@ -36,6 +36,9 @@ Modeller_Kil6t/
 !sartname/*.pdf
 !sartname/*.txt
 
+# ===== Kullaniciya ozel ayarlar (herkesin kendi tercihi; repoya girmez) =====
+app/ayarlar.json
+
 # ===== IDE / OS =====
 .vscode/
 .idea/

@@ -9,6 +9,7 @@ Kamera kaynagi: DERINMAVI_CAM env (index / dosya / RTSP-URL); tanimsizsa otomati
 """
 import os
 import time
+import tempfile
 import threading
 import cv2
 import numpy as np
@@ -46,9 +47,51 @@ GERCEK_BOYUT = {"f16": 0.50, "helikopter": 0.50, "drone": 0.30, "fuze": 0.40}
 # DIKKAT: kalibre edilmeden mesafeler YAKLASIKTIR. Env ile makineye ozel gecilebilir.
 FOCAL_PX = float(os.environ.get("DERINMAVI_FOCAL", "900"))
 
-FLOOR = 0.35   # YENI takip baslatmak icin esik. Zaten takipteki (ID'li) kutular bunun
-               # altinda da gosterilir (ByteTrack onayladi) -> titremeyi bu onler, esik degil.
-INFER_IMGSZ = 640   # cikarim cozunurlugu (kucuk/uzak nesne icin 512->640; 15 m dayanikliligi)
+# =====================================================================
+#  CANLI AYARLAR (arayuzdeki "⚙ Ayarlar" panelinden anlik degistirilir)
+# =====================================================================
+# Her ayarin "onerilen" (varsayilan) degeri VARSAYILAN_AYAR'da. Panel bu degerleri
+# okur, kaydiriciyla degistirir; analiz_et her karede AYAR'i okur -> canli etki.
+#   hassasiyet  -> model.track(conf=..)  : nesneyi "gordu" saymak icin gereken guven
+#   gosterim    -> yeni kutuyu ekranda gostermek icin esik (takiptekiler zaten gosterilir)
+#   kararlilik  -> ByteTrack track_buffer: kaybolan kutu kac kare hafizada tutulur (titreme)
+#   cozunurluk  -> model.track(imgsz=..) : uzak nesne <-> hiz dengesi
+VARSAYILAN_AYAR = {"hassasiyet": 0.25, "gosterim": 0.35, "kararlilik": 30, "cozunurluk": 640}
+AYAR = dict(VARSAYILAN_AYAR)
+_tracker_yeniden_kur = True   # kararlilik degisince (ve ilk kullanimda) tracker yeniden kurulur
+
+# geriye donuk uyumluluk (eski koda referans varsa)
+FLOOR = VARSAYILAN_AYAR["gosterim"]
+INFER_IMGSZ = VARSAYILAN_AYAR["cozunurluk"]
+
+# ByteTrack config'i track_buffer'i canli degistirebilmek icin kendi yaml'imiza yazariz.
+_TRACKER_YAML = os.path.join(tempfile.gettempdir(), "derinmavi_bytetrack.yaml")
+
+
+def _tracker_yaml_yaz():
+    """Guncel track_buffer ile ByteTrack config dosyasini yazar."""
+    with open(_TRACKER_YAML, "w", encoding="utf-8") as f:
+        f.write(
+            "tracker_type: bytetrack\n"
+            "track_high_thresh: 0.1\n"      # esik dusuk; asil hassasiyet model conf'unda
+            "track_low_thresh: 0.05\n"
+            "new_track_thresh: 0.1\n"
+            f"track_buffer: {int(AYAR['kararlilik'])}\n"
+            "match_thresh: 0.8\n"
+            "fuse_score: True\n"
+        )
+
+
+def ayar_guncelle(**kw):
+    """Arayuzden gelen ayar degisikligini uygular (canli). kararlilik degisirse
+    tracker'in yeniden kurulmasi gerekir (bir sonraki karede yapilir)."""
+    global _tracker_yeniden_kur
+    for k, v in kw.items():
+        if k not in AYAR:
+            continue
+        if k == "kararlilik" and int(v) != int(AYAR[k]):
+            _tracker_yeniden_kur = True
+        AYAR[k] = v
 
 # BGR renkler (arayuz cizimleri)
 RED = (32, 32, 191)      # dusman (A3)
@@ -355,8 +398,20 @@ def analiz_et(model, frame, estop=False, asama=None):
     Kutular ByteTrack'in ANLIK ciktisidir: nesnenin gercek yerinde, gecikmesiz.
     Takip ID'li kutular dusuk guvende de gosterilir -> titremez, hayalet/cift kutu olmaz.
     """
-    results = model.track(frame, persist=True, conf=0.25, imgsz=INFER_IMGSZ,
-                          tracker="bytetrack.yaml", verbose=False)
+    # CANLI AYAR: kararlilik (track_buffer) degistiyse tracker'i yeniden kur.
+    global _tracker_yeniden_kur
+    if _tracker_yeniden_kur:
+        _tracker_yaml_yaz()
+        try:   # mevcut tracker'i dusur ki yeni track_buffer ile yeniden kurulsun
+            if getattr(model, "predictor", None) is not None and hasattr(model.predictor, "trackers"):
+                del model.predictor.trackers
+        except Exception:
+            pass
+        _tracker_yeniden_kur = False
+
+    gosterim = AYAR["gosterim"]
+    results = model.track(frame, persist=True, conf=AYAR["hassasiyet"],
+                          imgsz=AYAR["cozunurluk"], tracker=_TRACKER_YAML, verbose=False)
     r = results[0]
     balonlar = []
     dets = []
@@ -367,14 +422,14 @@ def analiz_et(model, frame, estop=False, asama=None):
             x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
             tid = int(b.id.item()) if b.id is not None else None
             if cls == "balon":
-                if conf >= FLOOR or tid is not None:
+                if conf >= gosterim or tid is not None:
                     balonlar.append((x1, y1, x2, y2))
                 continue
             if cls not in DISPLAY:
                 continue
             # Takip ID'si varsa ByteTrack onaylamis -> dusuk conf'ta da goster (titremez).
-            # ID yoksa (ilk kare / zayif tespit) FLOOR ile gurultuyu ele.
-            if tid is None and conf < FLOOR:
+            # ID yoksa (ilk kare / zayif tespit) "gosterim" esigi ile gurultuyu ele.
+            if tid is None and conf < gosterim:
                 continue
             # SARTNAME: taraf = RENK, ama YALNIZ Asama 3'te. A1-A2'de hepsi kirmizi/hedef.
             taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
