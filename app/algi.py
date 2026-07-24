@@ -359,8 +359,12 @@ def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
         color = RED if enemy else (BLUE if d["tip"] == "Dost" else GRAY)
         x1, y1, x2, y2 = d["box"]
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
-        tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"], "Bilinmiyor")
-        txt = f"{tip_cv} - {DISPLAY_CV.get(d['cls'], d['cls'])} - %{d['conf']}"
+        # Kutu etiketi: taraf BILINIYORSA "Dusman/Dost - Tip - %..", bilinmiyorsa
+        # kalabalik yapmamak icin SADECE tip adi ("Helikopter - %..") yazilir.
+        # Dost/dusman/bilinmiyor bilgisi yan paneldeki tespit tablosunda (TIP kolonu) gorunur.
+        tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"])
+        ad_cv = DISPLAY_CV.get(d['cls'], d['cls'])
+        txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
         f, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
         (tw, th), _ = cv2.getTextSize(txt, f, fs, ft)
         ly = max(y1, th + 10)
