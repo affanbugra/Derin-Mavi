@@ -1,0 +1,13 @@
+# DERİN MAVİ — Görev Kontrol İstasyonu bağımlılıkları
+# Kurulum:  pip install -r requirements.txt
+#
+# Not: ultralytics kendi torch sürümünü çeker. GPU'suz makinelerde CPU torch yeterlidir
+# (canlı tespit CPU'da çalışır). Küçük model (yolov8n/11n) + imgsz 640 önerilir.
+
+ultralytics>=8.1.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+PySide6>=6.6.0
+
+# ONNX ile hızlı CPU çıkarımı isteyenler için (opsiyonel — DERINMAVI_MODEL=onnx):
+# onnxruntime>=1.16.0

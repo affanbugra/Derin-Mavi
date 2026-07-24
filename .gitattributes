@@ -1,0 +1,10 @@
+# Satır sonlarını normalize et (Windows/Linux/Mac tutarlılığı)
+* text=auto eol=lf
+
+# Windows'a özel betikler CRLF kalsın
+*.bat text eol=crlf
+
+# İkili dosyalar
+*.png binary
+*.pt binary
+*.onnx binary

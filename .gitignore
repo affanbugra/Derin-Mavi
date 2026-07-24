@@ -1,0 +1,39 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.Python
+
+# ===== Model ağırlıkları (herkes kendi modelini lokalde tutar) =====
+*.pt
+*.onnx
+*.engine
+# models/ klasörü YAPISI repoda kalır (README.md + .gitkeep hariç tutulur):
+!models/README.md
+!models/.gitkeep
+
+# ===== Veri setleri / eğitim çıktıları (repoya girmez) =====
+*.zip
+datasets/
+dataset/
+dataset_v*/
+runs/
+roboflow_rf/
+
+# NOT: Dokümanlar repoda AÇIKTIR — yalnızca 2 dosya: CLAUDE.md (proje beyni) + README.md.
+
+# ===== Gizli yarışma belgeleri (repoya asla girmemeli) =====
+Analiz/
+Modeller_Kil6t/
+*.pdf
+*.3mf
+
+# ===== IDE / OS =====
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store
