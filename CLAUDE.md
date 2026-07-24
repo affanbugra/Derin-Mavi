@@ -18,7 +18,8 @@ Sen bu projede **teknik danışman + yazılım geliştirme ortağısın.** Amaç
    iyisini görüyorsan **söyle ve gerekçelendir.** Bunu sana her seferinde hatırlatmak zorunda
    kalmasınlar — bu senin varsayılan davranışın.
 2. **Tek referans = ŞARTNAME.** KTR bile %100 bağlayıcı değil (araç sıfırdan yapılıyor).
-   Bir çelişki varsa şartname kazanır. Emin değilsen `analiz/Şartname.pdf`'e dön.
+   Bir çelişki varsa şartname kazanır. Emin değilsen `sartname/Şartname.pdf`'e (veya hızlı
+   arama için `sartname/sartname_metin.txt`) dön.
 3. **Her kararı PUANA bağla.** "Bu ne kadar puan getirir/kaybettirir?" sorusu pusulan.
    Baraj puanlarını geçmek önce gelir, sonra maksimizasyon.
 4. **Basitlik kazandırır.** En sağlam çözüm en az parça içerendir (örn. 10–15m bandı içgörüsü).
@@ -31,6 +32,11 @@ Sen bu projede **teknik danışman + yazılım geliştirme ortağısın.** Amaç
    destekli), yollar göreli, model/donanım seçimi çalışma anında algılanır. Kod başka ortamda
    "indir-çalıştır" mantığıyla sorunsuz koşmalı. (Kamera kaynağı: `DERINMAVI_CAM` env — index
    / dosya / RTSP-URL; tanımsızsa otomatik tarama.)
+8. **ŞARTNAME DİSİPLİNİ + KESİN/VARSAYIM AYRIMI.** Şartname gerektiren her bilgi/işlemde
+   **gerçek şartnameyi tara** (`sartname/sartname_metin.txt` grep veya `sartname/Şartname.pdf` oku) —
+   hafızaya/varsayıma güvenip **emin olmadan işlem yapma.** Bir bilgi şartnamede/resmi duyuruda
+   yazıyorsa **[KESİN]**, senin/ekibin çıkarımıysa **[VARSAYIM]** olarak ayır ve öyle davran.
+   Kesinmiş gibi davranıp yanlış yönlendirme = en büyük hata.
 
 ---
 
@@ -130,13 +136,17 @@ en son araçla entegre edip videoyu çekmek.
 | **Dost** | Helikopter | 50 cm | **Camgöbeği #00A3E0** |
 | **Dost** | Savaş Uçağı F16 | 50 cm | **Camgöbeği #00A3E0** |
 
+> **Yukarıdaki tablo = [KESİN] renk şeması** (renk kodları ayrı resmi kanaldan teyitli).
+> Ama dost/düşman kararı **tipe DEĞİL, RENGE** bakar (aşağı).
+
 **SSS / sık karışan noktalar:**
-- *"İHA ve Füze neden hep kırmızı?"* → Şartname dost tablosunda YALNIZCA Helikopter ve F16
-  var. İHA + Füze her zaman düşmandır; cyan varyantları YOKTUR. Sentetik veride bu kasıtlıdır.
-- *"Balon nerede olacak?"* → **NET DEĞİL.** Temsili fotoğrafta maketin altında direkte;
-  şartname Şekil 6'da maketin üstünde/gövdesinde. Teknofest ileride netleştirecek (açık karar).
-  Sentetik veride balon konumu bu yüzden RASTGELE (alt %50 / üst %25 / gövde %25).
-  Temsili görsellere körü körüne güvenme — tek referans şartname + resmi duyurular.
+- *"Dost/düşman nasıl belirlenir?"* → **İki AYRI iş:** (1) model **nesneyi/tipi** tanır,
+  (2) renk **tarafı** belirler → **maviye yakın = DOST, kırmızıya yakın = DÜŞMAN, arası yok.**
+  Tipe bakan hiçbir kural YOK; ne renkse odur. Sadece **Aşama 3'te** yapılır.
+- *"İHA/Füze hep düşman mı?"* → Pratikte kırmızı oldukları için renk kuralı onları düşman
+  çıkarır — ama biz bir **tip-kuralı KOYMAYIZ**, renge bakarız. "İHA/Füze'nin cyan versiyonu
+  yok" ifadesi **[VARSAYIM]** idi, artık **kullanmıyoruz** (gereksiz — renk zaten karar veriyor).
+- *"Balon nerede olacak?"* → **[KESİN] maketlerin ALTINDA.** (Artık açık/belirsiz değil.)
 
 **Görüş geometrisi (parkur çizimi + takım bilgisi — veri üretiminin temeli):**
 - Hedefler raya asılı, zemine PARALEL, "hafif öne eğik" (burun-aşağı ~0-20°).
@@ -148,11 +158,14 @@ en son araçla entegre edip videoyu çekmek.
   render'da füzeye %70 yatay / %30 dik taban dönüşü uygulanır (montaj belirsizliği payı).
 
 **HAYATİ KURALLAR:**
-- **Dost/düşman ayrımı RENK ile yapılır.** Tip değil renk belirler. **Aynı F16 hem dost
-  (cyan) hem düşman (kırmızı) olabilir.** Helikopter de öyle. İHA ve Füze hep düşman.
-- **Balon rengi dost ve düşmanda AYNIDIR** → dost/düşman ayrımı balondan YAPILAMAZ,
-  yalnızca maketin **gövde renginden** yapılır. (Şartname: "balonların rengi aynı olacaktır".)
-- **İmha kanıtı = balonun patlaması.** Maket üzerindeki balon lazerle patlatılır.
+- **Dost/düşman = RENK, basit binary:** maviye yakın=DOST, kırmızıya yakın=DÜŞMAN, **arası yok.**
+  **Tip (model) ile taraf (renk) AYRI adımlardır.** Aynı F16/Helikopter hem dost (cyan) hem
+  düşman (kırmızı) olabilir. "İHA/Füze hep düşman" gibi bir tip-kuralı YOK — renge bakılır.
+- **Renk/taraf yalnızca AŞAMA 3'te yapılır.** [KESİN] **Aşama 1 ve 2'de tüm maketler kırmızı,
+  dost yoktur** → o iki aşamada renk işi HİÇ yapılmaz, sadece TANIMA yeterli (renk önemsiz).
+- **Bu sene "angajman" kavramı YOK** (kullanıcı bilgisi) → arayüz dilinden çıkarıldı.
+- **Balon rengi dost ve düşmanda AYNIDIR** → ayrım balondan YAPILAMAZ, maketin gövde renginden.
+- **İmha kanıtı = balonun patlaması.** Balon maketin ALTINDA [KESİN], lazerle patlatılır.
 - Maketlerin 3D dosyalarını TEKNOFEST paylaştı; **orijinal boyutta 3D baskı alınıp** gerçek
   test ortamı simüle edilecek. (Asıl model doğruluğu bu basılı maketlerin fotoğraflarıyla gelir.)
 
@@ -306,9 +319,10 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
 ## 9. Yol Haritası (video 10.08 → final)
 
 **Video öncesi (yazılım hazırlığı — donanım-bağımsız yapılabilecekler):**
-1. ✅ **Renk mimarisi** (16.07): `app/renk_analizi.py` — HSV ile kırmızı/cyan → dost/düşman;
-   `SIDE` sabiti kaldırıldı. Belirsiz renk = "Bilinmeyen" = ASLA kilitlenme (dost-vurma −10'a
-   karşı güvenli taraf). İHA/Füze renk okunamazsa varsayılan düşman (şartname gereği hep düşman).
+1. ✅ **Renk mimarisi** (16.07, 24.07'de sadeleştirildi): `app/renk_analizi.py` — HSV ile
+   kırmızı/cyan → dost/düşman. **Basit binary:** maviye yakın=Dost, kırmızıya yakın=Düşman,
+   arası yok. Eski "Bilinmeyen" ve "İHA/Füze hep düşman (HEP_DUSMAN)" mantığı KALDIRILDI —
+   tip-kuralı yok, sadece renge bakılır. Renk yalnız **Aşama 3'te** çalışır (A1-A2 sadece tanıma).
 2. ✅ **Renkli + balonlu sentetik veri** (16.07): `render_synth.py` şartname renkleriyle
    (#F50A0A / #00A3E0) render ediyor; balon (direkte, rastgele renk) **5. sınıf "balon"** olarak
    etiketleniyor (nişan noktası); koyu perde arka planı eklendi (yarışma ortamı). Işık BEYAZ
@@ -341,8 +355,8 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
 
 **FAZ 4 — Teknofest örnek parkur görüntüleri gelince:** görüntüler `sentetik_veri/backgrounds/`
 klasörüne → `render_synth.py` ZATEN gerçek arka plan destekli (`REAL_BGS`) → v4 eğitimi.
-Işık/zemin bilgisiyle gerçek test ortamı simülasyonu kurulur. Balon konumu da o zaman netleşir
-→ `draw_balloon` ağırlıkları güncellenir.
+Işık/zemin bilgisiyle gerçek test ortamı simülasyonu kurulur. (Balon konumu artık [KESİN]:
+maketlerin altında → `draw_balloon` buna göre sabitlenir.)
 
 **FAZ 5 — Entegrasyon ve "kusursuzluk" (donanımla paralel):**
 - ✅ Arayüz: manuel/otonom mod, aşamaya duyarlı görev paneli, çalışan yazılımsal E-Stop.
@@ -373,6 +387,7 @@ d:\Masaüstü\Derin Mavi\            ← repo kökü (git init yapıldı)
 ├── README.md                    ← ekip için kurulum/kullanım özeti
 ├── CLAUDE.md                    ← BU DOSYA (proje beyni)
 ├── requirements.txt             ← ultralytics, opencv-python, numpy, PySide6
+├── sartname\                    ← Şartname.pdf + sartname_metin.txt (şartname taraması için)
 ├── .gitignore  .gitattributes
 ├── app\                         ← uygulama kodu
 │   ├── arayuz_qt.py (ANA, native PySide6; _model_bul() dinamik model)

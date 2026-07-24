@@ -30,6 +30,11 @@ Analiz/
 Modeller_Kil6t/
 *.pdf
 *.3mf
+# İSTİSNA: Şartname resmi/kamuya açık bir belge — repoda tutulur (şartname taraması için).
+# KTR raporu, parkur çizimi, 3mf maketler yine repoya GİRMEZ (yukarıdaki kurallar geçerli).
+!sartname/
+!sartname/*.pdf
+!sartname/*.txt
 
 # ===== IDE / OS =====
 .vscode/

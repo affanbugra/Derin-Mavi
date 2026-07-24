@@ -28,7 +28,7 @@ def _ensure_qmedia():
     except ImportError:
         return False
 
-from renk_analizi import taraf_tespit
+from renk_analizi import renk_oranlari
 
 # ---------------- Sabitler (sartname) ----------------
 # Ekran adlari. TARAF tipe DEGIL renge baglidir (kirmizi=dusman, cyan=dost).
@@ -51,9 +51,10 @@ FLOOR = 0.35   # YENI takip baslatmak icin esik. Zaten takipteki (ID'li) kutular
 INFER_IMGSZ = 640   # cikarim cozunurlugu (kucuk/uzak nesne icin 512->640; 15 m dayanikliligi)
 
 # BGR renkler (arayuz cizimleri)
-RED = (32, 32, 191)      # dusman
-BLUE = (168, 88, 18)     # dost
-GRAY = (140, 140, 140)   # bilinmeyen taraf
+RED = (32, 32, 191)      # dusman (A3)
+BLUE = (168, 88, 18)     # dost (A3)
+HEDEF = (0, 170, 255)    # notr hedef rengi (A1/A2 — dost/dusman ayrimi yok, hepsi hedef)
+GRAY = (140, 140, 140)   # (kullanilmiyor; ileride gerekebilir)
 YELLOW = (60, 200, 235)  # balon (nisan noktasi)
 
 CAM_SOURCE = os.environ.get("DERINMAVI_CAM", "").strip()
@@ -312,9 +313,11 @@ def est_distance(cls, box_px):
 # ONAYLAMISTIR; guveni FLOOR altinda olsa bile GOSTERIRIZ (eski kod bunlari
 # gizleyip titretiyordu). ID yoksa (ilk kare/zayif) FLOOR ile gurultu elenir.
 #
-# Taraf hafizasi: yalniz RENK karari icin (kutu konumuna DOKUNMAZ). Her ID'nin son
-# "kesin" tarafini hatirlariz ki renk bir an okunamayinca dost/dusman yanip sonmesin.
-_taraf_hafiza = {}   # id -> son bilinen kesin taraf ("Düşman"/"Dost")
+# Taraf hafizasi: yalniz RENK karari icin (kutu konumuna DOKUNMAZ) ve yalniz ASAMA 3'te.
+# Renk bir an okunamazsa (ikisi de ~0) son bilinen taraf korunur -> dost/dusman yanip sonmez.
+_taraf_hafiza = {}   # id -> son bilinen taraf ("Düşman"/"Dost")
+
+RENK_ESIK = 0.02     # bu oranin altinda renk "okunamadi" sayilir (hafizaya dusulur)
 
 
 def takip_sifirla():
@@ -322,13 +325,32 @@ def takip_sifirla():
     _taraf_hafiza.clear()
 
 
+def _taraf_belirle(frame, box, tid):
+    """ASAMA 3 taraf karari — BINARY: maviye yakin=Dost, kirmiziya yakin=Düşman, arasi yok.
+    Renk hic okunamazsa (ikisi de ~0) son bilinen tarafa duseriz (yanip sonmesin)."""
+    kirmizi, cyan = renk_oranlari(frame, box)
+    if max(kirmizi, cyan) < RENK_ESIK and tid in _taraf_hafiza:
+        return _taraf_hafiza[tid]
+    taraf = "Dost" if cyan > kirmizi else "Düşman"
+    if tid is not None:
+        _taraf_hafiza[tid] = taraf
+    return taraf
+
+
 # ---------------- Tespit + karar ----------------
-def analiz_et(model, frame, estop=False):
+def analiz_et(model, frame, estop=False, asama=None):
     """Bir kareyi analiz eder. Doner: (dets, balonlar, active_idx).
 
-    dets: her biri {cls, ad, tip, conf, box, id}  (id = ByteTrack takip kimligi veya None)
-    balonlar: [(x1,y1,x2,y2), ...]  (nisan noktalari)
-    active_idx: kilitlenen dusman index'i; estop veya hedef yoksa -1.
+    asama: 1 | 2 | 3 | None  — SARTNAME'ye gore davranis degisir:
+      * Asama 1-2: TUM maketler kirmizi, dost YOK -> renk isi HIC yapilmaz.
+        Her tespit "Hedef"tir; hepsi angaje edilebilir (A2: hepsi vurulur, A1: sirayla manuel).
+      * Asama 3: taraf RENKTEN belirlenir (mavi=Dost, kirmizi=Düşman, arasi yok);
+        YALNIZCA "Düşman" kilitlenir (dost vurmak -10).
+
+    dets: her biri {cls, ad, tip, conf, box, id}
+          tip: A3'te "Düşman"/"Dost"; A1/A2/None'da "Hedef"
+    balonlar: [(x1,y1,x2,y2), ...]  (nisan noktalari — balon maketin ALTINDA)
+    active_idx: kilitlenen hedefin index'i; estop veya hedef yoksa -1.
 
     Kutular ByteTrack'in ANLIK ciktisidir: nesnenin gercek yerinde, gecikmesiz.
     Takip ID'li kutular dusuk guvende de gosterilir -> titremez, hayalet/cift kutu olmaz.
@@ -354,22 +376,22 @@ def analiz_et(model, frame, estop=False):
             # ID yoksa (ilk kare / zayif tespit) FLOOR ile gurultuyu ele.
             if tid is None and conf < FLOOR:
                 continue
-            taraf, _ = taraf_tespit(frame, (x1, y1, x2, y2), cls)   # SARTNAME: taraf = renk
-            # Taraf yumusatma (yalniz renk karari; kutu konumuna dokunmaz):
-            if tid is not None:
-                if taraf == "Bilinmeyen" and tid in _taraf_hafiza:
-                    taraf = _taraf_hafiza[tid]
-                elif taraf in ("Düşman", "Dost"):
-                    _taraf_hafiza[tid] = taraf
+            # SARTNAME: taraf = RENK, ama YALNIZ Asama 3'te. A1-A2'de hepsi kirmizi/hedef.
+            taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
             dets.append({"cls": cls, "ad": DISPLAY[cls], "tip": taraf,
                          "conf": int(round(conf * 100)), "box": (x1, y1, x2, y2), "id": tid})
 
-    # aktif hedef: yalnizca DUSMAN kilitlenir. E-Stop'ta kilit YOK.
+    # Aktif hedef (kilit). E-Stop'ta kilit YOK.
+    #   A3 : yalnizca "Düşman" kilitlenir (dosta ates edilmez, -10).
+    #   A1/A2/None : dost kavrami yok -> her tespit angaje edilebilir hedeftir.
     active_idx = -1
     if not estop and dets:
-        dusmanlar = [i for i, d in enumerate(dets) if d["tip"] == "Düşman"]
-        if dusmanlar:
-            active_idx = max(dusmanlar, key=lambda i: dets[i]["conf"])
+        if asama == 3:
+            aday = [i for i, d in enumerate(dets) if d["tip"] == "Düşman"]
+        else:
+            aday = list(range(len(dets)))
+        if aday:
+            active_idx = max(aday, key=lambda i: dets[i]["conf"])
     return dets, balonlar, active_idx
 
 
@@ -381,14 +403,13 @@ def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
         cv2.putText(frame, "BALON", (x1, max(12, y1 - 4)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, YELLOW, 1, cv2.LINE_AA)
     for i, d in enumerate(dets):
-        enemy = d["tip"] == "Düşman"
-        color = RED if enemy else (BLUE if d["tip"] == "Dost" else GRAY)
+        tip = d["tip"]
+        # Renk: A3'te taraf rengi (kirmizi/mavi); A1-A2'de notr HEDEF rengi (taraf yok).
+        color = RED if tip == "Düşman" else (BLUE if tip == "Dost" else HEDEF)
         x1, y1, x2, y2 = d["box"]
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
-        # Kutu etiketi: taraf BILINIYORSA "Dusman/Dost - Tip - %..", bilinmiyorsa
-        # kalabalik yapmamak icin SADECE tip adi ("Helikopter - %..") yazilir.
-        # Dost/dusman/bilinmiyor bilgisi yan paneldeki tespit tablosunda (TIP kolonu) gorunur.
-        tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"])
+        # Kutu etiketi: A3'te "Dusman/Dost - Tip - %.."; A1-A2'de (tip=="Hedef") SADECE tip adi.
+        tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(tip)
         ad_cv = DISPLAY_CV.get(d['cls'], d['cls'])
         txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
         f, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
@@ -396,8 +417,9 @@ def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
         ly = max(y1, th + 10)
         cv2.rectangle(frame, (x1, ly - th - 8), (x1 + tw + 12, ly), color, -1, cv2.LINE_AA)
         cv2.putText(frame, txt, (x1 + 6, ly - 4), f, fs, (255, 255, 255), ft, cv2.LINE_AA)
-        # aktif dusman icin nisan reticle (E-Stop'ta cizilmez)
-        if i == active_idx and enemy and not estop:
+        # Aktif hedefe nisan reticle (E-Stop'ta cizilmez). active_idx zaten asamaya gore
+        # secildi (A3=dusman, A1-A2=herhangi hedef) -> dosta asla nisan cizilmez.
+        if i == active_idx and not estop:
             cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
             cv2.circle(frame, (cx, cy), 16, color, 2, cv2.LINE_AA)
             cv2.line(frame, (cx - 22, cy), (cx + 22, cy), color, 1, cv2.LINE_AA)

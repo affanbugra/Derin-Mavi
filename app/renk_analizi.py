@@ -4,16 +4,17 @@
   Dusman = Kirmizi  #F50A0A
   Dost   = Camgobegi #00A3E0
 
-Aynı F16/Helikopter hem dost hem dusman olabilir -> tip tek basina taraf soylemez.
-Balon rengi iki tarafta da AYNIDIR -> analiz maket GOVDE renginden yapilir.
+BASIT BINARY (kullanici karari, 24.07): kutu icinde MAVIYE mi KIRMIZIYA mi daha
+yakin? maviye yakin -> DOST, kirmiziya yakin -> DUSMAN. ARASI YOK. "Bilinmeyen"
+ve "tipe gore hep dusman" (HEP_DUSMAN) mantigi KALDIRILDI — tipe bakan kural yok,
+sadece renge bakilir. Tip (model) ile taraf (renk) AYRI adimlardir.
 
-YOLO kutusunun ic bolgesinde HSV maskeleriyle kirmizi/cyan piksel orani olculur.
-Deterministik ve aciklanabilir: modelin renk ogrenmesine guvenmek yerine kesin kural.
+NOT: Bu adim yalniz ASAMA 3'te calisir. Asama 1-2'de tum maketler kirmizi (hepsi
+hedef, dost yok) -> renk isi HIC yapilmaz, sadece tanima yeterli.
 
 Kullanim:
-    from renk_analizi import taraf_tespit
-    taraf, guven = taraf_tespit(frame_bgr, (x1, y1, x2, y2))
-    # taraf: "Düşman" | "Dost" | "Bilinmeyen"   guven: 0..1 arasi baskin renk orani
+    from renk_analizi import taraf_binary
+    taraf = taraf_binary(frame_bgr, (x1, y1, x2, y2))   # "Dost" | "Düşman"
 """
 import cv2
 import numpy as np
@@ -28,12 +29,7 @@ KIRMIZI_UST_2 = np.array([180, 255, 255])
 CYAN_ALT = np.array([85, 90, 70])
 CYAN_UST = np.array([112, 255, 255])
 
-MIN_ORAN = 0.06   # kutu icinde bu orandan az renk varsa "Bilinmeyen" (arka plan gurultusu)
 KENAR_PAY = 0.12  # kutunun kenarindan icve dogru kirpma orani (arka plan sizmasini azaltir)
-
-# Sartname: IHA (drone) ve Fuze YALNIZCA dusman olarak tanimli.
-# Renk okunamazsa bu tipler icin guvenli varsayilan dusmandir.
-HEP_DUSMAN = {"drone", "fuze"}
 
 
 def _ic_bolge(frame, box):
@@ -62,34 +58,20 @@ def renk_oranlari(frame_bgr, box):
     return float(np.count_nonzero(m_kirmizi)) / n, float(np.count_nonzero(m_cyan)) / n
 
 
-def taraf_tespit(frame_bgr, box, cls=None):
-    """Taraf karari.
+def taraf_binary(frame_bgr, box):
+    """Taraf karari — BINARY, arasi yok.
 
-    Args:
-        frame_bgr: BGR kare
-        box: (x1, y1, x2, y2) piksel
-        cls: YOLO sinif adi (opsiyonel; drone/fuze icin guvenli varsayilan)
+    Kutu icinde cyan mi kirmizi mi baskin? cyan baskinsa "Dost", degilse "Düşman".
+    (Beraberlik/ikisi de ~0 -> "Düşman"; boyasiz maket A3'te beklenmez.)
 
-    Returns:
-        (taraf, guven): taraf "Düşman"/"Dost"/"Bilinmeyen"; guven = baskin renk orani
+    Returns: "Dost" | "Düşman"
     """
     kirmizi, cyan = renk_oranlari(frame_bgr, box)
-
-    if kirmizi >= MIN_ORAN and kirmizi > cyan * 1.3:
-        return "Düşman", kirmizi
-    if cyan >= MIN_ORAN and cyan > kirmizi * 1.3:
-        return "Dost", cyan
-
-    # Renk belirsiz: IHA/Fuze sartname geregi hep dusman; digerleri bilinmeyen.
-    # Bilinmeyen'e ATES EDILMEZ (dost vurma cezasi -10'dan kacinmak icin guvenli taraf).
-    if cls in HEP_DUSMAN:
-        return "Düşman", max(kirmizi, cyan)
-    return "Bilinmeyen", max(kirmizi, cyan)
+    return "Dost" if cyan > kirmizi else "Düşman"
 
 
 if __name__ == "__main__":
     # hizli kendi kendine test: sentetik kirmizi/cyan kutularla dogrula
     for ad, bgr in (("kirmizi", (10, 10, 245)), ("cyan", (224, 163, 0))):
         img = np.full((100, 100, 3), bgr, np.uint8)
-        taraf, g = taraf_tespit(img, (0, 0, 100, 100))
-        print(f"{ad}: {taraf} (guven {g:.2f})")
+        print(f"{ad}: {taraf_binary(img, (0, 0, 100, 100))}")

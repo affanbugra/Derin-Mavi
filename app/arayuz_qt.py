@@ -84,6 +84,7 @@ class AlgiThread(QThread):
         self._calis = True
         self.estop = False
         self.model_yok = False              # models/ klasorunde model bulunamadi mi
+        self.asama = 3                      # 1/2/3/0 — SARTNAME davranisi (renk yalniz A3)
         self.kaynak_istegi = None           # None | "auto" | int
 
     def run(self):
@@ -160,13 +161,14 @@ class AlgiThread(QThread):
 
             # Model hazirsa: algilama yap. Degilse: ham goruntu gonder
             if model is not None:
-                dets, balonlar, active_idx = algi.analiz_et(model, frame, self.estop)
+                dets, balonlar, active_idx = algi.analiz_et(model, frame, self.estop, self.asama)
                 frame = algi.draw_overlay(frame, dets, active_idx, balonlar, self.estop)
                 data = self._panel_verisi(dets, active_idx, fps)
             else:
                 mesaj = ("Model yok — models/ klasörüne best.pt ekleyin"
                          if self.model_yok else "Model yükleniyor…")
-                data = {"active": None, "hedefler": [], "mesaj": mesaj, "fps": fps}
+                data = {"active": None, "hedefler": [], "mesaj": mesaj, "fps": fps,
+                        "a3": self.asama == 3}
 
             now = time.time()
             dt = now - t_son
@@ -184,15 +186,18 @@ class AlgiThread(QThread):
             cap.release()
 
     def _panel_verisi(self, dets, active_idx, fps):
-        # NOT: mesafe/menzil alanlari GECICI OLARAK YOK (bkz. algi.py "MESAFE OZELLIGI
-        # DEVRE DISI" notu) — gercek olcum eklenene kadar tip/renk/guven ile karar verilir.
+        # SARTNAME: A1-A2'de dost yok (hepsi hedef); A3'te dost/dusman (renk). Panel buna gore.
+        a3 = (self.asama == 3)
         hedefler = []
         for i, d in enumerate(dets):
-            enemy = d["tip"] == "Düşman"
             aktif = (i == active_idx)
-            durum = "◉ Kilitli" if (enemy and aktif and not self.estop) else "Pas geç"
-            hedefler.append({"ad": d["ad"], "tip": d["tip"],
-                             "durum": durum, "enemy": enemy, "aktif": aktif})
+            if aktif and not self.estop:
+                durum = "◉ Kilitli"
+            elif a3 and d["tip"] == "Dost":
+                durum = "Dost — geç"
+            else:
+                durum = "Bekliyor"
+            hedefler.append({"ad": d["ad"], "tip": d["tip"], "durum": durum, "aktif": aktif})
         active = None
         if active_idx >= 0 and not self.estop:
             d = dets[active_idx]
@@ -203,7 +208,7 @@ class AlgiThread(QThread):
             mesaj = f"{active['ad']} kilitlendi — %{active['conf']} güven"
         else:
             mesaj = "Hedef aranıyor…"
-        return {"active": active, "hedefler": hedefler, "mesaj": mesaj, "fps": fps}
+        return {"active": active, "hedefler": hedefler, "mesaj": mesaj, "fps": fps, "a3": a3}
 
     def durdur(self):
         self._calis = False
@@ -421,6 +426,7 @@ class MainWindow(QMainWindow):
 
         # algi thread
         self.thread = AlgiThread()
+        self.thread.asama = self.ASAMA_IDX[self.asama]   # ilk asamayi ilet (renk yalniz A3)
         self.thread.kare_hazir.connect(self._kare_geldi)
         self.thread.durum.connect(self._durum_geldi)
         self.thread.kameralar_bulundu.connect(self._kameralar_geldi)
@@ -735,13 +741,13 @@ class MainWindow(QMainWindow):
         tv.addWidget(self.tablo)
         v.addWidget(tk, 1)
 
-        # --- angajman ---
+        # --- hedef durumu + yasak alanlar ---
         ak = QFrame()
         ak.setObjectName("panelk")
         av = QVBoxLayout(ak)
         av.setContentsMargins(19, 15, 19, 15)
         av.setSpacing(10)
-        at = QLabel("ANGAJMAN DURUMU")
+        at = QLabel("HEDEF DURUMU")
         at.setObjectName("ph")
         av.addWidget(at)
         arow = QHBoxLayout()
@@ -757,7 +763,7 @@ class MainWindow(QMainWindow):
         self.eng_dot.setStyleSheet(f"background:{GRN};border-radius:4px;")
         ev = QVBoxLayout()
         ev.setSpacing(1)
-        self.eng_name = QLabel("Angajman bekleniyor")
+        self.eng_name = QLabel("Hedef bekleniyor")
         self.eng_name.setObjectName("engname")
         self.eng_sub = QLabel("—")
         self.eng_sub.setObjectName("engsub")
@@ -892,8 +898,18 @@ class MainWindow(QMainWindow):
         self._asama_uygula()
 
     def _asama_uygula(self):
-        """Secili asamaya gore stack + pill + kural gunceller."""
+        """Secili asamaya gore stack + pill + kural + algi davranisi + tablo gunceller."""
         self.stack.setCurrentIndex(self.ASAMA_IDX[self.asama])
+        # Algi thread'ine aktif asamayi bildir (renk yalniz A3'te calisir). Thread heniz
+        # olusmamis olabilir (ilk cagri __init__ sirasinda) -> guard.
+        if hasattr(self, "thread"):
+            self.thread.asama = self.ASAMA_IDX[self.asama]
+        # Tespit tablosu basligi: A3'te TARAF (dost/dusman) kolonu var; A1-A2'de yok.
+        if hasattr(self, "tablo"):
+            if self.asama == "Aşama 3":
+                self.tablo.setHorizontalHeaderLabels(["SINIF", "TARAF", "DURUM"])
+            else:
+                self.tablo.setHorizontalHeaderLabels(["SINIF", "DURUM", ""])
         if self.asama:
             self.asama_pill.setText(self.asama)
             self.asama_pill.setVisible(True)
@@ -1027,52 +1043,55 @@ class MainWindow(QMainWindow):
             self.live_dot.setVisible(True)
         self._ci("Kamera", GRN, f"· {qimg.width()}×{qimg.height()}")
 
+        # A3'te dost/dusman rozeti/kolonu var; A1-A2'de yok (hepsi hedef).
+        a3 = data.get("a3", False)
+        self.h_badge.setVisible(a3)
+
         a = data["active"]
         if a:
             self.h_ad.setText(a["ad"])
-            self.h_badge.setText(a["tip"])
-            self._badge_stil(self.h_badge, a["tip"])
+            if a3:
+                self.h_badge.setText(a["tip"])           # Düşman (A3 aktif hep düşman)
+                self._badge_stil(self.h_badge, a["tip"])
             self.h_conf.setText(f"%{a['conf']} güven")
-            enemy = a["tip"] == "Düşman"
-            if enemy:
-                self.fire_status.setText("Hedef kilitli · Atışa hazır")
-                self.fire_status.setStyleSheet(f"color:{GRN};font-size:13px;font-weight:500;")
-                self.eng_name.setText("Angajman kabul edildi")
-                self.eng_sub.setText(f"{a['ad']} · %{a['conf']} güven")
-            else:
-                self.fire_status.setText("Dost/bilinmeyen hedef · Pas geç")
-                self.fire_status.setStyleSheet(f"color:{TXT3};font-size:13px;font-weight:500;")
-                self.eng_name.setText("Angajman reddedildi")
-                self.eng_sub.setText(f"{a['ad']} · dost/bilinmeyen")
+            self.fire_status.setText("Hedef kilitli · Atışa hazır")
+            self.fire_status.setStyleSheet(f"color:{GRN};font-size:13px;font-weight:500;")
+            self.eng_name.setText("Hedef kilitli")
+            self.eng_sub.setText(f"{a['ad']} · %{a['conf']} güven")
         else:
             self.h_ad.setText("—")
-            self.h_badge.setText("—")
-            self._badge_stil(self.h_badge, None)
+            if a3:
+                self.h_badge.setText("—")
+                self._badge_stil(self.h_badge, None)
             self.h_conf.setText("")
             estop = "DURDUR" in data["mesaj"]
             self.fire_status.setText(data["mesaj"] if estop else "Hedef aranıyor…")
             self.fire_status.setStyleSheet(f"color:{RED if estop else TXT3};font-size:13px;font-weight:500;")
-            self.eng_name.setText("Angajman bekleniyor")
+            self.eng_name.setText("Hedef bekleniyor")
             self.eng_sub.setText("—")
 
-        # tablo
+        # tablo (A3: SINIF/TARAF/DURUM · A1-A2: SINIF/DURUM/-)
         hedefler = data["hedefler"]
         self.tablo.setRowCount(len(hedefler))
+        lock_bg = QColor(191, 32, 32, 18) if a3 else QColor(0, 170, 255, 22)
         for r, hh in enumerate(hedefler):
-            kilitli = hh["aktif"] and hh["enemy"]
-            it_ad = QTableWidgetItem(hh["ad"])
-            it_ad.setForeground(QColor(TXT if kilitli else TXT2))
-            it_tip = QTableWidgetItem(hh["tip"])
-            it_tip.setForeground(QColor(RED if hh["enemy"] else (BLUE if hh["tip"] == "Dost" else TXT3)))
-            it_dur = QTableWidgetItem(hh["durum"])
-            it_dur.setForeground(QColor(RED if kilitli else TXT3))
+            tip = hh["tip"]
+            kilitli = hh["aktif"]
+            ad_it = QTableWidgetItem(hh["ad"])
+            ad_it.setForeground(QColor(TXT if kilitli else TXT2))
+            dur_it = QTableWidgetItem(hh["durum"])
+            dur_it.setForeground(QColor((RED if a3 else GRN) if kilitli else TXT3))
             if kilitli:
-                f = it_dur.font()
-                f.setBold(True)
-                it_dur.setFont(f)
-            for c, it in enumerate((it_ad, it_tip, it_dur)):
+                f = dur_it.font(); f.setBold(True); dur_it.setFont(f)
+            if a3:
+                taraf_it = QTableWidgetItem(tip)
+                taraf_it.setForeground(QColor(RED if tip == "Düşman" else (BLUE if tip == "Dost" else TXT3)))
+                cells = (ad_it, taraf_it, dur_it)
+            else:
+                cells = (ad_it, dur_it, QTableWidgetItem(""))
+            for c, it in enumerate(cells):
                 if kilitli:
-                    it.setBackground(QColor(191, 32, 32, 18))
+                    it.setBackground(lock_bg)
                 self.tablo.setItem(r, c, it)
         self.tablo.setRowHeight(0, 36)
 

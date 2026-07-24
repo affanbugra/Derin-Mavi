@@ -1,0 +1,688 @@
+===== SAYFA 1 =====
+ÇELİKKUBBE HAVA SAVUNMA 
+SİSTEMLERİ YARIŞMASI 
+TEKNİK ŞARTNAMESİ 
+2026 
+===== SAYFA 2 =====
+İÇİNDEKİLER 
+İÇİNDEKİLER .......................................................................................................................... 2 
+TABLOLAR .............................................................................................................................. 0 
+VERSİYONLAR ........................................................................................................................ 1 
+1. YARIŞMANIN AMACI ........................................................................................................ 2 
+2. YARIŞMAYA YÖNELİK GENEL BİLGİLER ............................................................................ 2 
+2.1. YARIŞMA KATILIM KOŞULLARI ................................ ................................ .......... 2 
+2.2. YARIŞMA TAKVİMİ ................................ ................................ ...............................  4 
+2.3. İLETİŞİM VE SORU & CEVAP ................................ ................................ .............. 4 
+2.3.1. İletişim .............................................................................................................. 4 
+2.3.2. Soru & Cevap ..................................................................................................... 4 
+2.4. YARIŞMA SÜRECİ ................................ ................................ ................................  5 
+2.4.1. Ön Tasarım Raporu ............................................................................................. 5 
+2.4.2. Ön Tasarım Raporu İtiraz Süreci ........................................................................... 5 
+2.4.3. Kritik Tasarım Raporu .......................................................................................... 5 
+2.4.4. Kritik Tasarım Raporu İtiraz Süreci ....................................................................... 6 
+2.4.4.1. Görev Kabiliyet Gösterimi Videosu ................................................................... 6 
+2.4.4.2. Videoda Dikkat Edilmesi Gereken Genel Hususlar ............................................. 6 
+2.4.5. Final Değerlendirme Aşaması .............................................................................. 7 
+3. HAKEM BRİFİNGİ ............................................................................................................. 7 
+4. YARIŞMACILAR İÇİN UYGULANACAK OLAN GENEL HUSUSLAR ...................................... 8 
+4.1. TEKNİK HUSUSLAR ................................ ................................ ............................. 8 
+4.2. GÜVENLİK HUSUSLARI ................................ ................................ ....................... 8 
+4.3. DİĞER HUSUSLAR ................................ ................................ ...............................  8 
+4.4. GENEL PUANLAMA ................................ ................................ ............................. 9 
+4.4.1. Raporlar ve Sunum Puanlaması ........................................................................... 9 
+4.4.2. Ebat Puanlaması ................................................................................................. 9 
+5. YARIŞMA DETAYLARI ....................................................................................................... 9 
+5.1. AŞAMA 1: FARKLI MENZİLLERDE DURAN HEDEF İMHASI ..............................  9 
+5.2. AŞAMA 2: SÜRÜ SALDIRISI ve HEDEFLERİN İMHASI ................................ ...... 9 
+5.3. AŞAMA 3: FARKLI KATMANLARDAKİ HAREKETLİ HEDEFLERİN İMHASI .....10 
+6. GÖREV TANIMLARI ........................................................................................................ 10 
+6.1. AŞAMA - 1 FARKLI MENZİLLERDE DURAN HEDEF İMHASI ............................ 11 
+6.2. AŞAMA - 2 SÜRÜ SALDIRISI ve İMHASI ................................ ................................ .12 
+6.3. AŞAMA – 3 FARKLI KATMANLARDAKİ HAREKETLİ HEDEFLERİN İMHASI ...14 
+6.4. TOPLAM PUAN HESABI ................................ ................................ .....................16 
+===== SAYFA 3 =====
+7. ÖDÜL ............................................................................................................................ 16 
+7.1. ÖDÜL SIRALAMASI İÇİN MİNİMUM BAŞARI KRİTERİ ................................ ...........16 
+7.2. En İyi Tasarım Ödülü ................................ ................................ ...........................17 
+7.3. En İyi Takım Ruhu Ödülü ................................ ................................ ....................17 
+8. GENEL KURALLAR ......................................................................................................... 17 
+9. ETİK KURALLAR ............................................................................................................. 17 
+10. SORUMLULUK BEYANI ............................................................................................... 17 
+ 
+ 
+ 
+ 
+===== SAYFA 4 =====
+TABLOLAR 
+Tablo 1.  Versiyonlar Tablosu ................................................................................................... 1 
+Tablo 2. Yarışma Takvimi ......................................................................................................... 4 
+Tablo 3. Yarışma Puanlaması .................................................................................................. 9 
+Tablo 4. Ebat Puanlaması ....................................................................................................... 9 
+Tablo 5. Aşama 1 - Puan Dağılımı Tablosu .............................................................................. 11 
+Tablo 6. Aşama 2 - Puan Dağılımı Tablosu .............................................................................. 12 
+Tablo 7. Aşama 3 - Puan Dağılımı Tablosu .............................................................................. 14 
+Tablo 8. Toplam Puan Hesabı ................................................................................................ 16 
+Tablo 9. Ödül Miktarı ............................................................................................................ 16 
+ 
+ŞEKİLLER 
+Şekil 1. Yarışma Katılım Aşaması ............................................................................................ 3 
+Şekil 2. Aşama 1 Temsili Gösterim ........................................................................................ 11 
+Şekil 3. Aşama 1 Temsili hedef sırası ..................................................................................... 12 
+Şekil 4. Aşama 2 Temsili Gösterim ........................................................................................ 13 
+Şekil 5. Aşama 3 Temsili Gösterim ........................................................................................ 15 
+Şekil 6. Düşman Hedefler ..................................................................................................... 16 
+  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+===== SAYFA 5 =====
+VERSİYONLAR 
+Tablo 1.  Versiyonlar Tablosu 
+VERSİYON TARİH Açıklama 
+V1.0 02.01.2026 İlk Yayın 
+V1.1 18.02.2026 Hedef ve aşama 
+güncellemeleri yapıldı.
+V1.2 20.02.2026 Yarışma Takvimi 
+güncellenmiştir.
+V1.3 27.02.2026
+Aşama tanımlarında anlam 
+karışıklığına yol açan ifadeler 
+düzeltilmiştir.
+V1.4 16.03.2026 Yarışma Takvimi 
+güncellenmiştir. 
+V1.5 25.05.2026 Yarışma Takvimi 
+güncellenmiştir. 
+===== SAYFA 6 =====
+ 
+1. YARIŞMANIN AMACI 
+Hava Savunma Sistemleri; günümüzdeki askeri uygulamalarda ülke güvenliğini sağlamak 
+için çok önemli rol oynamaktadır. Bu savunma görevi çok çeşitli şekillerde, çok farklı 
+tehditlere karşı yürütülmektedir. Son zamanlarda dünyadaki gelişmeler takip edildiğinde, 
+ülkelerin hava filolarının güçlü olması kadar, hava savunma sistemlerinin de yeterli 
+donanım ve kabiliyetlere sahip olması gerekliliği birçok kez kanıtlanmıştır. 
+Bu ihtiyaç doğrultusunda yarışmanın amacı; takımların verilen senaryolara ilişkin 
+görevleri başarı ile gerçekleştirecek hava savunma sistemlerini geliştirmesi ve üretmesi, 
+aynı zamanda hava savunma sistemlerinin öneminin ülke çapında geniş bir tabana 
+yayılarak özgün, yerli ve yetenekli sistemlerin geliştirilmesini sağlamaktır. 
+2. YARIŞMAYA YÖNELİK GENEL BİLGİLER 
+2.1. YARIŞMA KATILIM KOŞULLARI 
+• Yarışmaya, Türkiye veya yurt dışında öğrenim gören yükseköğretim (ön lisans, lisans 
+ve yüksek lisans) öğrencileri başvuru yapabilmektedir.  
+• Yarışmaya takım halinde katılmak zorunludur. 
+• Takımlar en az 3 en fazla 15 kişiden oluşmalıdır. (Bu sayıya danışman dahil değildir.) 
+• Takımlar, tek bir okuldan oluşturulabileceği gibi bir veya birden fazla yükseköğretim 
+öğrencisinin bir araya gelmesi ile karma bir takım olarak da oluşturulabilir. 
+• Takımlar, bir öğretim görevlisini/üyesini veya araştırma görevlisini danışman olarak 
+alabilir. 
+• Finale kalan takımların onaylı öğrenci belgelerini, danışmanlar için ise öğretim 
+üyesi/görevlisi veya araştırma görevlisi olduklarını gösteren onaylı belgenin ıslak 
+imzalı olarak TEKNOFEST Yarışmalar Komitesinin açıklayacağı tarihte KYS sistemine 
+yüklenmesi gerekmektedir. 
+• Takımlar yarışmaya herhangi bir proje raporunun aynısı, benzeri veya kopyası ile 
+katılmaları durumunda diskalifiye edilecektir. 
+• www.teknofest.org adresinde yayımlanmış raporlardan alıntı yapılması durumunda, 
+ilgili kaynağın belirtilmesi zorunludur. Kaynak gösterimine ilişkin format, şartname 
+içerisinde yer alan GENEL KURALLAR dosyasında tanımlanmıştır. 
+• Yarışma süreci boyunca TEKNOFEST yarışmalar komitesi tarafından yapılacak olan 
+tüm bilgilendirmeler takımın iletişim sorumlusu olarak belirlediği kişiye yapılacaktır. 
+Bu sebeple her takım bir iletişim sorumlusu belirlemelidir. (KYS’ ye kayıtlı e -mail 
+adresine bilgilendirme yapılmaktadır.) 
+• Süreçlerin (Başvuru Yapma, Rapor Yükleme Son Tarih, Doldurulması Gereken Form 
+vb.) takibi iletişim sorumlusunun görevi olup iletişim sorumlusundan kaynaklı 
+gecikmeler ve/veya aksaklıklardan TEKNOFEST Yarışmalar Komitesi sorumlu değildir. 
+• Başvurular 28 Şubat 2026 tarihine kadar www.t3kys.com başvuru sistemi üzerinden 
+çevrimiçi olarak yapılır. 
+• Başvuru tarihleri arasında takım kaptanı/danışman sistem üzerinden kayıt olur, varsa 
+danışman ve/veya takım kaptanı/takım üyelerinin kaydını doğru ve eksiksiz olarak 
+===== SAYFA 7 =====
+ 
+sisteme yapar ve varsa danışman ve üyelerin e -postalarına davet gönderir. Davet 
+gönderilen üye Başvuru sistemine giriş yaparak “Takım bilgilerim” kısmından gelen 
+daveti kabul eder ve kayıt tamamlanır. Aksi durumda kayıt tamamlanmış olmaz. 
+ 
+Şekil 1. Yarışma Katılım Aşaması 
+• Takım oluşturma işlemini tamamlayan yarışmacıların projesine uygun yarışmaya 
+başvuru yapması gerekmektedir. 
+• Her katılımcı en fazla 1 takımda üye (danışman dahil) olarak bulunabilir. 
+• Yarışma kapsamında gerekli tüm süreçler (Başvuru, Rapor Alımı, Rapor Sonuçları, 
+Maddi Destek Başvurusu, İtiraz Süreçleri, Üye ekleme/çıkarma işlemleri vb.) KYS 
+sistemi üzerinden yapılmaktadır. Takımların KYS sistemi üzerinden süreçleri takip 
+etmesi gerekmektedir. 
+• Üye ekleme/çıkarma işlemleri TEKNOFEST Yarışmalar Komitesinin açıklayacağı tarihe 
+kadar yapılmaktadır. 
+• Yarışma süreci boyunca KYS üzerinden başvuru yapma, rapor yükleme, form 
+doldurma işlemleri Takım kaptanı ve/veya danışmanın yetkisi dahilinde olup yarışma 
+süreçleri bu kişiler üzerinden yönetilmektedir. 
+• TEKNOFEST Yarışmalar Komitesi festival alanında bulunacak üye sayısını 
+sınırlandırma yetkisine sahiptir. Sınırlandırma yapılması durumunda komite 
+tarafından bilgilendirme yapılacaktır. 
+• Yarışma süreci boyunca, başvuru yaptığınız dönemdeki eğitim seviyeniz dikkate 
+alınacaktır. 
+• Yarışma duyuruları  TEKNOFEST Havacılık, Uzay ve Teknoloji Festivali Teknoloji 
+Yarışmaları resmi web sitesi (www.teknofest.org) üzerinden yapılacak  olup, 
+başvurular Kurumsal Yönetim Sistemi (KYS) üzerinden alınacaktır. 
+ 
+
+===== SAYFA 8 =====
+2.2. YARIŞMA TAKVİMİ 
+2.3. İLETİŞİM VE SORU & CEVAP 
+2.3.1. İletişim 
+Yarışma hakkındaki teknik sorular ve yanıtları www.teknofest.org adresinden erişilebilen 
+Hava Savunma Sistemleri grubunda yer alacaktır. Bu grubun aktif olarak takip edilmesi ve 
+her takımdan en az 1 kişinin  üye olarak bu gruptaki duyuruları ve soru & cevapları takip 
+etmesi yarışmacı takım sorumluluğundadır. Belirtilen konunun takip edilmemesi 
+sonucunda doğacak takımların güncel bilgilendirmelere ulaşamama durumundan 
+hakem ve jüri heyetleri sorumlu değildir. 
+Yarışmanın organizasyon kısmı ile ilgili soruların iletisim@teknofest.org mail adresi 
+üzerinden iletilmesi gereklidir. 
+Teknik ve organizasyon ile ilgili sorularınızın yukarıda belirtilen kanallar üzerinden 
+iletilmesi, sorulan sorulara hızlı dönüş yapılabilmesi açısından önem arz etmektedir. 
+2.3.2. Soru & Cevap 
+Yarışma ile ilgili detaylar bu şartname içerisinde açıklanmıştır. Yarışmanın sağlıklı bir 
+süreç içerisinde yürütülebilmesi için şartnamenin dikkatle okunması gerekmektedir. 
+Şartnamedeki ilgili kural ve/veya ibarelerin açık/anlaşılır olmadığı ya da yetersiz  olduğu 
+düşünüldüğü durumlarda ilgili konu hakkında soru sorulması gerekmektedir. 
+Soru & Cevap aşağıdaki maddeler için bir kaynak değildir: 
+• Stratejik veya yarışmacı takımın geleceğe yönelik planladığı belirsiz durumlar,
+• Hakem heyeti tarafından geçmişte yapılan yarışma esnası kural değişikliğini
+sorgulamak,
+• Sistem dizaynını/tasarımını hakem ve/veya jüri heyetlerine onaylatmak.
+Zayıf, şartname içerisinden referans gösterilmemiş, ucu açık, net anlaşılmayan ve cevabı 
+daha önce bildirilmiş sorular cevaplandırılmayacaktır. Cevaplandırılmayacak sorulara 
+örnek olarak aşağıdaki maddeler verilebilir: 
+TARİH AÇIKLAMA 
+28.02.2026 Yarışma Son Başvuru Tarihi 
+23.03.2026 – 17:00 Ön Tasarım Raporu Son Teslim Tarihi 
+29.04.2026 Ön Tasarım Raporu Sonuçlarının Açıklanması 
+9.06.2026 – 17:00 Kritik Tasarım Raporu Son Teslim Tarihi 
+2.07.2026 Kritik Tasarım Raporu Sonuçlarının Açıklanması 
+10.08.2026 – 17:00 Sistem Kabiliyeti Videolarının Son Teslim Tarihi 
+24.08.2026 Finale Kalan (Finalist) Takımların Açıklanması 
+Ağustos – Eylül 2026 Yarışma Finalleri 
+30 Eylül – 4 Ekim 2026 TEKNOFEST 
+Tablo 2. Yarışma Takvimi 
+===== SAYFA 9 =====
+ 
+• Tasarladığımız parça/sistem yarışma için uygun mudur? 
+• Açık/net olmayan ya da referans eksikliği sebebiyle anlaşılmayan sorular 
+• Tekrar eden sorular 
+• Şartnamede belirtilen konular 
+2.4. YARIŞMA SÜRECİ 
+Çelikkubbe Hava Savunma Sistemleri Yarışması kapsamında değerlendirme süreci; Ön 
+Tasarım Rapor, Kritik Tasarım Raporu ve yarışma final puanlaması olarak üç farklı 
+aşamada yapılacaktır. Ön Tasarım Raporu ve Kritik Tasarım Raporu dosyalarını 
+göndermeyen takımlar yarışmaya katılmaya hak kazanamayacaklardır. 
+Rapor tesliminin yarışma takvimde belirtilen gün ve saat içerisinde KYS sistemi üzerinden 
+yüklenmesi gerekmektedir. İtiraz süreci TEKNOFEST yarışmalar komitesi tarafından 
+sonuçların açıklanmasının ardından gönderilen takım üyelerinin KYS’ ye kayıtlı mail i le 
+takımlara bildirilmektedir. Takvim ve saatlerde TEKNOFEST Yarışmalar Komitesi 
+tarafından değişiklik yapma hakkı bulunmaktadır.  
+2.4.1. Ön Tasarım Raporu 
+Takımlar, Ön Tasarım Raporunu 2.2 Yarışma Takviminde belirtilen tarihe kadar teslim 
+etmekle yükümlüdürler. Ön Tasarım Raporuna ait şablon yarışma son başvuru tarihinden 
+sonra açıklanacaktır. Ön Tasarım Raporu değerlendirmeleri sonucunda Kritik Tasarım 
+Raporu (KTR) aşamasına geçen takımlar 2.2 Yarışma Takviminde belirtilen tarihte 
+açıklanacaktır. 
+Ön tasarım raporu en fazla 10 sayfa (kapak, içindekiler, görseller ve referanslar bölümleri 
+dahil) olacaktır. Sayfa sınırına uymayan raporlar değerlendirmeye alınmayacaktır. 
+Ön Tasarım Raporu şablonu daha sonra www.teknofest.org sitesinde yarışma sayfasından paylaşılacaktır. 
+2.4.2. Ön Tasarım Raporu İtiraz Süreci 
+Takımların rapor değerlendirmesi sonucunda baraj puanın altında olması durumunda 
+itiraz etme hakkı bulunacaktır. Rapor itirazları, rapor sonuçları açıklandıktan sonraki 48 
+saat içerisinde KYS üzerinden alınmaktadır.  İtirazlar takım danışmanı veya takım kaptanı 
+tarafından yapılmalıdır. Belirlenen süreç içerisinde iletilmeyen itirazlar değerlendirmeye 
+alınmayacaktır. Takımların itirazları farklı hakem heyetlerine gönderilir ve yeniden 
+değerlendirilir. İtiraz süreci hakkında detaylı bilgiye GENEL KURALLARDAN ulaşabilirsiniz. 
+İtiraz aşmasında da başarılı olarak geçemeyen takımların yüksek itiraz hakkı 
+bulunmaktadır. Yüksek itiraz başvurunuz için iletisim@teknofest.org adresine itiraz 
+gerekçeleriniz ve dilekçenizin yer aldığı mailin TEKNOFEST Yarışmalar İtiraz 
+Yönetmeliği’nde belirtilen kriterlere göre tarafımıza gönderilmesi gerekmektedir.  Yüksek 
+itiraz süreci hakkında detaylı bilgiye GENEL KURALLARDAN ulaşabilirsiniz. 
+2.4.3. Kritik Tasarım Raporu 
+Kritik Tasarım Raporu (KTR) aşamasına geçen takımlar, Kritik Tasarım Raporlarını 2.2 
+Yarışma Takviminde belirtilen tarihe kadar teslim etmekle yükümlüdürler. Kritik Tasarım 
+Raporuna ait şablon yarışma son başvuru tarihinden sonra açıklanacaktır. 
+===== SAYFA 10 =====
+ 
+Kritik tasarım raporu en fazla 30 sayfa  (kapak, içindekiler, görsel (teknik resim) ve 
+referanslar bölümleri dahil) olacaktır. Sayfa sınırına uymayan raporlar değerlendirmeye 
+alınmayacaktır. 
+KTR şablonu daha sonra www.teknofest.org sitesinde yarışma sayfasından paylaşılacaktır. 
+2.4.4. Kritik Tasarım Raporu İtiraz Süreci 
+Takımların rapor değerlendirmesi sonucunda baraj puanın altında olması durumunda 
+itiraz etme hakkı bulunacaktır. Rapor itirazları, rapor sonuçları açıklandıktan sonraki 48 
+saat içerisinde KYS üzerinden alınmaktadır.  İtirazlar takım danışmanı veya takım kaptanı 
+tarafından yapılmalıdır. Belirlenen süreç içerisinde iletilmeyen itirazlar değerlendirmeye 
+alınmayacaktır. Takımların itirazları farklı hakem heyetlerine gönderilir ve yeniden 
+değerlendirilir. İtiraz süreci hakkında detaylı bilgiye GENEL KURALLARDAN ulaşabilirsiniz. 
+İtiraz aşmasında da başarılı olarak geçemeyen takımların yüksek itiraz hakkı 
+bulunmaktadır. Yüksek itiraz başvurunuz için iletisim@teknofest.org adresine itiraz 
+gerekçeleriniz ve dilekçenizin yer aldığı mailin TEKNOFEST Yarışmalar İtiraz 
+Yönetmeliği’nde belirtilen kriterlere göre tarafımıza gönderilmesi gerekmektedir.  Yüksek 
+itiraz süreci hakkında detaylı bilgiye GENEL KURALLARDAN ulaşabilirsiniz. 
+2.4.4.1. Görev Kabiliyet Gösterimi Videosu 
+KTR aşamasını başarıyla geçen ekiplerden aşağıdaki yetenekleri göstermeleri 
+beklenecektir. Bu aşamayı geçebilen takımlar final aşamasında yarışmaya hak 
+kazanacaktır. 
+Yetenek 1: Sisteme kullanıcı tarafından komutların verildiği arayüzler (Kullanıcı Arayüz 
+Yazılımı, Joystick, Klavye, vs..) tüm fonksiyonları ile anlatılacaktır. Entegrasyonu 
+tamamlanmış sistem üzerinden gösterilmesi pozitif değerlendirilecektir.  
+Yetenek 2: Sistem durağan halde ateş ederek 15m mesafedeki balonu patlatabilecektir.  
+Yetenek 3: Sistem yan ve yükseliş eksenlerinde hareket ederken, Acil Durdur'a basılarak 
+sistemin durduğu gözlenecektir.  
+Yetenek 4: Sistem ateş ederken Acil Durdur'a basılarak sistemin ateşi kestiği 
+gözlenecektir. 
+Yetenek 5: Sistem yan ve yükseliş ekseninde hareket eden bir hedefi takip edebilecektir. 
+Hedef olarak verilen görsellere benzerlik taşıyan herhangi bir unsur kullanılabilir. 
+Yetenek 6 (OPSİYONEL): 5 metre, 10 metre ve 15 metrede farklı hedef tiplerinin tespitinin 
+yapılıp, hedef sınıflandırmasının yapılabildiğinin kullanıcı arayüzü üzerinden 
+gösterilmesi. Örnek olarak verilen görsellerin F16, Mini/Micro İHA, Füze veya Helikopter 
+olarak sınıflandırılabilmesi beklenmektedir. 
+Gerekli görüldüğü durumda Görev kabiliyeti Gösterim Videosunda ilave yetenekler 
+istenebilir.   
+2.4.4.2. Videoda Dikkat Edilmesi Gereken Genel Hususlar 
+• Videonun çözünürlüğü en az 720p, toplam süresi ise en az 2 dakika, en fazla 5 dakika 
+olmalıdır. 
+• Yarışmaya katılabilmek için hareket kabiliyeti ve hedef imha kabiliyeti videosunun 2.2 
+Yarışma Takviminde belirtilen tarihe kadar gönderilmesi zorunludur. 
+===== SAYFA 11 =====
+ 
+• Video tek bir video olarak Youtube’a yüklenecektir. Diğer platformlara yüklenen 
+videolar kabul edilmeyecektir. Videolar “Liste dışı” olarak yüklenebilir. 
+• Video açıklamasında yeteneklerin gösterim noktaları belirtilecektir. 
+• Birden fazla video veya Youtube dışında başka bir video linki kabul edilmeyecektir. 
+• Yetenekler yukarıda belirtildiği sıra ile eksiksiz gösterilmelidir. Videonun ilgili kısmında 
+kaç numaralı yeteneğin gösterildiği belirtilmelidir.  
+• Videoların linki T3 KYS sisteminde açılan forma eklenecektir. Linkte sorun yaşanması 
+halinde takımlar elenecektir. 
+2.4.5. Final Değerlendirme Aşaması 
+Final etabının ardından, takımlar hakemlere final değerlendirmelerini yaparak yarışma 
+süreci ile ilgili geri bildirimlerini içeren detaylı bir sunum/rapor sunacaklardır. Final 
+Değerlendirme Aşamasında hakemler takımlara sistemlerin son haline uygun (KTR 
+sonrası değişiklikleri de göz önüne alarak) farklı branşlarda (elektronik, yazılım, mekanik 
+vb.) değerlendirmede bulunacaklardır. Final Değerlendirme Sunumu’nun içeriği, yarışma 
+öncesi gerçekleştirilen tasarım ve planların gerçek uygulamalar ile nasıl 
+karşılaştırılabileceği, varsa sorunlar ile ilgili bilgi ve çözüm yolları gibi bilgileri içermelidir. 
+Sunum ile ilgili şablon ilgili internet sitesinde paylaşılacaktır. Final Değerlendirme 
+Sunumu, final ile birlikte hakemlerin belirleyeceği süre zarfında yapılacaktır. 
+3. HAKEM BRİFİNGİ 
+• Yarışma başlamadan önce yarışma hakkındaki genel hususların yarışmacılara 
+aktarıldığı hakem brifingi yapılacaktır. 
+• Hakem heyeti her bir test aşaması öncesinde takımları test alanının etrafına 
+çağırarak, yarışmacı takımların test ortamını yakından görmesini sağlayacaktır. 
+• Hakemler yarışma öncesinde takımların teknik raporlarını okuyacak ve takımlar ile 
+ilgili bilgi sahibi olacaktır. Sistemlerin belirtilen noktaya montajı sonrasında sistemin 
+dış arayüzleri hakem tarafından kontrol edilecek ve herhangi bir olumsuzluk anında 
+hakem yarışmayı durduracaktır. Hakemler, yarışma sırasında kuralların 
+uygulanmasından sorumlu olacaklardır. 
+• Yarışma sırasında ortaya çıkabilecek herhangi bir güvenlik endişesi veya sorunu ile 
+ilgili hakemler yarışmayı durdurma ve sistemin gücünü kesme yetkisine sahiptir. 
+• Yarışma etapları sonrası hakem heyeti takımların final değerlendirme 
+raporunu/sunumunu her bir takımla mülakat yaparak değerlendirecektir. Hava 
+savunma sistemi üreten yarışmacı takımın sistem ile ilgili teknik sorulara cevap 
+verebiliyor olması beklenmektedir. Danışmanlar mülakata katılmayacaktır. 
+===== SAYFA 12 =====
+ 
+4. YARIŞMACILAR İÇİN UYGULANACAK OLAN GENEL HUSUSLAR 
+4.1. TEKNİK HUSUSLAR 
+• Yarışma ortamında yer alacak Hava Savunma Sistemi’nin her boyutu (E x B x D) 
+100cm’ den küçük olacaktır. Bu boyutlara sistemin dış kablajı dahil değildir. 
+• Yarışmacı takımların 5-10-15 metrelerde hedefleri imha etmeleri beklenmektedir. 
+• Sistemde kullanılan kablolar yırtılma ve elektrik kaçaklarına karşı takımlar tarafından 
+izole edilmelidir. 
+• Yarışma öncesinde sistemler ve hedef imha çözümlerinin güvenlik açısından 
+uygunluğu hakemler tarafından kontrol edilecektir. Uygun görülmesi halinde takım 
+yarışmaya katılabilecektir. 
+4.2. GÜVENLİK HUSUSLARI 
+• Sistem, test alanında ortaya yakın konumlandırılacak olup, sistemin sadece 
+hedeflerin yer alacağı tarafa bakmasına izin verilecektir. Kesinlikle tanımlanan yasak 
+bölgeye dönmesine izin verilmeyecek yapıda olacaktır. Bu atışa yasak alan ile 
+karıştırılmamalıdır. Sistemlerin hem harekete yasak alan hem de atışa yasak alan 
+tanımlama fonksiyonlarının olması beklenmektedir. 
+• Takımlar, ancak gerekli güvenlik kurallarını tatbik ettikten sonra, sistemlerine enerji 
+sağlayabilirler. 
+• Sistemlerin üzerinde bulunacak olan bütün kabloların elektrik yalıtımı tam ve uygun 
+olmalıdır. Herhangi bir şekilde açıkta kablo, elektriksel bağlantı vb. olmayacaktır. 
+• Yarışma öncesinde her ekibe hareket ve imha çözümlerini denemek için kısa bir süre 
+verilecektir. Bu sürede ilgili ayarlamaları yapmaları beklenecektir. 
+• Sistemin ana gövdesi üzerinde keskin noktalar bulunmayacak ve yuvarlatılacaktır. 
+• Güvenlik şartlarının tamamını sağlayarak hakemlerden uygunluk onayını almayan 
+sistemin yarışmasına izin verilmeyecektir. 
+4.3. DİĞER HUSUSLAR 
+• Sistemlerin yarışacağı alan izleyicilerden kısmen izole, izleyicileri hedef imha 
+çözümlerinden koruyacak şekilde olacaktır. 
+• Yarışma alanından ayrı bir konumda, katılan her yarışmacı takımın kullanması için 
+birer masanın konumlandığı bir alan olacaktır. 
+• Alan içerisinde 220 VAC enerji tedarik edilecektir.  Yarışmacı ekibin sisteminin EMI 
+gereklerini kendisinin sağlaması beklenir. 
+• Yarışma alanında ve takım masalarının bulunduğu alanda takım üyesi ve danışmanı 
+haricinde kimse bulunmayacaktır. 
+• Dışarıdan herhangi bir bilgilendirme ve yönlendirmenin anlaşılması durumunda 
+hakem kararıyla yarışmacı takım yarışma dışı bırakılabilecektir. 
+===== SAYFA 13 =====
+ 
+• Yarışma alanı içerisine konulacak kameralar ve hakemler vasıtasıyla, kontrol 
+masasına bilgi aktarımı, kablo ile araca dışarıdan müdahale, etapların tamamlanıp 
+tamamlanmadığı gibi konularda takımlar takip edileceklerdir. 
+• Kamera sistemi takımlar tarafından yapılacak herhangi bir itiraz durumu ve olası 
+hilelerin önlenmesi amacıyla devrede olacaktır. Ayrıca yarışma sırasında takımların 
+performansı kayıt altına alınarak tanıtım malzemesi olarak da kullanılabilecektir. 
+• Yarışma sırasında ortaya çıkabilecek özel durumlar için hakemler vaka üzerine 
+toplanıp karar verecektir. 
+ 
+4.4. GENEL PUANLAMA 
+4.4.1. Raporlar ve Sunum Puanlaması 
+ 
+4.4.2. Ebat Puanlaması 
+5. YARIŞMA DETAYLARI 
+TEKNOFEST 202 6 Çelikkubbe Hava Savunma Sistemleri Yarışması, 3 görev aşaması 
+içerecektir. Bu aşamalar tüm takımlar için aynı şekilde başlayacak olacak olup, takımlar 
+aynı testlere tabi tutulacaktır. 
+5.1. AŞAMA 1: FARKLI MENZİLLERDE DURAN HEDEF İMHASI 
+Yarışmacı takımlar bu görev ile sistemlerinin hassas konumlama, nişan alma ve farklı 
+menzillerde hedef imha yeteneklerini göstereceklerdir. Belirlenen hedeflere doğru farklı 
+menzillerde atışlar yapacaklardır. Bu görev iki eksende hassas yönelim kabiliyeti ile atış 
+yeteneğini birleştirerek yarışmacı takımların bu konudaki teknik becerilerini 
+birleştirecektir. Bu aşama özelinde aynı hedef seti tüm menzillerde yer alacaktır. 
+Yarışmacı takım kendisine belirtilen hedefi imha ettiği menzile göre alacağı puan 
+değişecektir.  
+5.2. AŞAMA 2: SÜRÜ SALDIRISI ve HEDEFLERİN İMHASI 
+Yarışmacı takımlar, tasarladıkları hedef algılama sistemlerini kullanarak kendilerine 
+doğru yaklaşan hedefleri  tespit edeceklerdir. Parkurdaki tüm hedeflerin imha edilmesi, 
+bu imhanın hedefler parkurdan çıkan kadar yapılması gerekmektedir. Burada, yarışmacı 
+PUANLAMA TÜRÜ PUANLAMA 
+Ön Tasarım Raporu  10 Puan 
+Kritik Tasarım Raporu  50 Puan 
+Final Değerlendirme Sunumu 40 Puan 
+Tablo 3. Yarışma Puanlaması 
+BOYUTLAR (En, boy, yükseklik arasından en uzun olan 
+boyut baz alınacaktır.) PUANLAMA 
+Boyut ≤ 60 cm 20 Puan 
+60cm <Boyut <100 cm 0 Puan 
+Tablo 4. Ebat Puanlaması 
+===== SAYFA 14 =====
+ 
+takımların hedef imha çözümlerinin hassasiyeti, hedef tanımlama algoritma/sistem 
+tasarım becerileri öne çıkıp diğer tüm yeteneklerle birleştirilip zaman kritik olarak görevin 
+yerine getirilmesi gerekecektir. 
+5.3. AŞAMA 3: FARKLI KATMANLARDAKİ HAREKETLİ HEDEFLERİN İMHASI 
+Yarışmacı takımlar, sistemlerinde tasarladıkları renk/şekil algılama özelliği ile  düşman 
+hedefi te spit ederek  hedefi imha etmek için; otonom modda doğru hedefe yönlenme, 
+hedef arama, hedef tespit ve imha işlemlerini gerçekleştireceklerdir. İmha sonrası yeni 
+gelecek saldırıdaki hedef tipine göre aynı senaryo tekrar işletilecek olup hedef tipine göre 
+hedefin doğru hedef tipine göre imhası beklenecektir. 
+6. GÖREV TANIMLARI 
+Görevler üç aşamada gerçekleştirilecektir. Bir önceki aşamada belirlenen minimum 
+puanı alamayan takımlar bir üst aşamaya geçemeyeceklerdir. 
+Hava Savunma Sistemlerinin farklı otonomluk seviyeleri bulundurması beklenmektedir. 
+Manuel mod, sistemin tüm fonksiyonlarının kullanıcı girdisi ile, bir kullanıcı arayüzü 
+üzerinden yapıldığı moddur. Otonom mod ise sistemin açıldıktan sonra tanımlı görevler i 
+otomatik olarak gerçekleştirdiği moddur. Bu modlar arası geçişler kullanıcı denetiminde 
+olacaktır. 
+Aşama-1 tamamen manuel modda gerçekleştirilecektir . Sistemin yönlendirilmesi, a teş 
+emri kullanıcı komutuyla gerçekleşecektir. Ateşleme sonrası, yeni hedefe yönelme ve 
+yeniden ateşleme  kullanıcı komutu ile tekrar başlatılacaktır. Aşama -2 otonom modda 
+gerçekleştirilecektir. Yarışmacı takım sistemini açtıktan sonra, sistemi otonom moda 
+alıp, sistemin görevleri gerçekleştirmesini bekleyecektir. Bu görevler, otomatik hedef 
+tespit, takip ve imhadır. Sürü saldırısında yaklaşan hedefler parkurdan çıkmadan imha 
+edilmesi gerekmektedir.  Aşama-3’te y aklaşan hedeflerden doğru hedefi bulup doğru 
+mesafede imha etmesi beklenecektir. Yanlış hedef in imhası  ve doğru hedefin imha 
+edilememesi cezalandırılacaktır. 
+Yarışma başlamadan önce y arışmacı takımlara sistemlerinin montajı ve diğer 
+hazırlıklarını tamamlamaları için 30 dakika süre verilecektir. Test amaçlı atış yapmalarına 
+izin verilecektir.  
+Sistemler testlere yükseliş ekseni 0 derece, yan eksen 0 derecede olacak şekilde 
+başlayacaktır. Yan eksende 0 derece referansı Şekil 2’de verildiği gibidir. 
+Yarışma başladıktan sonra bakım gerektiren bir durum oluştuğunda takım liderinin talebi 
+üzerine yarışma süresi durdurulabilir. Takımlar her aşamada istediği kadar bakım molası 
+alabilirler. 3 aşama için kullanılacak toplam bakım süresi 10 dakikadır. Her bakım talebi 
+toplam bakım süresinden minimum 30 saniye götürecektir . 30 saniyeden uzun sürecek 
+bakımlar, toplam harcanılan süre kadar bakım süresinden düşülecektir. Takımların bunu 
+düşünerek bakım sürelerini dikkatli kullanmaları gerekmektedir. Diğer takım üy elerinin 
+desteğine ihtiyaç duyulması durumunda ilgili takım üyeleri sistemin bulunduğu test 
+alanına gelebilir. Bakım süresi sona erdiğinde yarışma süresi işlemeye devam edecektir. 
+Sistemlerde dışarıya çıkacak bir kablo ile güvenli bir konumda acil durdurma butonu 
+(basmalı, çevirmeli, manyetik) olması zorunludur. Acil durdur butonuna basıldıktan sonra 
+===== SAYFA 15 =====
+ 
+yarışma hakem heyetinin değerlendirmesi sonrası devam edebilecektir. Hakem heyeti 
+yarışmayı sonlandırma hakkına sahiptir. 
+Yarışma gerçekleşirken test ortamı kaynaklı testlerin aksaması durumunda, testin 
+sonlandırılmasına ya da baştan başlatılmasına ilgili yarışma takımının lideri karar 
+verecektir. 
+Takımların hedef imha çözümü olarak patlayıcı kullanmaları yasaktır. 
+ 
+ 
+ 
+ 
+ 
+6.1. AŞAMA - 1 FARKLI MENZİLLERDE DURAN HEDEF İMHASI 
+Farklı Menzillerde Duran  Hedef İmhası testi için ayrılan süreler, puanlamalar ve diğer 
+kurallar aşağıda verilmiştir. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Tablo 5. Aşama 1 - Puan Dağılımı Tablosu 
+*Bonus Puan dahil değildir. 
+**Bonus Süre Puanı olarak, 80 puan elde eden takımlara kalan süreleri ile orantılı 
+olarak ilave puan verilecektir. 
+***Yanlış hedefin imhası 
+Bonus Süre Puanı (BSP) = 20 × (İlgili Parkurda Kalan Süre (Saniye)/300)  
+Aşama-1 için aşağıda temsili bir gösterim verilmiştir. 
+ 
+Şekil 2. Aşama 1 Temsili Gösterim 
+Hedefler sistemden yaklaşık 5 -10-15 metre uzaklıkta yer alacaktır. Hedefler durağan 
+olacaktır. 4 farklı hedefin imha sırası yarışma öncesinde hazırlık aşaması tamamlanınca 
+AŞAMA - 1 PUANLAMA 
+Yakın Menzil Hedef İmha Puanı 5 Puan 
+Orta Menzil Hedef İmha Puanı 10 Puan 
+Uzun Menzil Hedef İmha Puanı 20 Puan 
+Kazanılabilecek Maksimum Puan* 80 Puan 
+Bonus Süre Puanı** <20 Puan 
+Ceza Puanı*** -5 Puan 
+Verilecek Süre 5 Dakika 
+===== SAYFA 16 =====
+ 
+yarışmacı takıma  bir zarf ile  verilecektir. Bu sıra ile hedeflerin imha edilmesi 
+gerekmektedir. Yanlış sıra daki bir hedefin imha edilmesi durumunda yarışmacı takım 5 
+ceza puanı alacaktır. 
+Örnek olarak hedefler aşağıdaki gibi rasgele belirlenen bir sıra ile yarışmacı takıma 
+verilecektir: 
+  
+Şekil 3. Aşama 1 Temsili hedef sırası 
+Yarışmacı takımın ilk hedef olarak Balistik Füze dışında bir hedefi imha etmesi 
+durumunda 5 puan ceza alacaktır.  
+1. Aşamada takımların bir üst seviyeye geçebilmesi için en az 30 puan toplaması 
+beklenmektedir. 
+6.2. AŞAMA - 2 SÜRÜ SALDIRISI ve İMHASI 
+Sürü Saldırı ve İmhası görevi 4 tur sürü saldırısı şeklinde gerçekleştirilecektir. Herhangi 
+bir süre sınırı olmadan 4 tur tamamlandığında aşama tamamlanmış olacaktır.  
+ 
+ 
+ 
+ 
+ 
+ 
+Tablo 6. Aşama 2 - Puan Dağılımı Tablosu 
+*Tur başına uygulanacak olan hedef vuramama ceza puanıdır. 3 Tur boyunca hedef 
+vuramayan yarışmacı takım aşamadan başarısız sayılacak ve 0 puan alacaktır. 
+Balistik Füze Helikopter Savaş Uçağı Mini/Micro İHA
+AŞAMA - 2 PUANLAMA 
+Tur başına Bir Hedef İmha Puanı 5 Puan 
+Tur başına İki Hedef İmha Puanı 15 Puan 
+Tur başına Üç Hedef İmha Puanı 30 Puan 
+Kazanılabilecek Maksimum Puan 120 Puan 
+Ceza Puanı* -5 Puan 
+===== SAYFA 17 =====
+ 
+ 
+ 
+Şekil 4. Aşama 2 Temsili Gösterim 
+Hedefler harekete A noktasından başlayacak ve B noktasına kadar hareket edecektir. 
+Hedeflerin A noktasından B noktasına gitmeleri 1 tam tur olarak ifade edilmektedir. 
+1 tur esnasında her kolda yalnızca bir, parkurda toplam üç hedef bulunacaktır.  1. tur 
+tamamlandığında yarışmacı takım hedefleri imha etmiş ise 2. Tura geçmeden parkurdaki 
+imha edilen hedef yerine yenisi konulacaktır. Dolayısıyla takımlar her tura başlarken tüm 
+hedefler parkurda olacaktır. 
+Sürü saldırısı 3 farklı koldan hedeflerin önceden tanımlı bir yol üzerinde sistemlerine 
+yaklaşacak şekilde gerçekleşecektir. Yarışmacı sistemlerin bu hedefleri tur tamamlanana 
+kadar imha etmeleri gerekmektedir. Hedef maket olarak Balistik Füze ve Mini/Micro İHA 
+kullanılması planlanmaktadır. Bu aşamada hedef tipi sınıflandırması beklenmemektedir. 
+2. Aşamada takımların bir üst seviyeye geçebilmesi için en az 20 puan toplaması 
+beklenmektedir. 
+
+===== SAYFA 18 =====
+ 
+6.3. AŞAMA – 3 FARKLI KATMANLARDAKİ HAREKETLİ HEDEFLERİN 
+İMHASI 
+Farklı katmanlardaki hareketli hedef imhası 8 tur üzerinden gerçekleştirilecektir. Tur 
+tanımlaması Aşama-2 ile birebir aynıdır. Tur başına 1 adet imha edilmesi gereken düşman 
+hedef ile 2 adet dost unsur yarışmacı sistemlere doğru yaklaşacaktır. Yarışmacı takımın 
+düşman unsuru tespit edip, hedefin tipine göre uygun menzilde imha etmesi 
+beklenmektedir.  
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+*Bu aşamada dost hedef vurulduğunda ve/veya düşman hedef vurulamadığında alınacak 
+ceza puanıdır. Tur başına alınabilecek maksimum ceza puanı 10 puan ile 
+sınırlandırılmıştır. 3 ardışık tur  boyunca düşman hedef vuramayan yarışmacı takım 
+aşamadan başarısız sayılacak ve 0 puan alacaktır. 
+F16 Hedefi için uygun imha mesafesi 10-15 metredir. 10 Metreden daha yakın mesafede 
+gerçekleştirilen imhalar puan hesabına katılmayacaktır.  Helikopter ve Balistik Füze 
+hedefleri için uygun imha mesafesi 5 -15 metredir.  5 Metreden daha yakın mesafede 
+gerçekleştirilen imhalar puan hesabına katılmayacaktır.  Mini/Micro İHA hedefleri için 
+uygun imha mesafesi 0-15 metredir.   
+Aşama-3 için Şekil 5’de temsili gösterimler verilmiştir. Kırmızı ok düşman hedefi, mavi ok 
+ise dost hedefleri temsil etmektedir. 
+Takımların başarılı sayılabilmesi için Aşama -3’ten minimum  10 puan almaları 
+gerekmektedir. 
+ 
+ 
+ 
+AŞAMA - 3 PUANLAMA 
+F16 Hedefi İmha Puanı 30 Puan 
+Helikopter, Balistik Füze Hedefi İmha Puanı 20 Puan 
+Mini/Micro İHA Hedefi İmha Puanı 10 Puan 
+Kazanılabilecek Maksimum Puan 160 Puan 
+Ceza Puanı* -10 Puan 
+Tablo 7. Aşama 3 - Puan Dağılımı Tablosu 
+===== SAYFA 19 =====
+ 
+ 
+ 
+ 
+Şekil 5. Aşama 3 Temsili Gösterim 
+Düşman hedef görselleri  Şekil 6’da  temsili olarak gösterilmiştir. Hedeflerin imha 
+edildiğinin anlaşılması için kesit alanına göre belli bir büyüklükte balon , hedef üzerine 
+yerleştirilecektir. Balon rengi değişiklik gösterebilir.  
+
+===== SAYFA 20 =====
+ 
+ 
+ 
+Şekil 6. Düşman Hedefler 
+Dost hedef aynı maketlerin farklı renkleriyle temsil edilecektir. Hedeflerde yer alan 
+balonların rengi aynı olacaktır. Hedef tasarımları ve görselleri netleşince yarışmacı 
+takımlarla paylaşılacaktır. 
+6.4. TOPLAM PUAN HESABI 
+Tablo 8. Toplam Puan Hesabı 
+7. ÖDÜL 
+Ödül sıralamasına giren takımlar arasında dereceye giren takımlara aşağıdaki tabloda 
+belirtilen para ödülleri verilecektir. Bu tabloda belirtilen ödüller, ödül almaya hak kazanan 
+takımlara verilecek toplam tutarı göstermektedir, bireysel ödüllendirme yapılmayacaktır. 
+Birincilik, ikincilik ve üçüncülük ödülleri, takım üyeleri toplam sayısına göre eşit miktarda 
+bölünerek her şahsın belirteceği banka hesabına yatırılacaktır. Takım danışmanına da 
+tabloda belirtildiği miktarda para ödülü verilecektir. 
+Tablo 9. Ödül Miktarı 
+7.1. ÖDÜL SIRALAMASI İÇİN MİNİMUM BAŞARI KRİTERİ 
+Ödül sıralamasına girebilmek için takımların 3. Aşamadan en az 10 puan almaları 
+gerekmektedir.  
+Ödül sıralama haricindeki Genel sıralama aşağıdaki kurallara göre yapılacaktır. 
+• İlk olarak takımlar geçmeye hak kazandıkları aşamalara göre ve 3. aşamadan 10 
+Puan ve üzeri alanlar şeklinde gruplandırılacaktır. 
+• Tüm gruplar kendi içlerinde aldıkları toplam puana göre sıralanacaktır.  
+BAŞLIK NO TANIM MAKSİMUM KAZANILABİLECEK PUAN 
+4.4.1. Rapor ve Sunum Puanlaması 100 Puan 
+4.4.2. Ebat Puanlaması 20 Puan 
+6.1. 1. Aşama Görevleri Puanlaması 100 Puan 
+6.2. 2. Aşama Görevleri Puanlaması 120 Puan 
+6.3. 3. Aşama Görevleri Puanlaması 160 Puan 
+TOPLAM 500 Puan 
+DERECE ÖDÜL MİKTARI DANIŞMAN 
+BİRİNCİ ₺300.000,00 ₺20.000,00 
+İKİNCİ ₺250.000,00 ₺15.000,00 
+ÜÇÜNCÜ ₺200.000,00 ₺12.000,00 
+===== SAYFA 21 =====
+ 
+• Her grup kendi içerisinde sıralanırken 0 puan alan takımlar kendi grubunda en 
+arkada yer alacaktır.  
+• Son tabloda sırası ile Ödül grubu  en önde , arkasında 3. Aşamaya geçenler, 
+arkasında 2. Aşamaya geçenler ve en sonda 1. Aşamada kalanlar kendi içlerinde 
+sıralı olarak yer alacaktır. 
+• Ödül sıralamasına girmeye hak kazanmamış bir takım genel sıralamada ilk üçte 
+yer alsa bile ödül verilmeyecektir. 
+7.2. En İyi Tasarım Ödülü 
+Rapor aşamaları ile birlikte Yarışma Değerlendirme Kurulu tarafından tasarım 
+değerlendirmeleri yapmaktadır.  
+Tasarımın işlevselliği, güvenilirliği, sistem mimarisi , bu mimarinin gerçek sistemlere 
+benzerliği, kullanıcı dostu olması, kullanıcı arayüz yazılımının işlevselliği gibi gerçek hava 
+savunma sistemlerinde aranan özellikler  hakemler tarafından değerlendirilerek en iyi 
+tasarıma sahip takım belirlenecektir. 
+Belirtilen ödül prestij amaçlı olup bir maddi karşılığı bulunmamaktadır. 
+7.3. En İyi Takım Ruhu Ödülü 
+Yarışma alanında üstlendikleri görevleri ve alandaki iş planlarını en iyi şekilde 
+sonuçlandırmayı hedefleyerek enerjilerini en iyi şekilde yansıtan takımlara yarışmada 
+başarı elde edilip edilmemesine bakılmaksızın verilen ödüldür. Takım olarak alan 
+çalışması, alanda gösterilen çaba, beceri, takım içi ve takımlar arası iletişim vb. 
+durumlarına bakılarak değerlendirme yapılacaktır.  
+Belirtilen ödül prestij amaçlı olup bir maddi karşılığı bulunmamaktadır. 
+8. GENEL KURALLAR 
+Yarışma kapsamında geçerli olan Genel Kurallar kitapçığına ulaşmak için tıklayınız. 
+9. ETİK KURALLAR 
+Yarışma kapsamında geçerli olan Etik Kurallar kitapçığına ulaşmak için tıklayınız. 
+10. SORUMLULUK BEYANI 
+T3 Vakfı ve TEKNOFEST, yarışmacıların teslim etmiş olduğu herhangi bir üründen veya 
+yarışmacıdan kaynaklanan herhangi bir yaralanma veya hasardan hiçbir şekilde sorumlu 
+değildir. Yarışmacıların 3. kişilere verdiği zararlardan T3 Vakfı ve organizasyon yetki lileri 
+sorumlu değildir. T3 Vakfı ve TEKNOFEST, takımların kendi sistemlerini Türkiye 
+Cumhuriyeti yasaları çerçevesinde hazırlamalarını ve uygulamalarını sağlamaktan 
+sorumlu değildir.  
+Türkiye Teknoloji Takımı Vakfı işbu şartnamede her türlü değişiklik yapma hakkını 
+saklı tutar. 
+ 
+ 
+  
+===== SAYFA 22 =====
+ 
+ 
