@@ -141,6 +141,8 @@ class AlgiThread(QThread):
                 self.durum.emit("Sistem hazır" if model else "Model yükleniyor… (kamera aktif)", False)
 
             ok, frame = cap.read()
+            if ok and frame is not None:
+                frame = cv2.flip(frame, 1)   # yatay aynalama: goruntu ters dusmesin
             if not ok or frame is None:
                 hata += 1
                 if hata > 30:
