@@ -300,43 +300,87 @@ def est_distance(cls, box_px):
     return float(np.clip(round(d, 1), 0.5, 30.0))
 
 
+# ---------------- Takip hafizasi (KARARLI kutular) ----------------
+# ByteTrack her nesneye kalici bir ID verir. Bunu kullanip her nesneyi AYRI takip
+# ederiz (ayni anda 2-3 hedef sorunsuz, birine ozel degil). Titremeyi bitiren iki mekanizma:
+#   1) COASTING (kisa hafiza): bir nesne birkac kare gorunmezse -veya guveni bir an FLOOR
+#      altina duserse- kutuyu HEMEN silmeyiz; son yerinde COAST_SEC saniye korur, sonra sileriz.
+#      Sure KARE degil SANIYE bazli -> FPS'ten (makineden) bagimsiz (CLAUDE.md ilke 7).
+#   2) EMA yumusatma: kutu kosesi = a*yeni + (1-a)*eski -> ziplamadan akici kayar.
+COAST_SEC = 1.5      # gorulmeyen takip bu kadar saniye ekranda tutulur, sonra silinir
+EMA_ALPHA = 0.5      # 1.0 = yumusatma yok; 0'a yakin = daha yumusak ama daha yavas takip
+
+_tracks = {}         # id -> {cls, box, conf, taraf, t_son}
+
+
+def takip_sifirla():
+    """Takip hafizasini temizler (or. kamera degisince cagirilir; eski kutular kalmasin)."""
+    _tracks.clear()
+
+
+def _kutu_yumusat(eski, yeni, a=EMA_ALPHA):
+    return tuple(int(a * n + (1 - a) * o) for o, n in zip(eski, yeni))
+
+
 # ---------------- Tespit + karar ----------------
 def analiz_et(model, frame, estop=False):
     """Bir kareyi analiz eder. Doner: (dets, balonlar, active_idx).
 
-    dets: her biri {cls, ad, tip, conf, box}  (mesafe alani YOK — yukaridaki not)
+    dets: her biri {cls, ad, tip, conf, box, id}  (id = ByteTrack takip kimligi veya None)
     balonlar: [(x1,y1,x2,y2), ...]  (nisan noktalari)
     active_idx: kilitlenen dusman index'i; estop veya hedef yoksa -1.
+
+    Kutular ID-bazli takip + coasting + EMA ile KARARLIDIR: bir kez taninan nesne
+    hareket ederken kutu kaybolmaz/titremez, hedefe kilitlenmis gibi takip eder.
     """
     results = model.track(frame, persist=True, conf=0.25, imgsz=INFER_IMGSZ,
                           tracker="bytetrack.yaml", verbose=False)
     r = results[0]
-
-    best = {}
+    now = time.time()
     balonlar = []
+    goruldu = set()          # bu karede gercekten gorulen takip id'leri
+    idsiz = []               # ByteTrack henuz id vermediyse gecici gosterilecekler (nadiren)
+
     if r.boxes is not None:
         for b in r.boxes:
             cls = r.names[int(b.cls)]
             conf = float(b.conf)
-            if conf < FLOOR:
-                continue
             x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
             if cls == "balon":
-                balonlar.append((x1, y1, x2, y2))
+                if conf >= FLOOR:
+                    balonlar.append((x1, y1, x2, y2))
                 continue
             if cls not in DISPLAY:
                 continue
-            if cls not in best or conf > best[cls]["conff"]:
-                best[cls] = {"conff": conf, "box": (x1, y1, x2, y2)}
+            tid = int(b.id.item()) if b.id is not None else None
+            # Dusuk guvenli VE daha once takip edilmeyen -> gurultu, takip baslatma.
+            # Ama zaten takipteyse dusuk guven onemli degil (kilit korunur -> titremez).
+            if conf < FLOOR and (tid is None or tid not in _tracks):
+                continue
+            box = (x1, y1, x2, y2)
+            taraf, _ = taraf_tespit(frame, box, cls)   # SARTNAME: taraf = renk
+            if tid is None:
+                idsiz.append({"cls": cls, "ad": DISPLAY[cls], "tip": taraf,
+                              "conf": int(round(conf * 100)), "box": box, "id": None})
+                continue
+            if tid in _tracks:
+                box = _kutu_yumusat(_tracks[tid]["box"], box)
+                # Taraf yumusatma: bir kez kesin taraf bulunduysa gecici "Bilinmeyen"de koru.
+                if taraf == "Bilinmeyen" and _tracks[tid]["taraf"] != "Bilinmeyen":
+                    taraf = _tracks[tid]["taraf"]
+            _tracks[tid] = {"cls": cls, "box": box, "conf": conf, "taraf": taraf, "t_son": now}
+            goruldu.add(tid)
 
+    # Coasting: gorulmeyen ama suresi dolmamis takipleri KORU; suresi dolani sil.
     dets = []
-    for cls, v in best.items():
-        box = v["box"]
-        taraf, _ = taraf_tespit(frame, box, cls)   # SARTNAME: taraf = renk
-        dets.append({
-            "cls": cls, "ad": DISPLAY[cls], "tip": taraf,
-            "conf": int(round(v["conff"] * 100)), "box": box,
-        })
+    for tid in list(_tracks.keys()):
+        tr = _tracks[tid]
+        if tid not in goruldu and now - tr["t_son"] > COAST_SEC:
+            del _tracks[tid]
+            continue
+        dets.append({"cls": tr["cls"], "ad": DISPLAY[tr["cls"]], "tip": tr["taraf"],
+                     "conf": int(round(tr["conf"] * 100)), "box": tr["box"], "id": tid})
+    dets.extend(idsiz)       # id'siz gecici tespitler (ByteTrack id atamadan onceki ilk kare)
 
     # aktif hedef: yalnizca DUSMAN kilitlenir. E-Stop'ta kilit YOK.
     active_idx = -1

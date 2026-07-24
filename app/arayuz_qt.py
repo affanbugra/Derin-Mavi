@@ -127,6 +127,7 @@ class AlgiThread(QThread):
             if self.kaynak_istegi is not None:
                 istek = self.kaynak_istegi
                 self.kaynak_istegi = None
+                algi.takip_sifirla()   # kamera degisiyor: eski takip kutulari kalmasin
                 if cap is not None:
                     cap.release()
                 self.durum.emit("Kamera değiştiriliyor…", False)
