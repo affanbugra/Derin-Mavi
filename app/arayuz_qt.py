@@ -19,14 +19,14 @@ import cv2
 # hazir modulu kullanir (agirlik yukleme + tensor islemleri thread-guvenli).
 from ultralytics import YOLO
 
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QStyle, QStyleOptionSlider, QMessageBox,
+    QSlider, QStyle, QStyleOptionSlider,
 )
 
 import algi
@@ -489,6 +489,9 @@ class MainWindow(QMainWindow):
         self.thread.kameralar_bulundu.connect(self._kameralar_geldi)
         self.thread.start()
 
+        # Ayar paneli acikken panel disina tiklaninca kapansin (uygulama geneli olay filtresi)
+        QApplication.instance().installEventFilter(self)
+
     # ================= TOPBAR =================
     def _topbar(self):
         bar = QFrame()
@@ -758,13 +761,15 @@ class MainWindow(QMainWindow):
             self._ayar_satiri(pv, tanim)
 
         alt = QHBoxLayout()
-        self.ayar_sifirla_btn = QPushButton("↺ Sıfırla")
+        self.ayar_sifirla_btn = QPushButton("Sıfırla")
         self.ayar_sifirla_btn.setObjectName("ayaralt")
         self.ayar_sifirla_btn.setCursor(Qt.PointingHandCursor)
+        self.ayar_sifirla_btn.setMinimumHeight(32)
         self.ayar_sifirla_btn.clicked.connect(self._ayar_sifirla)
         self.ayar_kaydet_btn = QPushButton("Kaydet")
         self.ayar_kaydet_btn.setObjectName("ayarkaydet")
         self.ayar_kaydet_btn.setCursor(Qt.PointingHandCursor)
+        self.ayar_kaydet_btn.setMinimumHeight(32)
         self.ayar_kaydet_btn.clicked.connect(self._ayar_kaydet)
         alt.addWidget(self.ayar_sifirla_btn)
         alt.addStretch(1)
@@ -781,11 +786,14 @@ class MainWindow(QMainWindow):
         ust.setSpacing(6)
         lab = QLabel(baslik)
         lab.setObjectName("ayarlbl")
-        info = QPushButton("!")
+        info = QLabel("!")
         info.setObjectName("ayarinfo")
         info.setFixedSize(16, 16)
-        info.setCursor(Qt.PointingHandCursor)
-        info.clicked.connect(lambda _, b=baslik, a=aciklama: self._ayar_bilgi(b, a))
+        info.setAlignment(Qt.AlignCenter)
+        # Uzerine gelince aciklama (tooltip) — ekstra popup yok. Satirlar <br> ile sarilir.
+        ipucu = f"<div style='max-width:300px; white-space:normal'>{aciklama.replace(chr(10), '<br>')}</div>"
+        info.setToolTip(ipucu)
+        lab.setToolTip(ipucu)
         deger = QLabel()
         deger.setObjectName("ayardeg")
         ust.addWidget(lab)
@@ -827,14 +835,27 @@ class MainWindow(QMainWindow):
             algi.ayar_guncelle(**{key: int(val)})
         self._ayar_deger_yaz(tip, val, deger_lbl)
 
-    def _ayar_bilgi(self, baslik, aciklama):
-        QMessageBox.information(self, baslik, aciklama)
-
     def _ayar_toggle(self):
         gorunur = not self.ayar_panel.isVisible()
         self.ayar_panel.setVisible(gorunur)
         if gorunur:
             self.ayar_panel.raise_()
+
+    def eventFilter(self, obj, event):
+        """Ayar paneli acikken panelin/butonun DISINA tiklaninca paneli kapat."""
+        if (event.type() == QEvent.MouseButtonPress
+                and getattr(self, "ayar_panel", None) is not None
+                and self.ayar_panel.isVisible()):
+            w = obj
+            icerde = False
+            while w is not None:
+                if w is self.ayar_panel or w is self.ayar_btn:
+                    icerde = True
+                    break
+                w = w.parent()
+            if not icerde:
+                self.ayar_panel.setVisible(False)
+        return super().eventFilter(obj, event)
 
     def _ayar_sifirla(self):
         algi.ayar_guncelle(**algi.VARSAYILAN_AYAR)
@@ -1374,10 +1395,10 @@ class MainWindow(QMainWindow):
             background:#fff; border:2px solid {BLUE}; }}
         #ayarsl::handle:horizontal:hover {{ border:2px solid {RED}; }}
         #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:6px;
-            padding:5px 12px; font-size:12px; font-weight:600; }}
+            padding:7px 16px; font-size:12px; font-weight:600; min-height:16px; }}
         #ayaralt:hover {{ background:{CARD}; }}
         #ayarkaydet {{ background:{BLUE}; color:#fff; border:none; border-radius:6px;
-            padding:5px 16px; font-size:12px; font-weight:700; }}
+            padding:7px 20px; font-size:12px; font-weight:700; min-height:16px; }}
         #ayarkaydet:hover {{ background:#0e4a90; }}
         #panelk {{ background:{PANEL}; border:1px solid {BD}; border-radius:8px; }}
         #ph {{ font-size:11px; font-weight:600; letter-spacing:1px; color:{TXT3};
