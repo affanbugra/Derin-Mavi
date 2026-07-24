@@ -901,8 +901,9 @@ class MainWindow(QMainWindow):
         """Secili asamaya gore stack + pill + kural + algi davranisi + tablo gunceller."""
         self.stack.setCurrentIndex(self.ASAMA_IDX[self.asama])
         # Algi thread'ine aktif asamayi bildir (renk yalniz A3'te calisir). Thread heniz
-        # olusmamis olabilir (ilk cagri __init__ sirasinda) -> guard.
-        if hasattr(self, "thread"):
+        # olusmamis olabilir (ilk cagri __init__ sirasinda). DIKKAT: hasattr(self,"thread")
+        # KULLANMA — QObject'in yerlesik thread() metodu yuzunden hep True doner; isinstance ile.
+        if isinstance(getattr(self, "thread", None), AlgiThread):
             self.thread.asama = self.ASAMA_IDX[self.asama]
         # Tespit tablosu basligi: A3'te TARAF (dost/dusman) kolonu var; A1-A2'de yok.
         if hasattr(self, "tablo"):
