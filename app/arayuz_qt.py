@@ -20,7 +20,7 @@ import cv2
 from ultralytics import YOLO
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect
-from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter, QPolygon
+from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
@@ -118,13 +118,12 @@ class OneriSlider(QSlider):
         groove = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
         oran = (self.oneri_val - self.minimum()) / rng
         x = groove.x() + int(round(groove.width() * oran))
+        y = groove.bottom() + 4
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(21, 135, 80, 210))   # GRN, hafif saydam
-        # groove'un hemen ustunde asagi bakan kucuk ucgen = "onerilen" isareti
-        yt = groove.top() - 2
-        p.drawPolygon(QPolygon([QPoint(x, yt), QPoint(x - 4, yt - 6), QPoint(x + 4, yt - 6)]))
+        p.setBrush(QColor(21, 135, 80))   # GRN — "onerilen" konum noktasi (groove altinda)
+        p.drawEllipse(x - 3, y, 6, 6)
         p.end()
 
 
@@ -1420,14 +1419,14 @@ class MainWindow(QMainWindow):
         #ayarinfo {{ background:rgba(18,88,168,0.13); color:{BLUE}; border:none; border-radius:8px;
             font-size:11px; font-weight:800; font-style:italic; }}
         #ayarinfo:hover {{ background:{BLUE}; color:#fff; }}
-        #ayarsl {{ height:26px; }}
-        #ayarsl::groove:horizontal {{ height:6px; border-radius:3px; background:{BD}; }}
-        #ayarsl::sub-page:horizontal {{ height:6px; border-radius:3px; background:{BLUE}; }}
-        #ayarsl::add-page:horizontal {{ height:6px; border-radius:3px; background:{BD}; }}
-        #ayarsl::handle:horizontal {{ width:20px; height:20px; margin:-7px 0; border-radius:10px;
-            background:#fff; border:3px solid {BLUE}; }}
-        #ayarsl::handle:horizontal:hover {{ border:3px solid #0e4a90; }}
-        #ayarsl::handle:horizontal:pressed {{ background:{BLUE}; }}
+        #ayarsl {{ height:34px; }}
+        #ayarsl::groove:horizontal {{ height:6px; border-radius:3px; background:{BD}; margin:0 2px; }}
+        #ayarsl::sub-page:horizontal {{ height:6px; border-radius:3px; background:{BLUE}; margin:0 2px; }}
+        #ayarsl::add-page:horizontal {{ height:6px; border-radius:3px; background:{BD}; margin:0 2px; }}
+        #ayarsl::handle:horizontal {{ width:16px; height:16px; margin:-5px 0; border-radius:8px;
+            background:#fff; border:2px solid {BLUE}; }}
+        #ayarsl::handle:horizontal:hover {{ border:2px solid #0e4a90; }}
+        #ayarsl::handle:horizontal:pressed {{ background:#e8f0fb; }}
         #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:9px;
             padding:8px 18px; font-size:12px; font-weight:600; min-height:16px; }}
         #ayaralt:hover {{ background:{CARD}; border:1px solid {BD2}; }}
