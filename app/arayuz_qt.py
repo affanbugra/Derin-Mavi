@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider,
+    QSlider, QDialog, QCheckBox, QSpinBox,
 )
 
 import algi
@@ -316,7 +316,7 @@ class Kart(QFrame):
 
 
 class SiraliKartlar(QWidget):
-    KART_W, KART_H, GAP = 104, 62, 6
+    KART_W, KART_H, GAP = 120, 65, 8
 
     def __init__(self, tanimlar, grafik_dir):
         super().__init__()
@@ -369,6 +369,149 @@ class SiraliKartlar(QWidget):
     def sirali_tipler(self):
         """Kullanicinin dizdigi imha sirasini tip listesi olarak dondurur."""
         return [self.kartlar[ki].cls for ki in self.sira]
+
+
+# =====================================================================
+#  Manuel Mod Aci ve Limit Ayarlari Penceresi
+# =====================================================================
+class AciAyarlariDialog(QDialog):
+    def __init__(self, parent_win):
+        super().__init__(parent_win)
+        self.win = parent_win
+        self.setWindowTitle("Manuel Açı ve Limit Ayarları")
+        self.setFixedSize(380, 430)
+        if parent_win.centralWidget():
+            self.setStyleSheet(parent_win.centralWidget().styleSheet())
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(18, 16, 18, 16)
+        v.setSpacing(12)
+
+        t = QLabel("MANUEL AÇI & YASAK ALAN AYARLARI")
+        t.setObjectName("ph")
+        v.addWidget(t)
+
+        # 1. Max Tilt Limit
+        g1 = QFrame()
+        g1.setObjectName("panelk")
+        v1 = QVBoxLayout(g1)
+        v1.setContentsMargins(12, 10, 12, 10)
+        v1.setSpacing(6)
+
+        h1 = QHBoxLayout()
+        l1 = QLabel("Maksimum Yükseliş (Tilt) Sınırı:")
+        l1.setObjectName("engsub")
+        self.tilt_val_lbl = QLabel(f"{int(self.win.max_tilt_limit)}°")
+        self.tilt_val_lbl.setObjectName("turn")
+        self.tilt_val_lbl.setStyleSheet("font-size:14px; color:#1e78dc; font-weight:700;")
+        h1.addWidget(l1)
+        h1.addStretch(1)
+        h1.addWidget(self.tilt_val_lbl)
+        v1.addLayout(h1)
+
+        self.tilt_sl = QSlider(Qt.Horizontal)
+        self.tilt_sl.setMinimum(10)
+        self.tilt_sl.setMaximum(90)
+        self.tilt_sl.setValue(int(self.win.max_tilt_limit))
+        self.tilt_sl.valueChanged.connect(lambda val: self.tilt_val_lbl.setText(f"{val}°"))
+        v1.addWidget(self.tilt_sl)
+        v.addWidget(g1)
+
+        # 2. Pan Yasak Aci Araligi
+        g2 = QFrame()
+        g2.setObjectName("panelk")
+        v2 = QVBoxLayout(g2)
+        v2.setContentsMargins(12, 10, 12, 10)
+        v2.setSpacing(6)
+
+        self.pan_yasak_cb = QCheckBox("Pan (Azimut) Yasak Açı Aralığı Etkin")
+        self.pan_yasak_cb.setChecked(self.win.pan_yasak_aktif)
+        self.pan_yasak_cb.setStyleSheet("font-size:12px; font-weight:600;")
+        v2.addWidget(self.pan_yasak_cb)
+
+        py_row = QHBoxLayout()
+        py_row.setSpacing(10)
+
+        l_pmin = QLabel("Min (°)")
+        l_pmin.setObjectName("engsub")
+        py_row.addWidget(l_pmin)
+        self.pan_min_spin = QSpinBox()
+        self.pan_min_spin.setRange(0, 360)
+        self.pan_min_spin.setValue(int(self.win.pan_yasak_min))
+        py_row.addWidget(self.pan_min_spin)
+
+        l_pmax = QLabel("Max (°)")
+        l_pmax.setObjectName("engsub")
+        py_row.addWidget(l_pmax)
+        self.pan_max_spin = QSpinBox()
+        self.pan_max_spin.setRange(0, 360)
+        self.pan_max_spin.setValue(int(self.win.pan_yasak_max))
+        py_row.addWidget(self.pan_max_spin)
+        v2.addLayout(py_row)
+        v.addWidget(g2)
+
+        # 3. Tilt Yasak Aci Araligi
+        g3 = QFrame()
+        g3.setObjectName("panelk")
+        v3 = QVBoxLayout(g3)
+        v3.setContentsMargins(12, 10, 12, 10)
+        v3.setSpacing(6)
+
+        self.tilt_yasak_cb = QCheckBox("Tilt (Yükseliş) Yasak Açı Aralığı Etkin")
+        self.tilt_yasak_cb.setChecked(self.win.tilt_yasak_aktif)
+        self.tilt_yasak_cb.setStyleSheet("font-size:12px; font-weight:600;")
+        v3.addWidget(self.tilt_yasak_cb)
+
+        ty_row = QHBoxLayout()
+        ty_row.setSpacing(10)
+
+        l_tmin = QLabel("Min (°)")
+        l_tmin.setObjectName("engsub")
+        ty_row.addWidget(l_tmin)
+        self.tilt_min_spin = QSpinBox()
+        self.tilt_min_spin.setRange(0, 90)
+        self.tilt_min_spin.setValue(int(self.win.tilt_yasak_min))
+        ty_row.addWidget(self.tilt_min_spin)
+
+        l_tmax = QLabel("Max (°)")
+        l_tmax.setObjectName("engsub")
+        ty_row.addWidget(l_tmax)
+        self.tilt_max_spin = QSpinBox()
+        self.tilt_max_spin.setRange(0, 90)
+        self.tilt_max_spin.setValue(int(self.win.tilt_yasak_max))
+        ty_row.addWidget(self.tilt_max_spin)
+        v3.addLayout(ty_row)
+        v.addWidget(g3)
+
+        # Bottom Buttons
+        btn_box = QHBoxLayout()
+        btn_box.addStretch(1)
+
+        cancel_btn = QPushButton("İptal")
+        cancel_btn.setObjectName("ayaralt")
+        cancel_btn.setCursor(Qt.PointingHandCursor)
+        cancel_btn.clicked.connect(self.reject)
+
+        save_btn = QPushButton("Kaydet")
+        save_btn.setObjectName("ayarkaydet")
+        save_btn.setCursor(Qt.PointingHandCursor)
+        save_btn.clicked.connect(self._kaydet)
+
+        btn_box.addWidget(cancel_btn)
+        btn_box.addWidget(save_btn)
+        v.addLayout(btn_box)
+
+    def _kaydet(self):
+        self.win.max_tilt_limit = float(self.tilt_sl.value())
+        if hasattr(self.win, "tilt_lbl_ref"):
+            self.win.tilt_lbl_ref.setText(f"YÜKSELİŞ (TİLT max {int(self.win.max_tilt_limit)}°)")
+        self.win.pan_yasak_aktif = self.pan_yasak_cb.isChecked()
+        self.win.pan_yasak_min = float(self.pan_min_spin.value())
+        self.win.pan_yasak_max = float(self.pan_max_spin.value())
+        self.win.tilt_yasak_aktif = self.tilt_yasak_cb.isChecked()
+        self.win.tilt_yasak_min = float(self.tilt_min_spin.value())
+        self.win.tilt_yasak_max = float(self.tilt_max_spin.value())
+        self.accept()
 
 
 # =====================================================================
@@ -954,9 +1097,9 @@ class MainWindow(QMainWindow):
         v.addWidget(kart)
 
         # --- tespit tablosu ---
-        tk = QFrame()
-        tk.setObjectName("panelk")
-        tv = QVBoxLayout(tk)
+        self.tk = QFrame()
+        self.tk.setObjectName("panelk")
+        tv = QVBoxLayout(self.tk)
         tv.setContentsMargins(19, 13, 19, 13)
         tv.setSpacing(8)
         tt = QLabel("TESPİT EDİLEN HEDEFLER")
@@ -975,9 +1118,226 @@ class MainWindow(QMainWindow):
             hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
         hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         tv.addWidget(self.tablo)
-        v.addWidget(tk, 1)
+
+        # Sag kolon stacked widget (Otonom = Tablo, Manuel = Yon kontrolleri)
+        self.sag_stack = QStackedWidget()
+        self.sag_stack.addWidget(self.tk)                       # 0: Otonom
+        self.manuel_panel = self._manuel_kontrol_panel()
+        self.sag_stack.addWidget(self.manuel_panel)             # 1: Manuel
+        v.addWidget(self.sag_stack, 1)
 
         return kol
+
+    # ================= MANUEL YÖN VE NİŞAN KONTROLÜ =================
+    def _manuel_kontrol_panel(self):
+        mk = QFrame()
+        mk.setObjectName("panelk")
+        mv = QVBoxLayout(mk)
+        mv.setContentsMargins(16, 12, 16, 12)
+        mv.setSpacing(8)
+
+        # 1. Baslik + Aci Ayarlari butonu
+        brow = QHBoxLayout()
+        mt = QLabel("MANUEL NİŞAN & YÖN KONTROLÜ")
+        mt.setObjectName("ph")
+        brow.addWidget(mt, 1)
+
+        self.aci_ayar_btn = QPushButton("⚙ Açı Ayarları")
+        self.aci_ayar_btn.setObjectName("ayaralt")
+        self.aci_ayar_btn.setCursor(Qt.PointingHandCursor)
+        self.aci_ayar_btn.setFixedHeight(24)
+        self.aci_ayar_btn.clicked.connect(self._aci_ayarlar_toggle)
+        brow.addWidget(self.aci_ayar_btn, 0)
+        mv.addLayout(brow)
+
+        # Aci takip degiskenleri
+        self.pan_aci = 0.0          # Azimut (0 - 360)
+        self.tilt_aci = 0.0         # Yukselis (0 - max_tilt_limit)
+        self.max_tilt_limit = 60.0  # Yukselis max siniri
+        self.pan_yasak_aktif = False
+        self.pan_yasak_min = 120.0
+        self.pan_yasak_max = 160.0
+        self.tilt_yasak_aktif = False
+        self.tilt_yasak_min = 45.0
+        self.tilt_yasak_max = 60.0
+        self.aci_adim = 5.0          # Adim hassasiyeti (derece)
+
+        # 2. Dijital Aci Gostergesi
+        gost_box = QFrame()
+        gost_box.setObjectName("angtgl")
+        gh = QHBoxLayout(gost_box)
+        gh.setContentsMargins(12, 6, 12, 6)
+        gh.setSpacing(12)
+
+        # Pan
+        pv = QVBoxLayout()
+        pv.setSpacing(1)
+        plbl = QLabel("AZİMUT (PAN)")
+        plbl.setObjectName("engsub")
+        self.pan_val_lbl = QLabel("0.0°")
+        self.pan_val_lbl.setObjectName("turn")
+        self.pan_val_lbl.setStyleSheet(f"font-size:18px; color:{TXT}; font-weight:700;")
+        pv.addWidget(plbl)
+        pv.addWidget(self.pan_val_lbl)
+        gh.addLayout(pv, 1)
+
+        # Div
+        d1 = QFrame()
+        d1.setObjectName("vdiv")
+        d1.setFixedWidth(1)
+        gh.addWidget(d1)
+
+        # Tilt
+        tv_box = QVBoxLayout()
+        tv_box.setSpacing(1)
+        self.tilt_lbl_ref = QLabel(f"YÜKSELİŞ (TİLT max {int(self.max_tilt_limit)}°)")
+        self.tilt_lbl_ref.setObjectName("engsub")
+        self.tilt_val_lbl = QLabel("0.0°")
+        self.tilt_val_lbl.setObjectName("turn")
+        self.tilt_val_lbl.setStyleSheet(f"font-size:18px; color:{BLUE}; font-weight:700;")
+        tv_box.addWidget(self.tilt_lbl_ref)
+        tv_box.addWidget(self.tilt_val_lbl)
+        gh.addLayout(tv_box, 1)
+
+        mv.addWidget(gost_box)
+
+        # Bolge Status Label
+        self.bolge_status = QLabel("● BÖLGE GÜVENLİ")
+        self.bolge_status.setObjectName("firest")
+        self.bolge_status.setAlignment(Qt.AlignCenter)
+        self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+        mv.addWidget(self.bolge_status)
+
+        # 3. YON TUS TAKIMI (D-Pad Grid)
+        dpad = QWidget()
+        gl = QGridLayout(dpad)
+        gl.setContentsMargins(0, 4, 0, 4)
+        gl.setSpacing(6)
+
+        btn_style = (f"QPushButton {{ background:{CARD}; border:1px solid {BD}; border-radius:8px; "
+                     f"color:{TXT}; font-size:16px; font-weight:700; min-width:46px; min-height:38px; }}"
+                     f"QPushButton:hover {{ background:{BD2}; color:#fff; border-color:{BLUE}; }}"
+                     f"QPushButton:pressed {{ background:{BLUE}; color:#fff; }}")
+
+        btn_home_style = (f"QPushButton {{ background:rgba(30,120,220,0.12); border:1px solid {BLUE}; "
+                          f"border-radius:8px; color:{BLUE}; font-size:18px; font-weight:700; min-width:46px; min-height:38px; }}"
+                          f"QPushButton:hover {{ background:{BLUE}; color:#fff; }}")
+
+        btn_up = QPushButton("▲")
+        btn_up.setStyleSheet(btn_style)
+        btn_up.setToolTip("YUKARI (TİLT +)")
+        btn_up.setCursor(Qt.PointingHandCursor)
+        btn_up.clicked.connect(lambda: self._aci_hareket(0.0, self.aci_adim))
+        gl.addWidget(btn_up, 0, 1)
+
+        btn_left = QPushButton("◄")
+        btn_left.setStyleSheet(btn_style)
+        btn_left.setToolTip("SOL (PAN -)")
+        btn_left.setCursor(Qt.PointingHandCursor)
+        btn_left.clicked.connect(lambda: self._aci_hareket(-self.aci_adim, 0.0))
+        gl.addWidget(btn_left, 1, 0)
+
+        btn_home = QPushButton("⌖")
+        btn_home.setStyleSheet(btn_home_style)
+        btn_home.setToolTip("MERKEZ / SIFIRLA (0°, 0°)")
+        btn_home.setCursor(Qt.PointingHandCursor)
+        btn_home.clicked.connect(self._aci_reset)
+        gl.addWidget(btn_home, 1, 1)
+
+        btn_right = QPushButton("►")
+        btn_right.setStyleSheet(btn_style)
+        btn_right.setToolTip("SAĞ (PAN +)")
+        btn_right.setCursor(Qt.PointingHandCursor)
+        btn_right.clicked.connect(lambda: self._aci_hareket(self.aci_adim, 0.0))
+        gl.addWidget(btn_right, 1, 2)
+
+        btn_down = QPushButton("▼")
+        btn_down.setStyleSheet(btn_style)
+        btn_down.setToolTip("AŞAĞI (TİLT -)")
+        btn_down.setCursor(Qt.PointingHandCursor)
+        btn_down.clicked.connect(lambda: self._aci_hareket(0.0, -self.aci_adim))
+        gl.addWidget(btn_down, 2, 1)
+
+        mv.addWidget(dpad, 0, Qt.AlignCenter)
+
+        # 4. Adim Hassasiyet Butonlari
+        step_row = QHBoxLayout()
+        step_row.setSpacing(6)
+        step_lbl = QLabel("Hassasiyet:")
+        step_lbl.setObjectName("engsub")
+        step_row.addWidget(step_lbl)
+
+        self.step_btns = {}
+        for val, label in [(1.0, "1° Hassas"), (5.0, "5° Normal"), (10.0, "10° Hızlı")]:
+            sb = QPushButton(label)
+            sb.setCheckable(True)
+            sb.setChecked(val == self.aci_adim)
+            sb.setFixedHeight(22)
+            sb.setCursor(Qt.PointingHandCursor)
+            sb.clicked.connect(lambda _, v=val: self._aci_adim_sec(v))
+            step_row.addWidget(sb)
+            self.step_btns[val] = sb
+            self._step_btn_stil_guncelle(sb, val == self.aci_adim)
+
+        mv.addLayout(step_row)
+        return mk
+
+    def _aci_hareket(self, d_pan, d_tilt):
+        """Pan/Tilt acisini degistirir, yasak bolgeleri kontrol eder ve ESP32 komutunu gonderir."""
+        yeni_pan = (self.pan_aci + d_pan) % 360.0
+        yeni_tilt = max(0.0, min(self.max_tilt_limit, self.tilt_aci + d_tilt))
+
+        # Yasak aci kontrolu
+        yasak_mi = False
+        if self.pan_yasak_aktif and (self.pan_yasak_min <= yeni_pan <= self.pan_yasak_max):
+            yasak_mi = True
+        if self.tilt_yasak_aktif and (self.tilt_yasak_min <= yeni_tilt <= self.tilt_yasak_max):
+            yasak_mi = True
+
+        if yasak_mi:
+            self.bolge_status.setText("▲ YASAK AÇI LİMİTİ — ENGELLENDİ")
+            self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
+            return
+
+        self.pan_aci = yeni_pan
+        self.tilt_aci = yeni_tilt
+        self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
+        self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
+        self.bolge_status.setText("● BÖLGE GÜVENLİ")
+        self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+
+        # ESP32 komutu gonder
+        if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
+            self.kontrol.nisan(1, d_pan, d_tilt)
+
+    def _aci_reset(self):
+        self.pan_aci = 0.0
+        self.tilt_aci = 0.0
+        self.pan_val_lbl.setText("0.0°")
+        self.tilt_val_lbl.setText("0.0°")
+        self.bolge_status.setText("● MERKEZE ALINDI")
+        self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+        if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
+            self.kontrol.home()
+
+    def _aci_ayarlar_toggle(self):
+        dlg = AciAyarlariDialog(self)
+        dlg.exec()
+
+    def _step_btn_stil_guncelle(self, btn, secili):
+        if secili:
+            btn.setStyleSheet(f"QPushButton {{ background:{BLUE}; color:#fff; border:none; "
+                              f"border-radius:4px; font-size:10px; font-weight:700; padding:0 8px; }}")
+        else:
+            btn.setStyleSheet(f"QPushButton {{ background:{CARD}; color:{TXT2}; border:1px solid {BD}; "
+                              f"border-radius:4px; font-size:10px; font-weight:600; padding:0 8px; }}"
+                              f"QPushButton:hover {{ border-color:{BD2}; }}")
+
+    def _aci_adim_sec(self, val):
+        self.aci_adim = val
+        for v, b in self.step_btns.items():
+            b.setChecked(v == val)
+            self._step_btn_stil_guncelle(b, v == val)
 
     def _asama1_panel(self):
         """Asama 1: zarf sirasina gore dizilen 4 hedef karti."""
@@ -1047,7 +1407,7 @@ class MainWindow(QMainWindow):
         ic.addWidget(self.kural, 1)
 
         sv.addLayout(ic)
-        h.addWidget(sysk, 6)
+        h.addWidget(sysk, 8)
 
         # --- hedef durumu ---
         eng_card = QFrame()
@@ -1204,7 +1564,28 @@ class MainWindow(QMainWindow):
             for b in self.asama_btns.values():
                 b.setChecked(False)
         self.sb_mod.setText(f'<span style="color:{BLUE}">Sistem:</span>&nbsp;{ad}')
+        if hasattr(self, "sag_stack"):
+            if self.mod == "Manuel":
+                self.sag_stack.setCurrentWidget(self.manuel_panel)
+            else:
+                self.sag_stack.setCurrentWidget(self.tk)
         self._asama_uygula()
+
+    def keyPressEvent(self, event):
+        if getattr(self, "mod", "") == "Manuel" and hasattr(self, "pan_aci"):
+            if event.key() == Qt.Key_Up:
+                self._aci_hareket(0.0, self.aci_adim)
+                return
+            elif event.key() == Qt.Key_Down:
+                self._aci_hareket(0.0, -self.aci_adim)
+                return
+            elif event.key() == Qt.Key_Left:
+                self._aci_hareket(-self.aci_adim, 0.0)
+                return
+            elif event.key() == Qt.Key_Right:
+                self._aci_hareket(self.aci_adim, 0.0)
+                return
+        super().keyPressEvent(event)
 
     def _asama_sec(self, ad):
         if not self.asama_btns[ad].isEnabled():
