@@ -380,8 +380,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("DERİN MAVİ — Görev Kontrol İstasyonu")
-        self.mod = "Otonom"
-        self.asama = "Aşama 3"
+        self.mod = "Manuel"
+        self.asama = "Aşama 1"
         self._ayar_yukle()   # kayitli ayarlar varsa algi.AYAR'a yukle (sliderlar bunu okur)
 
         # Icerik tuvali: yuksekligi sabit 900, GENISLIGI EKRANIN ORANINA gore ayarlanir.
