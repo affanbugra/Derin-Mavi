@@ -116,14 +116,21 @@ class OneriSlider(QSlider):
         opt = QStyleOptionSlider()
         self.initStyleOption(opt)
         groove = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
-        oran = (self.oneri_val - self.minimum()) / rng
-        x = groove.x() + int(round(groove.width() * oran))
-        y = groove.bottom() + 4
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(21, 135, 80))   # GRN — "onerilen" konum noktasi (groove altinda)
-        p.drawEllipse(x - 3, y, 6, 6)
+        yesil = QColor(21, 135, 80)
+        # 1) Onerilen konum: groove UZERINDE kisa dikey tik (kirpilmaz, hep gorunur).
+        oran = (self.oneri_val - self.minimum()) / rng
+        x = groove.x() + int(round(groove.width() * oran))
+        cy = groove.center().y()
+        p.setBrush(yesil)
+        p.drawRect(x - 1, cy - 6, 2, 12)
+        # 2) TAM onerilen degerdeysen: kulbun ici yesil dolar -> "buradasin" belli olur.
+        if self.value() == self.oneri_val:
+            h = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
+            hc = h.center()
+            p.drawEllipse(hc.x() - 4, hc.y() - 4, 8, 8)
         p.end()
 
 
