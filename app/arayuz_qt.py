@@ -274,24 +274,33 @@ class Kart(QFrame):
         self.setObjectName("kart")
         self.setFixedSize(ust.KART_W, ust.KART_H)
         v = QVBoxLayout(self)
-        v.setContentsMargins(8, 6, 8, 8)
-        v.setSpacing(3)
+        v.setContentsMargins(5, 4, 5, 4)
+        v.setSpacing(2)
+
+        # Ust satir: rozet + ad
+        ust_row = QHBoxLayout()
+        ust_row.setContentsMargins(0, 0, 0, 0)
+        ust_row.setSpacing(4)
+
         self.rozet = QLabel("1")
         self.rozet.setObjectName("kartno")
-        self.rozet.setFixedSize(19, 19)
+        self.rozet.setFixedSize(16, 16)
         self.rozet.setAlignment(Qt.AlignCenter)
-        v.addWidget(self.rozet, 0, Qt.AlignLeft)
+        ust_row.addWidget(self.rozet, 0, Qt.AlignVCenter)
+
+        adl = QLabel(ad)
+        adl.setObjectName("kartad")
+        adl.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        ust_row.addWidget(adl, 1, Qt.AlignVCenter)
+        v.addLayout(ust_row)
+
+        # Alt: gorsel
         img = QLabel()
         img.setAlignment(Qt.AlignCenter)
         if not pixmap.isNull():
-            img.setPixmap(pixmap.scaled(ust.KART_W - 26, 74,
+            img.setPixmap(pixmap.scaled(ust.KART_W - 12, 30,
                           Qt.KeepAspectRatio, Qt.SmoothTransformation))
         v.addWidget(img, 1)
-        adl = QLabel(ad)
-        adl.setObjectName("kartad")
-        adl.setAlignment(Qt.AlignCenter)
-        adl.setWordWrap(True)
-        v.addWidget(adl)
         self.setCursor(Qt.OpenHandCursor)
 
     def mousePressEvent(self, e):
@@ -307,7 +316,7 @@ class Kart(QFrame):
 
 
 class SiraliKartlar(QWidget):
-    KART_W, KART_H, GAP = 158, 150, 10
+    KART_W, KART_H, GAP = 104, 62, 6
 
     def __init__(self, tanimlar, grafik_dir):
         super().__init__()
@@ -400,13 +409,23 @@ class MainWindow(QMainWindow):
 
         # --- main ---
         main = QWidget()
-        mh = QHBoxLayout(main)
-        mh.setContentsMargins(12, 12, 12, 12)
-        mh.setSpacing(12)
+        mv = QVBoxLayout(main)
+        mv.setContentsMargins(12, 12, 12, 12)
+        mv.setSpacing(12)
         kok.addWidget(main, 1)
 
-        mh.addWidget(self._sol_kolon())
-        mh.addWidget(self._sag_kolon(), 1)
+        # 1. Ust Alan (Kamera sol, Aktif Hedef + Tespit Tablosu sag)
+        ust_alan = QWidget()
+        uh = QHBoxLayout(ust_alan)
+        uh.setContentsMargins(0, 0, 0, 0)
+        uh.setSpacing(12)
+
+        uh.addWidget(self._sol_kolon(), 5)
+        uh.addWidget(self._sag_kolon(), 4)
+        mv.addWidget(ust_alan, 1)
+
+        # 2. Alt Panel (Sistem Durumu + Hedef Durumu + Yasak Alanlar)
+        mv.addWidget(self._alt_panel(), 0)
 
         # --- status bar ---
         kok.addWidget(self._sbar())
@@ -592,18 +611,16 @@ class MainWindow(QMainWindow):
         f.setFixedSize(1, 22)
         return f
 
-    # ================= SOL KOLON =================
+    # ================= SOL KOLON (KAMERA) =================
     def _sol_kolon(self):
         kol = QWidget()
-        kol.setFixedWidth(716)
         v = QVBoxLayout(kol)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(12)
+        v.setSpacing(0)
 
         # --- kamera ---
         self.cam = QFrame()
         self.cam.setObjectName("cam")
-        self.cam.setFixedHeight(464)
         cl = QVBoxLayout(self.cam)
         cl.setContentsMargins(0, 0, 0, 0)
         self.video = QLabel("Kamera başlatılıyor…")
@@ -614,45 +631,7 @@ class MainWindow(QMainWindow):
         # kamera sol ustune ⚙ Ayarlar butonu + acilir panel (video uzerinde)
         self._ayar_overlay_kur(self.cam)
 
-        v.addWidget(self.cam)
-
-        # --- sistem durumu (ASAMAYA DUYARLI) ---
-        sysk = QFrame()
-        sysk.setObjectName("panelk")
-        sv = QVBoxLayout(sysk)
-        sv.setContentsMargins(17, 13, 17, 13)
-        sv.setSpacing(9)
-
-        # baslik + asama pill
-        brow = QHBoxLayout()
-        ph = QLabel("SİSTEM DURUMU")
-        ph.setObjectName("ph")
-        brow.addWidget(ph)
-        brow.addStretch(1)
-        self.asama_pill = QLabel(self.asama or "—")
-        self.asama_pill.setObjectName("asamap")
-        brow.addWidget(self.asama_pill)
-        sv.addLayout(brow)
-
-        # asamaya gore degisen govde
-        self.stack = QStackedWidget()
-        yok = QLabel("Aşama seçiniz")
-        yok.setObjectName("bosmsg")
-        yok.setAlignment(Qt.AlignCenter)
-        self.stack.addWidget(yok)                     # 0: secim yok
-        self.stack.addWidget(self._asama1_panel())    # 1: Asama 1 (kartlar)
-        self.stack.addWidget(self._tur_panel(4))      # 2: Asama 2 (tur/4)
-        self.stack.addWidget(self._tur_panel(8))      # 3: Asama 3 (tur/8)
-        sv.addWidget(self.stack)
-
-        # kural kutusu (asamaya gore)
-        self.kural = QLabel()
-        self.kural.setObjectName("kural")
-        self.kural.setWordWrap(True)
-        sv.addWidget(self.kural)
-
-        v.addWidget(sysk)
-        v.addStretch(1)
+        v.addWidget(self.cam, 1)
         return kol
 
     def _asama1_panel(self):
@@ -773,7 +752,7 @@ class MainWindow(QMainWindow):
     def _ayar_satiri(self, layout, tanim):
         key, baslik, tip, mn, mx, oneri, aciklama = tanim
         kutu = QVBoxLayout()          # her ayar kendi grubunda (ic bosluk dar, gruplar arasi genis)
-        kutu.setSpacing(5)
+        kutu.setSpacing(6)
         ust = QHBoxLayout()
         ust.setSpacing(7)
         lab = QLabel(baslik)
@@ -800,23 +779,19 @@ class MainWindow(QMainWindow):
             sl.setMinimum(0)
             sl.setMaximum(len(COZUNURLUK_SECENEK) - 1)
             sl.setValue(COZUNURLUK_SECENEK.index(int(algi.AYAR[key])))
-            oneri_txt = f"{oneri} px"
+            sl.oneri_val = COZUNURLUK_SECENEK.index(oneri)
         else:
             sl.setMinimum(mn)
             sl.setMaximum(mx)
             sl.setValue(int(round(algi.AYAR[key] * 100)) if tip == "yuzde" else int(algi.AYAR[key]))
-            oneri_txt = f"{oneri / 100:.2f}" if tip == "yuzde" else f"{oneri} kare"
+            sl.oneri_val = oneri
         sl.setObjectName("ayarsl")
-        sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger: self._ayar_degisti(k, t, val, d))
+        sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger, s=sl: self._ayar_degisti(k, t, val, d, s))
         kutu.addWidget(sl)
-
-        oneri_lbl = QLabel(f"Önerilen: {oneri_txt}")
-        oneri_lbl.setObjectName("ayaroneri")
-        kutu.addWidget(oneri_lbl)
 
         layout.addLayout(kutu)
         self.ayar_sliderlar[key] = (sl, tip)
-        self._ayar_deger_yaz(tip, sl.value(), deger)
+        self._ayar_degisti(key, tip, sl.value(), deger, sl)
 
     def _ayar_deger_yaz(self, tip, val, lbl):
         if tip == "yuzde":
@@ -826,7 +801,7 @@ class MainWindow(QMainWindow):
         else:
             lbl.setText(f"{val} kare")
 
-    def _ayar_degisti(self, key, tip, val, deger_lbl):
+    def _ayar_degisti(self, key, tip, val, deger_lbl, slider):
         if tip == "yuzde":
             algi.ayar_guncelle(**{key: val / 100.0})
         elif tip == "secim":
@@ -834,6 +809,36 @@ class MainWindow(QMainWindow):
         else:
             algi.ayar_guncelle(**{key: int(val)})
         self._ayar_deger_yaz(tip, val, deger_lbl)
+        self._slider_stil_guncelle(slider, val, deger_lbl)
+
+    def _slider_stil_guncelle(self, sl, val, deger_lbl=None):
+        is_default = (val == getattr(sl, "oneri_val", None))
+        if is_default:
+            sl.setStyleSheet(f"""
+                QSlider#ayarsl {{ height: 22px; }}
+                QSlider#ayarsl::groove:horizontal {{ height: 5px; border-radius: 2px; background: #dbe3ec; margin: 0 2px; }}
+                QSlider#ayarsl::sub-page:horizontal {{ height: 5px; border-radius: 2px; background: {BLUE}; margin: 0 2px; }}
+                QSlider#ayarsl::add-page:horizontal {{ height: 5px; border-radius: 2px; background: #dbe3ec; margin: 0 2px; }}
+                QSlider#ayarsl::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px;
+                    background: {GRN}; border: 2px solid {GRN}; }}
+                QSlider#ayarsl::handle:horizontal:hover {{ background: #189a5c; border: 2px solid #189a5c; }}
+                QSlider#ayarsl::handle:horizontal:pressed {{ background: #0f6c3f; border: 2px solid #0f6c3f; }}
+            """)
+            if deger_lbl:
+                deger_lbl.setStyleSheet(f"color:{GRN}; background:rgba(21,135,80,0.14); border-radius:9px; padding:2px 10px; font-family:{FM}; border: 1px solid rgba(21,135,80,0.35); font-size:12px; font-weight:700;")
+        else:
+            sl.setStyleSheet(f"""
+                QSlider#ayarsl {{ height: 22px; }}
+                QSlider#ayarsl::groove:horizontal {{ height: 5px; border-radius: 2px; background: #dbe3ec; margin: 0 2px; }}
+                QSlider#ayarsl::sub-page:horizontal {{ height: 5px; border-radius: 2px; background: {BLUE}; margin: 0 2px; }}
+                QSlider#ayarsl::add-page:horizontal {{ height: 5px; border-radius: 2px; background: #dbe3ec; margin: 0 2px; }}
+                QSlider#ayarsl::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px;
+                    background: #ffffff; border: 2px solid {BLUE}; }}
+                QSlider#ayarsl::handle:horizontal:hover {{ border: 2px solid #0e4a90; background: #f3f8ff; }}
+                QSlider#ayarsl::handle:horizontal:pressed {{ background: #dbe9fb; }}
+            """)
+            if deger_lbl:
+                deger_lbl.setStyleSheet(f"color:{BLUE}; background:rgba(18,88,168,0.10); border-radius:9px; padding:2px 10px; font-family:{FM}; border: 1px solid rgba(18,88,168,0.18); font-size:12px; font-weight:700;")
 
     def _ayar_toggle(self):
         gorunur = not self.ayar_panel.isVisible()
@@ -914,8 +919,8 @@ class MainWindow(QMainWindow):
         kart = QFrame()
         kart.setObjectName("panelk")
         kv = QVBoxLayout(kart)
-        kv.setContentsMargins(19, 15, 19, 15)
-        kv.setSpacing(10)
+        kv.setContentsMargins(19, 13, 19, 13)
+        kv.setSpacing(8)
         t = QLabel("AKTİF HEDEF")
         t.setObjectName("ph")
         kv.addWidget(t)
@@ -935,12 +940,9 @@ class MainWindow(QMainWindow):
         hrow.addWidget(self.h_conf)
         kv.addLayout(hrow)
 
-        # NOT: mesafe/menzil gostergesi GECICI OLARAK KALDIRILDI (18.07.2026) — gercek
-        # olcum/kalibrasyon eklenene kadar yaniltici sayi gosterilmeyecek. bkz. algi.py notu.
-
         self.fire_btn = QPushButton("A T E Ş")
         self.fire_btn.setObjectName("fire")
-        self.fire_btn.setFixedHeight(48)
+        self.fire_btn.setFixedHeight(44)
         self.fire_btn.setCheckable(True)
         self.fire_btn.clicked.connect(self._ates_bas)
         kv.addWidget(self.fire_btn)
@@ -955,8 +957,8 @@ class MainWindow(QMainWindow):
         tk = QFrame()
         tk.setObjectName("panelk")
         tv = QVBoxLayout(tk)
-        tv.setContentsMargins(19, 15, 19, 15)
-        tv.setSpacing(10)
+        tv.setContentsMargins(19, 13, 19, 13)
+        tv.setSpacing(8)
         tt = QLabel("TESPİT EDİLEN HEDEFLER")
         tt.setObjectName("ph")
         tv.addWidget(tt)
@@ -975,56 +977,137 @@ class MainWindow(QMainWindow):
         tv.addWidget(self.tablo)
         v.addWidget(tk, 1)
 
-        # --- hedef durumu + yasak alanlar ---
-        ak = QFrame()
-        ak.setObjectName("panelk")
-        av = QVBoxLayout(ak)
-        av.setContentsMargins(19, 15, 19, 15)
-        av.setSpacing(10)
+        return kol
+
+    def _asama1_panel(self):
+        """Asama 1: zarf sirasina gore dizilen 4 hedef karti."""
+        w = QWidget()
+        v = QVBoxLayout(w)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(3)
+        ipucu = QLabel("Zarftan gelen imha sırasına göre kartları sürükleyip dizin:")
+        ipucu.setObjectName("ipucu")
+        v.addWidget(ipucu)
+        self.kartlar = SiraliKartlar(self.KART_TANIM, os.path.join(HERE, "Grafik"))
+        ksar = QHBoxLayout()
+        ksar.setContentsMargins(0, 0, 0, 0)
+        ksar.addWidget(self.kartlar)
+        ksar.addStretch(1)
+        v.addLayout(ksar)
+        return w
+
+    # ================= ALT PANEL (Sistem durumu + Hedef durumu + Yasak alanlar) =================
+    def _alt_panel(self):
+        alt = QWidget()
+        alt.setFixedHeight(126)
+        h = QHBoxLayout(alt)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(12)
+
+        # --- sistem durumu ---
+        sysk = QFrame()
+        sysk.setObjectName("panelk")
+        sv = QVBoxLayout(sysk)
+        sv.setContentsMargins(15, 10, 15, 10)
+        sv.setSpacing(6)
+
+        # baslik + asama pill
+        brow = QHBoxLayout()
+        ph = QLabel("SİSTEM DURUMU")
+        ph.setObjectName("ph")
+        brow.addWidget(ph)
+        brow.addStretch(1)
+        self.asama_pill = QLabel(self.asama or "—")
+        self.asama_pill.setObjectName("asamap")
+        brow.addWidget(self.asama_pill)
+        sv.addLayout(brow)
+
+        ic = QHBoxLayout()
+        ic.setSpacing(12)
+
+        self.stack = QStackedWidget()
+        yok = QLabel("Aşama seçiniz")
+        yok.setObjectName("bosmsg")
+        yok.setAlignment(Qt.AlignCenter)
+        self.stack.addWidget(yok)                     # 0: secim yok
+        self.stack.addWidget(self._asama1_panel())    # 1: Asama 1 (kartlar)
+        self.stack.addWidget(self._tur_panel(4))      # 2: Asama 2 (tur/4)
+        self.stack.addWidget(self._tur_panel(8))      # 3: Asama 3 (tur/8)
+        ic.addWidget(self.stack, 1)
+
+        # dikey ayirici
+        div = QFrame()
+        div.setObjectName("vdiv")
+        div.setFixedWidth(1)
+        ic.addWidget(div)
+
+        self.kural = QLabel()
+        self.kural.setObjectName("kural")
+        self.kural.setWordWrap(True)
+        ic.addWidget(self.kural, 1)
+
+        sv.addLayout(ic)
+        h.addWidget(sysk, 6)
+
+        # --- hedef durumu ---
+        eng_card = QFrame()
+        eng_card.setObjectName("panelk")
+        ev = QVBoxLayout(eng_card)
+        ev.setContentsMargins(15, 10, 15, 10)
+        ev.setSpacing(6)
         at = QLabel("HEDEF DURUMU")
         at.setObjectName("ph")
-        av.addWidget(at)
-        arow = QHBoxLayout()
-        arow.setSpacing(12)
+        ev.addWidget(at)
 
         self.eng = QFrame()
         self.eng.setObjectName("engok")
         eh = QHBoxLayout(self.eng)
-        eh.setContentsMargins(13, 10, 13, 10)
-        eh.setSpacing(9)
+        eh.setContentsMargins(11, 7, 11, 7)
+        eh.setSpacing(8)
         self.eng_dot = QLabel()
         self.eng_dot.setFixedSize(8, 8)
         self.eng_dot.setStyleSheet(f"background:{GRN};border-radius:4px;")
-        ev = QVBoxLayout()
-        ev.setSpacing(1)
+        ev_sub = QVBoxLayout()
+        ev_sub.setSpacing(1)
         self.eng_name = QLabel("Hedef bekleniyor")
         self.eng_name.setObjectName("engname")
         self.eng_sub = QLabel("—")
         self.eng_sub.setObjectName("engsub")
-        ev.addWidget(self.eng_name)
-        ev.addWidget(self.eng_sub)
+        ev_sub.addWidget(self.eng_name)
+        ev_sub.addWidget(self.eng_sub)
         eh.addWidget(self.eng_dot)
-        eh.addLayout(ev)
-        arow.addWidget(self.eng, 1)
+        eh.addLayout(ev_sub)
+        ev.addWidget(self.eng)
+        h.addWidget(eng_card, 2)
 
-        for baslik, alt in (("Atışa Yasak Alan", "Tanımsız — Kapalı"),
-                            ("Harekete Yasak Alan", "Tanımsız — Kapalı")):
+        # --- yasak alanlar ---
+        for baslik, alt_txt in (("ATIŞA YASAK ALAN", "Tanımsız — Kapalı"),
+                                ("HAREKETE YASAK ALAN", "Tanımsız — Kapalı")):
+            tgl_card = QFrame()
+            tgl_card.setObjectName("panelk")
+            tv = QVBoxLayout(tgl_card)
+            tv.setContentsMargins(15, 10, 15, 10)
+            tv.setSpacing(6)
+            ph2 = QLabel(baslik)
+            ph2.setObjectName("ph")
+            tv.addWidget(ph2)
+
             tgl = QFrame()
             tgl.setObjectName("angtgl")
             th2 = QHBoxLayout(tgl)
-            th2.setContentsMargins(20, 14, 20, 14)
-            th2.setSpacing(20)
-            l = QLabel(f'{baslik}<br><small style="color:{TXT3}">{alt}</small>')
+            th2.setContentsMargins(12, 9, 12, 9)
+            th2.setSpacing(10)
+            l = QLabel(f'<small style="color:{TXT3}">{alt_txt}</small>')
             l.setObjectName("tgll")
             sw = QLabel()
             sw.setFixedSize(32, 16)
             sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
             th2.addWidget(l, 1)
             th2.addWidget(sw)
-            arow.addWidget(tgl, 1)
-        av.addLayout(arow)
-        v.addWidget(ak)
-        return kol
+            tv.addWidget(tgl)
+            h.addWidget(tgl_card, 2)
+
+        return alt
 
     # ================= STATUS BAR =================
     def _sbar(self):
@@ -1400,15 +1483,6 @@ class MainWindow(QMainWindow):
         #ayarinfo {{ background:rgba(18,88,168,0.13); color:{BLUE}; border:none; border-radius:8px;
             font-size:11px; font-weight:800; font-style:italic; }}
         #ayarinfo:hover {{ background:{BLUE}; color:#fff; }}
-        #ayaroneri {{ font-size:10.5px; color:{TXT3}; background:transparent; }}
-        #ayarsl {{ height:22px; }}
-        #ayarsl::groove:horizontal {{ height:5px; border-radius:2px; background:#dbe3ec; margin:0 2px; }}
-        #ayarsl::sub-page:horizontal {{ height:5px; border-radius:2px; background:{BLUE}; margin:0 2px; }}
-        #ayarsl::add-page:horizontal {{ height:5px; border-radius:2px; background:#dbe3ec; margin:0 2px; }}
-        #ayarsl::handle:horizontal {{ width:16px; height:16px; margin:-6px 0; border-radius:8px;
-            background:#ffffff; border:2px solid {BLUE}; }}
-        #ayarsl::handle:horizontal:hover {{ border:2px solid #0e4a90; background:#f3f8ff; }}
-        #ayarsl::handle:horizontal:pressed {{ background:#dbe9fb; }}
         #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:9px;
             padding:8px 18px; font-size:12px; font-weight:600; min-height:16px; }}
         #ayaralt:hover {{ background:{CARD}; border:1px solid {BD2}; }}
