@@ -1188,95 +1188,129 @@ class MainWindow(QMainWindow):
         self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
         mv.addWidget(self.bolge_status)
 
-        # 3. YON TUS TAKIMI (Tactical Hava Savunma D-Pad Grid)
+        # 3. YON TUS TAKIMI (Kullanicinin HTML/CSS Kodunun Birebir Native Karsiligi)
         dpad = QWidget()
         gl = QGridLayout(dpad)
         gl.setContentsMargins(0, 4, 0, 4)
-        gl.setSpacing(6)
+        gl.setSpacing(8)
 
         # Stiller
-        self._dpad_normal_style = (
-            f"QPushButton {{ "
-            f"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e2a3a, stop:1 #131c28); "
-            f"  border: 1.5px solid {BD2}; "
-            f"  border-radius: 9px; "
-            f"  color: {TXT}; "
-            f"  font-size: 14px; "
-            f"  font-weight: 700; "
-            f"  min-width: 62px; "
-            f"  min-height: 48px; "
-            f"}} "
-            f"QPushButton:hover {{ "
-            f"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #283a52, stop:1 #1a2a3e); "
-            f"  border-color: {BLUE}; "
-            f"  color: #60a5fa; "
-            f"}}"
+        self._key_normal_style = (
+            "QPushButton { "
+            "  background: #f7f9fb; "
+            "  border: 1px solid #dfe4ea; "
+            "  border-radius: 10px; "
+            "  color: #2b3540; "
+            "  min-width: 80px; max-width: 80px; "
+            "  min-height: 60px; max-height: 60px; "
+            "} "
+            "QPushButton:hover { "
+            "  background: #eef3f8; "
+            "  border-color: #c3d3e2; "
+            "}"
         )
 
-        self._dpad_active_style = (
-            f"QPushButton {{ "
-            f"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {BLUE}, stop:1 #1257ab); "
-            f"  border: 2px solid #93c5fd; "
-            f"  border-radius: 9px; "
-            f"  color: #ffffff; "
-            f"  font-size: 15px; "
-            f"  font-weight: 800; "
-            f"  min-width: 62px; "
-            f"  min-height: 48px; "
-            f"}}"
+        self._key_active_style = (
+            "QPushButton { "
+            "  background: #dbe6f1; "
+            "  border: 1.5px solid #1e4b7a; "
+            "  border-radius: 10px; "
+            "  color: #1e4b7a; "
+            "  min-width: 80px; max-width: 80px; "
+            "  min-height: 60px; max-height: 60px; "
+            "}"
         )
 
-        self._dpad_home_normal_style = (
-            f"QPushButton {{ "
-            f"  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(30,120,220,0.15), stop:1 rgba(15,60,115,0.22)); "
-            f"  border: 1.5px solid {BLUE}; "
-            f"  border-radius: 9px; "
-            f"  color: {BLUE}; "
-            f"  font-size: 11px; "
-            f"  font-weight: 700; "
-            f"  min-width: 62px; "
-            f"  min-height: 48px; "
-            f"}} "
-            f"QPushButton:hover {{ "
-            f"  background: {BLUE}; "
-            f"  color: #ffffff; "
-            f"}}"
+        self._key_center_normal_style = (
+            "QPushButton { "
+            "  background: #1e4b7a; "
+            "  border: 1px solid #1e4b7a; "
+            "  border-radius: 10px; "
+            "  color: #ffffff; "
+            "  min-width: 80px; max-width: 80px; "
+            "  min-height: 60px; max-height: 60px; "
+            "} "
+            "QPushButton:hover { "
+            "  background: #265a8f; "
+            "  border-color: #265a8f; "
+            "}"
         )
 
-        self.btn_up = QPushButton("W\n▲")
-        self.btn_up.setStyleSheet(self._dpad_normal_style)
+        self._key_center_active_style = (
+            "QPushButton { "
+            "  background: #17395d; "
+            "  border: 1.5px solid #17395d; "
+            "  border-radius: 10px; "
+            "  color: #ffffff; "
+            "  min-width: 80px; max-width: 80px; "
+            "  min-height: 60px; max-height: 60px; "
+            "}"
+        )
+
+        self._fire_normal_style = (
+            "QPushButton { "
+            "  background: #ffffff; "
+            "  border: 1.5px solid #b8342a; "
+            "  border-radius: 10px; "
+            "  color: #b8342a; "
+            "  font-size: 15px; "
+            "  font-weight: 700; "
+            "  letter-spacing: 4px; "
+            "  padding: 10px 0; "
+            "} "
+            "QPushButton:hover { "
+            "  background: #b8342a; "
+            "  color: #ffffff; "
+            "}"
+        )
+
+        self._fire_active_style = (
+            "QPushButton { "
+            "  background: #96271f; "
+            "  border: 1.5px solid #96271f; "
+            "  border-radius: 10px; "
+            "  color: #ffffff; "
+            "  font-size: 15px; "
+            "  font-weight: 700; "
+            "  letter-spacing: 4px; "
+            "  padding: 10px 0; "
+            "}"
+        )
+
+        self.btn_up = QPushButton('<span style="font-size:15px; color:#2b3540;">▲</span><br/><span style="font-size:9.5px; color:#8a94a2;">W</span>')
+        self.btn_up.setStyleSheet(self._key_normal_style)
         self.btn_up.setToolTip("[W] veya [▲] — YUKARI (TİLT +)")
         self.btn_up.setCursor(Qt.PointingHandCursor)
         self.btn_up.pressed.connect(lambda: self._dpad_press("up"))
         self.btn_up.released.connect(lambda: self._dpad_release("up"))
         gl.addWidget(self.btn_up, 0, 1)
 
-        self.btn_left = QPushButton("A\n◄")
-        self.btn_left.setStyleSheet(self._dpad_normal_style)
+        self.btn_left = QPushButton('<span style="font-size:15px; color:#2b3540;">◀</span><br/><span style="font-size:9.5px; color:#8a94a2;">A</span>')
+        self.btn_left.setStyleSheet(self._key_normal_style)
         self.btn_left.setToolTip("[A] veya [◄] — SOL (PAN -)")
         self.btn_left.setCursor(Qt.PointingHandCursor)
         self.btn_left.pressed.connect(lambda: self._dpad_press("left"))
         self.btn_left.released.connect(lambda: self._dpad_release("left"))
         gl.addWidget(self.btn_left, 1, 0)
 
-        self.btn_home = QPushButton("R / ⌖\nMERKEZ")
-        self.btn_home.setStyleSheet(self._dpad_home_normal_style)
-        self.btn_home.setToolTip("[R] veya [Space] — SIFIRLA / MERKEZ (0°, 0°)")
-        self.btn_home.setCursor(Qt.PointingHandCursor)
-        self.btn_home.pressed.connect(lambda: self._dpad_press("home"))
-        self.btn_home.released.connect(lambda: self._dpad_release("home"))
-        gl.addWidget(self.btn_home, 1, 1)
+        self.btn_center = QPushButton('<span style="font-size:14px; color:#ffffff;">✛</span><br/><span style="font-size:9px; color:rgba(255,255,255,0.85);">MERKEZ</span>')
+        self.btn_center.setStyleSheet(self._key_center_normal_style)
+        self.btn_center.setToolTip("[R] veya [Space] — SIFIRLA / MERKEZ (0°, 0°)")
+        self.btn_center.setCursor(Qt.PointingHandCursor)
+        self.btn_center.pressed.connect(lambda: self._dpad_press("home"))
+        self.btn_center.released.connect(lambda: self._dpad_release("home"))
+        gl.addWidget(self.btn_center, 1, 1)
 
-        self.btn_right = QPushButton("D\n►")
-        self.btn_right.setStyleSheet(self._dpad_normal_style)
+        self.btn_right = QPushButton('<span style="font-size:15px; color:#2b3540;">▶</span><br/><span style="font-size:9.5px; color:#8a94a2;">D</span>')
+        self.btn_right.setStyleSheet(self._key_normal_style)
         self.btn_right.setToolTip("[D] veya [►] — SAĞ (PAN +)")
         self.btn_right.setCursor(Qt.PointingHandCursor)
         self.btn_right.pressed.connect(lambda: self._dpad_press("right"))
         self.btn_right.released.connect(lambda: self._dpad_release("right"))
         gl.addWidget(self.btn_right, 1, 2)
 
-        self.btn_down = QPushButton("S\n▼")
-        self.btn_down.setStyleSheet(self._dpad_normal_style)
+        self.btn_down = QPushButton('<span style="font-size:15px; color:#2b3540;">▼</span><br/><span style="font-size:9.5px; color:#8a94a2;">S</span>')
+        self.btn_down.setStyleSheet(self._key_normal_style)
         self.btn_down.setToolTip("[S] veya [▼] — AŞAĞI (TİLT -)")
         self.btn_down.setCursor(Qt.PointingHandCursor)
         self.btn_down.pressed.connect(lambda: self._dpad_press("down"))
@@ -1285,56 +1319,73 @@ class MainWindow(QMainWindow):
 
         mv.addWidget(dpad, 0, Qt.AlignCenter)
 
-        # 4. Adim Hassasiyet Butonlari
+        # 4. Adim Hassasiyet Butonlari (step-row)
         step_row = QHBoxLayout()
         step_row.setSpacing(6)
-        step_lbl = QLabel("Hassasiyet:")
-        step_lbl.setObjectName("engsub")
-        step_row.addWidget(step_lbl)
 
         self.step_btns = {}
         for val, label in [(1.0, "1° Hassas"), (5.0, "5° Normal"), (10.0, "10° Hızlı")]:
             sb = QPushButton(label)
             sb.setCheckable(True)
             sb.setChecked(val == self.aci_adim)
-            sb.setFixedHeight(22)
+            sb.setFixedHeight(32)
             sb.setCursor(Qt.PointingHandCursor)
             sb.clicked.connect(lambda _, v=val: self._aci_adim_sec(v))
-            step_row.addWidget(sb)
+            step_row.addWidget(sb, 1)
             self.step_btns[val] = sb
             self._step_btn_stil_guncelle(sb, val == self.aci_adim)
 
         mv.addLayout(step_row)
+
+        # 5. ATEŞ Butonu (.fire)
+        self.btn_fire = QPushButton("ATEŞ")
+        self.btn_fire.setStyleSheet(self._fire_normal_style)
+        self.btn_fire.setCursor(Qt.PointingHandCursor)
+        self.btn_fire.pressed.connect(lambda: self._dpad_press("fire"))
+        self.btn_fire.released.connect(lambda: self._dpad_release("fire"))
+        mv.addWidget(self.btn_fire)
+
         return mk
 
     def _dpad_press(self, direction):
         if direction == "up":
-            self.btn_up.setStyleSheet(self._dpad_active_style)
+            self.btn_up.setStyleSheet(self._key_active_style)
             self._aci_hareket(0.0, self.aci_adim)
         elif direction == "down":
-            self.btn_down.setStyleSheet(self._dpad_active_style)
+            self.btn_down.setStyleSheet(self._key_active_style)
             self._aci_hareket(0.0, -self.aci_adim)
         elif direction == "left":
-            self.btn_left.setStyleSheet(self._dpad_active_style)
+            self.btn_left.setStyleSheet(self._key_active_style)
             self._aci_hareket(-self.aci_adim, 0.0)
         elif direction == "right":
-            self.btn_right.setStyleSheet(self._dpad_active_style)
+            self.btn_right.setStyleSheet(self._key_active_style)
             self._aci_hareket(self.aci_adim, 0.0)
-        elif direction == "home":
-            self.btn_home.setStyleSheet(self._dpad_active_style)
+        elif direction in ("home", "center"):
+            self.btn_center.setStyleSheet(self._key_center_active_style)
             self._aci_reset()
+        elif direction == "fire":
+            self.btn_fire.setStyleSheet(self._fire_active_style)
+            self._fire_bas()
 
     def _dpad_release(self, direction):
         if direction == "up":
-            self.btn_up.setStyleSheet(self._dpad_normal_style)
+            self.btn_up.setStyleSheet(self._key_normal_style)
         elif direction == "down":
-            self.btn_down.setStyleSheet(self._dpad_normal_style)
+            self.btn_down.setStyleSheet(self._key_normal_style)
         elif direction == "left":
-            self.btn_left.setStyleSheet(self._dpad_normal_style)
+            self.btn_left.setStyleSheet(self._key_normal_style)
         elif direction == "right":
-            self.btn_right.setStyleSheet(self._dpad_normal_style)
-        elif direction == "home":
-            self.btn_home.setStyleSheet(self._dpad_home_normal_style)
+            self.btn_right.setStyleSheet(self._key_normal_style)
+        elif direction in ("home", "center"):
+            self.btn_center.setStyleSheet(self._key_center_normal_style)
+        elif direction == "fire":
+            self.btn_fire.setStyleSheet(self._fire_normal_style)
+
+    def _fire_bas(self):
+        self.bolge_status.setText("🔥 ATEŞ EDİLDİ — LAZER/SİSTEM AKTİF")
+        self.bolge_status.setStyleSheet("color:#b8342a; font-size:11px; font-weight:700; padding:2px 0;")
+        if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
+            self.kontrol.ates()
 
     def _ap_tilt_degisti(self, val):
         self.max_tilt_limit = float(val)
@@ -1405,12 +1456,30 @@ class MainWindow(QMainWindow):
 
     def _step_btn_stil_guncelle(self, btn, secili):
         if secili:
-            btn.setStyleSheet(f"QPushButton {{ background:{BLUE}; color:#fff; border:none; "
-                              f"border-radius:4px; font-size:10px; font-weight:700; padding:0 8px; }}")
+            btn.setStyleSheet(
+                "QPushButton { "
+                "  background: #eaf1f8; "
+                "  border: 1.5px solid #1e4b7a; "
+                "  border-radius: 8px; "
+                "  color: #1e4b7a; "
+                "  font-size: 12px; "
+                "  font-weight: 700; "
+                "}"
+            )
         else:
-            btn.setStyleSheet(f"QPushButton {{ background:{CARD}; color:{TXT2}; border:1px solid {BD}; "
-                              f"border-radius:4px; font-size:10px; font-weight:600; padding:0 8px; }}"
-                              f"QPushButton:hover {{ border-color:{BD2}; }}")
+            btn.setStyleSheet(
+                "QPushButton { "
+                "  background: #ffffff; "
+                "  border: 1px solid #dfe4ea; "
+                "  border-radius: 8px; "
+                "  color: #5f6b78; "
+                "  font-size: 12px; "
+                "} "
+                "QPushButton:hover { "
+                "  border-color: #c3d3e2; "
+                "  color: #2b3540; "
+                "}"
+            )
 
     def _aci_adim_sec(self, val):
         self.aci_adim = val
@@ -1666,8 +1735,11 @@ class MainWindow(QMainWindow):
                 elif k in (Qt.Key_D, Qt.Key_Right):
                     self._dpad_press("right")
                     return
-                elif k in (Qt.Key_R, Qt.Key_Space):
-                    self._dpad_press("home")
+                elif k in (Qt.Key_R, Qt.Key_C):
+                    self._dpad_press("center")
+                    return
+                elif k in (Qt.Key_F, Qt.Key_Space, Qt.Key_Return):
+                    self._dpad_press("fire")
                     return
         super().keyPressEvent(event)
 
@@ -1687,8 +1759,11 @@ class MainWindow(QMainWindow):
                 elif k in (Qt.Key_D, Qt.Key_Right):
                     self._dpad_release("right")
                     return
-                elif k in (Qt.Key_R, Qt.Key_Space):
-                    self._dpad_release("home")
+                elif k in (Qt.Key_R, Qt.Key_C):
+                    self._dpad_release("center")
+                    return
+                elif k in (Qt.Key_F, Qt.Key_Space, Qt.Key_Return):
+                    self._dpad_release("fire")
                     return
         super().keyReleaseEvent(event)
 
