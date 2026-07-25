@@ -19,14 +19,14 @@ import cv2
 # hazir modulu kullanir (agirlik yukleme + tensor islemleri thread-guvenli).
 from ultralytics import YOLO
 
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent
-from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect
+from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter, QPolygon
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QStyle, QStyleOptionSlider,
+    QSlider, QStyle, QStyleOptionSlider, QGraphicsDropShadowEffect,
 )
 
 import algi
@@ -118,12 +118,13 @@ class OneriSlider(QSlider):
         groove = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
         oran = (self.oneri_val - self.minimum()) / rng
         x = groove.x() + int(round(groove.width() * oran))
-        y = groove.center().y()
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(GRN))
-        p.drawEllipse(x - 3, y - 8, 6, 6)   # groove'un biraz ustunde kucuk yesil "oneri" noktasi
+        p.setBrush(QColor(21, 135, 80, 210))   # GRN, hafif saydam
+        # groove'un hemen ustunde asagi bakan kucuk ucgen = "onerilen" isareti
+        yt = groove.top() - 2
+        p.drawPolygon(QPolygon([QPoint(x, yt), QPoint(x - 4, yt - 6), QPoint(x + 4, yt - 6)]))
         p.end()
 
 
@@ -747,15 +748,32 @@ class MainWindow(QMainWindow):
 
         self.ayar_panel = QFrame(parent)
         self.ayar_panel.setObjectName("ayarpanel")
-        self.ayar_panel.setFixedWidth(320)
-        self.ayar_panel.move(10, 52)
-        pv = QVBoxLayout(self.ayar_panel)
-        pv.setContentsMargins(16, 13, 16, 13)
-        pv.setSpacing(11)
+        self.ayar_panel.setFixedWidth(336)
+        self.ayar_panel.move(12, 54)
+        # yumusak golge -> modern "yuzen kart" hissi
+        golge = QGraphicsDropShadowEffect(self.ayar_panel)
+        golge.setBlurRadius(36); golge.setXOffset(0); golge.setYOffset(9)
+        golge.setColor(QColor(15, 22, 32, 95))
+        self.ayar_panel.setGraphicsEffect(golge)
 
-        bas = QLabel("⚙  GÖRÜNTÜ İŞLEME AYARLARI")
+        pv = QVBoxLayout(self.ayar_panel)
+        pv.setContentsMargins(18, 15, 18, 16)
+        pv.setSpacing(16)
+
+        # --- baslik satiri: baslik + kapat (x) ---
+        brow = QHBoxLayout()
+        brow.setSpacing(8)
+        bas = QLabel("Görüntü İşleme")
         bas.setObjectName("ayarbaslik")
-        pv.addWidget(bas)
+        brow.addWidget(bas)
+        brow.addStretch(1)
+        self.ayar_kapat_btn = QPushButton("✕")
+        self.ayar_kapat_btn.setObjectName("ayarkapat")
+        self.ayar_kapat_btn.setFixedSize(24, 24)
+        self.ayar_kapat_btn.setCursor(Qt.PointingHandCursor)
+        self.ayar_kapat_btn.clicked.connect(lambda: self.ayar_panel.setVisible(False))
+        brow.addWidget(self.ayar_kapat_btn)
+        pv.addLayout(brow)
 
         for tanim in AYAR_TANIM:
             self._ayar_satiri(pv, tanim)
@@ -782,14 +800,17 @@ class MainWindow(QMainWindow):
 
     def _ayar_satiri(self, layout, tanim):
         key, baslik, tip, mn, mx, oneri, aciklama = tanim
+        kutu = QVBoxLayout()          # her ayar kendi grubunda (ic bosluk dar, gruplar arasi genis)
+        kutu.setSpacing(7)
         ust = QHBoxLayout()
-        ust.setSpacing(6)
+        ust.setSpacing(7)
         lab = QLabel(baslik)
         lab.setObjectName("ayarlbl")
-        info = QLabel("!")
+        info = QLabel("i")
         info.setObjectName("ayarinfo")
         info.setFixedSize(16, 16)
         info.setAlignment(Qt.AlignCenter)
+        info.setCursor(Qt.WhatsThisCursor)
         # Uzerine gelince aciklama (tooltip) — ekstra popup yok. Satirlar <br> ile sarilir.
         ipucu = f"<div style='max-width:300px; white-space:normal'>{aciklama.replace(chr(10), '<br>')}</div>"
         info.setToolTip(ipucu)
@@ -800,7 +821,7 @@ class MainWindow(QMainWindow):
         ust.addWidget(info)
         ust.addStretch(1)
         ust.addWidget(deger)
-        layout.addLayout(ust)
+        kutu.addLayout(ust)
 
         if tip == "secim":
             sl = OneriSlider(COZUNURLUK_SECENEK.index(oneri))
@@ -814,7 +835,8 @@ class MainWindow(QMainWindow):
             sl.setValue(int(round(algi.AYAR[key] * 100)) if tip == "yuzde" else int(algi.AYAR[key]))
         sl.setObjectName("ayarsl")
         sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger: self._ayar_degisti(k, t, val, d))
-        layout.addWidget(sl)
+        kutu.addWidget(sl)
+        layout.addLayout(kutu)
         self.ayar_sliderlar[key] = (sl, tip)
         self._ayar_deger_yaz(tip, sl.value(), deger)
 
@@ -842,19 +864,29 @@ class MainWindow(QMainWindow):
             self.ayar_panel.raise_()
 
     def eventFilter(self, obj, event):
-        """Ayar paneli acikken panelin/butonun DISINA tiklaninca paneli kapat."""
+        """Ayar paneli acikken panelin/butonun DISINA tiklaninca paneli kapat.
+
+        DIKKAT: QGraphicsView icinde gercek olay hedefi cogu zaman viewport'tur (parent
+        zinciri panele ulasmaz). Bu yuzden parent-zinciri DEGIL, GEOMETRI ile bakariz:
+        tiklama noktasini sahne(content) koordinatina cevirip panelin/butonun dikdortgeni
+        icinde mi diye kontrol ederiz.
+        """
         if (event.type() == QEvent.MouseButtonPress
                 and getattr(self, "ayar_panel", None) is not None
                 and self.ayar_panel.isVisible()):
-            w = obj
-            icerde = False
-            while w is not None:
-                if w is self.ayar_panel or w is self.ayar_btn:
-                    icerde = True
-                    break
-                w = w.parent()
-            if not icerde:
-                self.ayar_panel.setVisible(False)
+            try:
+                gp = event.globalPosition().toPoint()
+                vp = self.view.viewport().mapFromGlobal(gp)
+                sahne = self.view.mapToScene(vp).toPoint()   # sahne = content koordinati
+
+                def _icinde(w):
+                    tl = w.mapTo(self.content, QPoint(0, 0))
+                    return QRect(tl, w.size()).contains(sahne)
+
+                if not (_icinde(self.ayar_panel) or _icinde(self.ayar_btn)):
+                    self.ayar_panel.setVisible(False)
+            except Exception:
+                pass
         return super().eventFilter(obj, event)
 
     def _ayar_sifirla(self):
@@ -1376,29 +1408,33 @@ class MainWindow(QMainWindow):
         #video {{ background:#c8d0d8; border-radius:8px; color:{TXT3}; font-size:15px; }}
         #livet {{ font-size:11px; font-weight:700; color:{RED}; background:transparent; }}
         /* --- Ayar paneli (kamera uzeri overlay) --- */
-        #ayarbtn {{ background:rgba(15,22,32,0.72); color:#fff; border:1px solid rgba(255,255,255,0.25);
-            border-radius:8px; font-size:17px; }}
+        #ayarbtn {{ background:rgba(15,22,32,0.70); color:#fff; border:1px solid rgba(255,255,255,0.22);
+            border-radius:10px; font-size:17px; }}
         #ayarbtn:hover {{ background:{BLUE}; border:1px solid {BLUE}; }}
-        #ayarpanel {{ background:rgba(255,255,255,0.97); border:1px solid {BD2}; border-radius:10px; }}
-        #ayarbaslik {{ font-size:11px; font-weight:800; letter-spacing:1px; color:{BLUE};
-            background:transparent; padding-bottom:2px; }}
-        #ayarlbl {{ font-size:12.5px; font-weight:600; color:{TXT}; background:transparent; }}
-        #ayardeg {{ font-size:12.5px; font-weight:700; color:{BLUE}; background:transparent;
-            font-family:{FM}; }}
-        #ayarinfo {{ background:{AMB}; color:#fff; border:none; border-radius:8px;
-            font-size:11px; font-weight:800; }}
-        #ayarinfo:hover {{ background:{RED}; }}
-        #ayarsl {{ height:20px; }}
-        #ayarsl::groove:horizontal {{ height:5px; border-radius:3px; background:{BD}; }}
-        #ayarsl::sub-page:horizontal {{ height:5px; border-radius:3px; background:{BLUE}; }}
-        #ayarsl::handle:horizontal {{ width:15px; height:15px; margin:-6px 0; border-radius:8px;
-            background:#fff; border:2px solid {BLUE}; }}
-        #ayarsl::handle:horizontal:hover {{ border:2px solid {RED}; }}
-        #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:6px;
-            padding:7px 16px; font-size:12px; font-weight:600; min-height:16px; }}
-        #ayaralt:hover {{ background:{CARD}; }}
-        #ayarkaydet {{ background:{BLUE}; color:#fff; border:none; border-radius:6px;
-            padding:7px 20px; font-size:12px; font-weight:700; min-height:16px; }}
+        #ayarpanel {{ background:#ffffff; border:1px solid rgba(15,22,32,0.06); border-radius:16px; }}
+        #ayarbaslik {{ font-size:15px; font-weight:800; color:{TXT}; background:transparent; }}
+        #ayarkapat {{ background:{CARD}; color:{TXT3}; border:none; border-radius:12px;
+            font-size:12px; font-weight:700; }}
+        #ayarkapat:hover {{ background:rgba(191,32,32,0.12); color:{RED}; }}
+        #ayarlbl {{ font-size:13px; font-weight:600; color:{TXT}; background:transparent; }}
+        #ayardeg {{ font-size:12px; font-weight:700; color:{BLUE}; background:rgba(18,88,168,0.10);
+            border-radius:9px; padding:2px 10px; font-family:{FM}; }}
+        #ayarinfo {{ background:rgba(18,88,168,0.13); color:{BLUE}; border:none; border-radius:8px;
+            font-size:11px; font-weight:800; font-style:italic; }}
+        #ayarinfo:hover {{ background:{BLUE}; color:#fff; }}
+        #ayarsl {{ height:26px; }}
+        #ayarsl::groove:horizontal {{ height:6px; border-radius:3px; background:{BD}; }}
+        #ayarsl::sub-page:horizontal {{ height:6px; border-radius:3px; background:{BLUE}; }}
+        #ayarsl::add-page:horizontal {{ height:6px; border-radius:3px; background:{BD}; }}
+        #ayarsl::handle:horizontal {{ width:20px; height:20px; margin:-7px 0; border-radius:10px;
+            background:#fff; border:3px solid {BLUE}; }}
+        #ayarsl::handle:horizontal:hover {{ border:3px solid #0e4a90; }}
+        #ayarsl::handle:horizontal:pressed {{ background:{BLUE}; }}
+        #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:9px;
+            padding:8px 18px; font-size:12px; font-weight:600; min-height:16px; }}
+        #ayaralt:hover {{ background:{CARD}; border:1px solid {BD2}; }}
+        #ayarkaydet {{ background:{BLUE}; color:#fff; border:none; border-radius:9px;
+            padding:8px 22px; font-size:12px; font-weight:700; min-height:16px; }}
         #ayarkaydet:hover {{ background:#0e4a90; }}
         #panelk {{ background:{PANEL}; border:1px solid {BD}; border-radius:8px; }}
         #ph {{ font-size:11px; font-weight:600; letter-spacing:1px; color:{TXT3};
