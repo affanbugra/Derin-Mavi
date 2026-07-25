@@ -1011,12 +1011,20 @@ class MainWindow(QMainWindow):
         self.pan_aci = 0.0          # Azimut (0 - 360)
         self.tilt_aci = 0.0         # Yukselis (0 - max_tilt_limit)
         self.max_tilt_limit = 60.0  # Yukselis max siniri
+
+        # 1. Harekete Yasak Alan Sinirlari
         self.pan_yasak_aktif = False
         self.pan_yasak_min = 120.0
         self.pan_yasak_max = 160.0
         self.tilt_yasak_aktif = False
         self.tilt_yasak_min = 45.0
         self.tilt_yasak_max = 60.0
+
+        # 2. Atisa Yasak Alan Sinirlari
+        self.atis_yasak_aktif = False
+        self.atis_pan_min = 45.0
+        self.atis_pan_max = 75.0
+
         self.aci_adim = 5.0          # Adim hassasiyeti (derece)
 
         # Ic Stack (0: D-Pad Kontrolleri, 1: Aci Ayarlari Paneli)
@@ -1245,10 +1253,10 @@ class MainWindow(QMainWindow):
         s1_box.addWidget(self.ap_tilt_sl)
         apv.addLayout(s1_box)
 
-        # 2. Pan Yasak Aci Araligi
+        # 2. Pan Harekete Yasak Aci Araligi
         s2_box = QVBoxLayout()
         s2_box.setSpacing(3)
-        self.ap_pan_cb = QCheckBox("Pan (Azimut) Yasak Açı Aralığı")
+        self.ap_pan_cb = QCheckBox("Pan (Azimut) Harekete Yasak Açı Aralığı")
         self.ap_pan_cb.setStyleSheet(f"color:{TXT2}; font-size:11px; font-weight:600;")
         self.ap_pan_cb.setChecked(self.pan_yasak_aktif)
         self.ap_pan_cb.stateChanged.connect(self._ap_yasak_degisti)
@@ -1275,10 +1283,10 @@ class MainWindow(QMainWindow):
         s2_box.addLayout(py_row)
         apv.addLayout(s2_box)
 
-        # 3. Tilt Yasak Aci Araligi
+        # 3. Tilt Harekete Yasak Aci Araligi
         s3_box = QVBoxLayout()
         s3_box.setSpacing(3)
-        self.ap_tilt_cb = QCheckBox("Tilt (Yükseliş) Yasak Açı Aralığı")
+        self.ap_tilt_cb = QCheckBox("Tilt (Yükseliş) Harekete Yasak Açı Aralığı")
         self.ap_tilt_cb.setStyleSheet(f"color:{TXT2}; font-size:11px; font-weight:600;")
         self.ap_tilt_cb.setChecked(self.tilt_yasak_aktif)
         self.ap_tilt_cb.stateChanged.connect(self._ap_yasak_degisti)
@@ -1304,6 +1312,36 @@ class MainWindow(QMainWindow):
         ty_row.addWidget(self.ap_tmax_spin, 1, Qt.AlignVCenter)
         s3_box.addLayout(ty_row)
         apv.addLayout(s3_box)
+
+        # 4. Pan Atisa Yasak Aci Araligi
+        s4_box = QVBoxLayout()
+        s4_box.setSpacing(3)
+        self.ap_atis_cb = QCheckBox("Pan (Azimut) Atışa Yasak Açı Aralığı")
+        self.ap_atis_cb.setStyleSheet(f"color:{TXT2}; font-size:11px; font-weight:600;")
+        self.ap_atis_cb.setChecked(self.atis_yasak_aktif)
+        self.ap_atis_cb.stateChanged.connect(self._ap_yasak_degisti)
+        s4_box.addWidget(self.ap_atis_cb)
+
+        ay_row = QHBoxLayout()
+        ay_row.setSpacing(6)
+        l_amin = QLabel("Min (°):")
+        l_amin.setObjectName("engsub")
+        self.ap_amin_spin = QSpinBox()
+        self.ap_amin_spin.setRange(0, 360)
+        self.ap_amin_spin.setValue(int(self.atis_pan_min))
+        self.ap_amin_spin.valueChanged.connect(self._ap_yasak_degisti)
+        l_amax = QLabel("Max (°):")
+        l_amax.setObjectName("engsub")
+        self.ap_amax_spin = QSpinBox()
+        self.ap_amax_spin.setRange(0, 360)
+        self.ap_amax_spin.setValue(int(self.atis_pan_max))
+        self.ap_amax_spin.valueChanged.connect(self._ap_yasak_degisti)
+        ay_row.addWidget(l_amin, 0, Qt.AlignVCenter)
+        ay_row.addWidget(self.ap_amin_spin, 1, Qt.AlignVCenter)
+        ay_row.addWidget(l_amax, 0, Qt.AlignVCenter)
+        ay_row.addWidget(self.ap_amax_spin, 1, Qt.AlignVCenter)
+        s4_box.addLayout(ay_row)
+        apv.addLayout(s4_box)
 
         apv.addStretch(1)
 
@@ -1359,6 +1397,11 @@ class MainWindow(QMainWindow):
             self.btn_center.setStyleSheet(self._key_center_normal_style)
 
     def _fire_bas(self):
+        if self.atis_yasak_aktif and (self.atis_pan_min <= self.pan_aci <= self.atis_pan_max):
+            self.bolge_status.setText("🚫 ATIŞA YASAK AÇI BÖLGESİ — ATEŞ ENGELLENDİ")
+            self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
+            return
+
         self.bolge_status.setText("🔥 ATEŞ EDİLDİ — LAZER/SİSTEM AKTİF")
         self.bolge_status.setStyleSheet("color:#b8342a; font-size:11px; font-weight:700; padding:2px 0;")
         if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
@@ -1371,12 +1414,48 @@ class MainWindow(QMainWindow):
             self.tilt_lbl_ref.setText(f"YÜKSELİŞ (TİLT max {int(val)}°)")
 
     def _ap_yasak_degisti(self):
+        # 1. Harekete Yasak Alan
         self.pan_yasak_aktif = self.ap_pan_cb.isChecked()
         self.pan_yasak_min = float(self.ap_pmin_spin.value())
         self.pan_yasak_max = float(self.ap_pmax_spin.value())
         self.tilt_yasak_aktif = self.ap_tilt_cb.isChecked()
         self.tilt_yasak_min = float(self.ap_tmin_spin.value())
         self.tilt_yasak_max = float(self.ap_tmax_spin.value())
+
+        # 2. Atisa Yasak Alan
+        self.atis_yasak_aktif = self.ap_atis_cb.isChecked()
+        self.atis_pan_min = float(self.ap_amin_spin.value())
+        self.atis_pan_max = float(self.ap_amax_spin.value())
+
+        # Sag alt kartlari guncelle
+        self._yasak_kartlari_guncelle()
+
+    def _yasak_kartlari_guncelle(self):
+        if not hasattr(self, "hareket_yasak_lbl"):
+            return
+
+        # Harekete Yasak Alan Kartı
+        if self.pan_yasak_aktif or self.tilt_yasak_aktif:
+            txts = []
+            if self.pan_yasak_aktif:
+                txts.append(f"P:{int(self.pan_yasak_min)}°-{int(self.pan_yasak_max)}°")
+            if self.tilt_yasak_aktif:
+                txts.append(f"T:{int(self.tilt_yasak_min)}°-{int(self.tilt_yasak_max)}°")
+            self.hareket_yasak_lbl.setText(f'<span style="color:{AMB};font-weight:700;">Aktif</span> '
+                                           f'<small style="color:{TXT2}">({", ".join(txts)})</small>')
+            self.hareket_yasak_sw.setStyleSheet(f"background:{AMB};border-radius:8px;")
+        else:
+            self.hareket_yasak_lbl.setText(f'<small style="color:{TXT3}">Devre Dışı — Serbest</small>')
+            self.hareket_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
+
+        # Atışa Yasak Alan Kartı
+        if self.atis_yasak_aktif:
+            self.atis_yasak_lbl.setText(f'<span style="color:{RED};font-weight:700;">Aktif</span> '
+                                        f'<small style="color:{TXT2}">({int(self.atis_pan_min)}°-{int(self.atis_pan_max)}°)</small>')
+            self.atis_yasak_sw.setStyleSheet(f"background:{RED};border-radius:8px;")
+        else:
+            self.atis_yasak_lbl.setText(f'<small style="color:{TXT3}">Devre Dışı — Serbest</small>')
+            self.atis_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
 
     def _ap_varsayilana_don(self):
         self.ap_tilt_sl.setValue(60)
@@ -1386,6 +1465,9 @@ class MainWindow(QMainWindow):
         self.ap_tilt_cb.setChecked(False)
         self.ap_tmin_spin.setValue(45)
         self.ap_tmax_spin.setValue(60)
+        self.ap_atis_cb.setChecked(False)
+        self.ap_amin_spin.setValue(45)
+        self.ap_amax_spin.setValue(75)
         self._ap_tilt_degisti(60)
         self._ap_yasak_degisti()
 
@@ -1394,7 +1476,7 @@ class MainWindow(QMainWindow):
         yeni_pan = (self.pan_aci + d_pan) % 360.0
         yeni_tilt = max(0.0, min(self.max_tilt_limit, self.tilt_aci + d_tilt))
 
-        # Yasak aci kontrolu
+        # Harekete yasak aci kontrolu
         yasak_mi = False
         if self.pan_yasak_aktif and (self.pan_yasak_min <= yeni_pan <= self.pan_yasak_max):
             yasak_mi = True
@@ -1402,7 +1484,7 @@ class MainWindow(QMainWindow):
             yasak_mi = True
 
         if yasak_mi:
-            self.bolge_status.setText("▲ YASAK AÇI LİMİTİ — ENGELLENDİ")
+            self.bolge_status.setText("▲ HAREKETE YASAK LİMİTİ — ENGELLENDİ")
             self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
             return
 
@@ -1410,8 +1492,14 @@ class MainWindow(QMainWindow):
         self.tilt_aci = yeni_tilt
         self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
         self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
-        self.bolge_status.setText("● BÖLGE GÜVENLİ")
-        self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+
+        # Atisa yasak bolgede miyiz ikazi
+        if self.atis_yasak_aktif and (self.atis_pan_min <= self.pan_aci <= self.atis_pan_max):
+            self.bolge_status.setText("⚠️ ATIŞA YASAK BÖLGEDESİNİZ — ATEŞ KİLİTLİ")
+            self.bolge_status.setStyleSheet(f"color:{AMB}; font-size:11px; font-weight:700; padding:2px 0;")
+        else:
+            self.bolge_status.setText("● BÖLGE GÜVENLİ")
+            self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
 
         # ESP32 komutu gonder
         if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
@@ -1567,32 +1655,59 @@ class MainWindow(QMainWindow):
         ev.addWidget(self.eng)
         h.addWidget(eng_card, 2)
 
-        # --- yasak alanlar ---
-        for baslik, alt_txt in (("ATIŞA YASAK ALAN", "Tanımsız — Kapalı"),
-                                ("HAREKETE YASAK ALAN", "Tanımsız — Kapalı")):
-            tgl_card = QFrame()
-            tgl_card.setObjectName("panelk")
-            tv = QVBoxLayout(tgl_card)
-            tv.setContentsMargins(15, 10, 15, 10)
-            tv.setSpacing(6)
-            ph2 = QLabel(baslik)
-            ph2.setObjectName("ph")
-            tv.addWidget(ph2)
+        # --- yasak alan kartlari ---
+        # 1. Atisa Yasak Alan Kart
+        atis_card = QFrame()
+        atis_card.setObjectName("panelk")
+        atv = QVBoxLayout(atis_card)
+        atv.setContentsMargins(15, 10, 15, 10)
+        atv.setSpacing(6)
+        ph_atis = QLabel("ATIŞA YASAK ALAN")
+        ph_atis.setObjectName("ph")
+        atv.addWidget(ph_atis)
 
-            tgl = QFrame()
-            tgl.setObjectName("angtgl")
-            th2 = QHBoxLayout(tgl)
-            th2.setContentsMargins(12, 9, 12, 9)
-            th2.setSpacing(10)
-            l = QLabel(f'<small style="color:{TXT3}">{alt_txt}</small>')
-            l.setObjectName("tgll")
-            sw = QLabel()
-            sw.setFixedSize(32, 16)
-            sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
-            th2.addWidget(l, 1)
-            th2.addWidget(sw)
-            tv.addWidget(tgl)
-            h.addWidget(tgl_card, 2)
+        tgl_atis = QFrame()
+        tgl_atis.setObjectName("angtgl")
+        th_atis = QHBoxLayout(tgl_atis)
+        th_atis.setContentsMargins(12, 9, 12, 9)
+        th_atis.setSpacing(10)
+        self.atis_yasak_lbl = QLabel('<small style="color:#8094a8">Devre Dışı — Serbest</small>')
+        self.atis_yasak_lbl.setObjectName("tgll")
+        self.atis_yasak_sw = QLabel()
+        self.atis_yasak_sw.setFixedSize(32, 16)
+        self.atis_yasak_sw.setStyleSheet("background:#c3d3e2;border-radius:8px;")
+        th_atis.addWidget(self.atis_yasak_lbl, 1)
+        th_atis.addWidget(self.atis_yasak_sw)
+        atv.addWidget(tgl_atis)
+        h.addWidget(atis_card, 2)
+
+        # 2. Harekete Yasak Alan Kart
+        hareket_card = QFrame()
+        hareket_card.setObjectName("panelk")
+        hrv = QVBoxLayout(hareket_card)
+        hrv.setContentsMargins(15, 10, 15, 10)
+        hrv.setSpacing(6)
+        ph_hrk = QLabel("HAREKETE YASAK ALAN")
+        ph_hrk.setObjectName("ph")
+        hrv.addWidget(ph_hrk)
+
+        tgl_hrk = QFrame()
+        tgl_hrk.setObjectName("angtgl")
+        th_hrk = QHBoxLayout(tgl_hrk)
+        th_hrk.setContentsMargins(12, 9, 12, 9)
+        th_hrk.setSpacing(10)
+        self.hareket_yasak_lbl = QLabel('<small style="color:#8094a8">Devre Dışı — Serbest</small>')
+        self.hareket_yasak_lbl.setObjectName("tgll")
+        self.hareket_yasak_sw = QLabel()
+        self.hareket_yasak_sw.setFixedSize(32, 16)
+        self.hareket_yasak_sw.setStyleSheet("background:#c3d3e2;border-radius:8px;")
+        th_hrk.addWidget(self.hareket_yasak_lbl, 1)
+        th_hrk.addWidget(self.hareket_yasak_sw)
+        hrv.addWidget(tgl_hrk)
+        h.addWidget(hareket_card, 2)
+
+        # Ilk durum yansitmasi
+        self._yasak_kartlari_guncelle()
 
         return alt
 
