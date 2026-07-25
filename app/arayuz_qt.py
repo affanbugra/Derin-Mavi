@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QStyle, QStyleOptionSlider,
+    QSlider,
 )
 
 import algi
@@ -100,38 +100,6 @@ AYAR_TANIM = [
      "↑ BÜYÜTÜRSEN (960): uzak/küçük nesneleri (15 m) daha iyi görür — ama FPS düşer, sistem yavaşlar.\n"
      "↓ KÜÇÜLTÜRSEN (416): daha akıcı ve hızlı olur — ama uzaktaki nesnede zayıflar."),
 ]
-
-
-class OneriSlider(QSlider):
-    """Yatay kaydirici; track uzerinde 'oneri' (varsayilan) konumunu kucuk bir nokta ile gosterir."""
-    def __init__(self, oneri_val, parent=None):
-        super().__init__(Qt.Horizontal, parent)
-        self.oneri_val = oneri_val
-
-    def paintEvent(self, e):
-        super().paintEvent(e)
-        rng = self.maximum() - self.minimum()
-        if rng <= 0:
-            return
-        opt = QStyleOptionSlider()
-        self.initStyleOption(opt)
-        groove = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderGroove, self)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.Antialiasing)
-        p.setPen(Qt.NoPen)
-        yesil = QColor(21, 135, 80)
-        # 1) Onerilen konum: groove UZERINDE kisa dikey tik (kirpilmaz, hep gorunur).
-        oran = (self.oneri_val - self.minimum()) / rng
-        x = groove.x() + int(round(groove.width() * oran))
-        cy = groove.center().y()
-        p.setBrush(yesil)
-        p.drawRect(x - 1, cy - 6, 2, 12)
-        # 2) TAM onerilen degerdeysen: kulbun ici yesil dolar -> "buradasin" belli olur.
-        if self.value() == self.oneri_val:
-            h = self.style().subControlRect(QStyle.CC_Slider, opt, QStyle.SC_SliderHandle, self)
-            hc = h.center()
-            p.drawEllipse(hc.x() - 4, hc.y() - 4, 8, 8)
-        p.end()
 
 
 # =====================================================================
@@ -805,7 +773,7 @@ class MainWindow(QMainWindow):
     def _ayar_satiri(self, layout, tanim):
         key, baslik, tip, mn, mx, oneri, aciklama = tanim
         kutu = QVBoxLayout()          # her ayar kendi grubunda (ic bosluk dar, gruplar arasi genis)
-        kutu.setSpacing(7)
+        kutu.setSpacing(5)
         ust = QHBoxLayout()
         ust.setSpacing(7)
         lab = QLabel(baslik)
@@ -827,19 +795,25 @@ class MainWindow(QMainWindow):
         ust.addWidget(deger)
         kutu.addLayout(ust)
 
+        sl = QSlider(Qt.Horizontal)
         if tip == "secim":
-            sl = OneriSlider(COZUNURLUK_SECENEK.index(oneri))
             sl.setMinimum(0)
             sl.setMaximum(len(COZUNURLUK_SECENEK) - 1)
             sl.setValue(COZUNURLUK_SECENEK.index(int(algi.AYAR[key])))
+            oneri_txt = f"{oneri} px"
         else:
-            sl = OneriSlider(oneri)
             sl.setMinimum(mn)
             sl.setMaximum(mx)
             sl.setValue(int(round(algi.AYAR[key] * 100)) if tip == "yuzde" else int(algi.AYAR[key]))
+            oneri_txt = f"{oneri / 100:.2f}" if tip == "yuzde" else f"{oneri} kare"
         sl.setObjectName("ayarsl")
         sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger: self._ayar_degisti(k, t, val, d))
         kutu.addWidget(sl)
+
+        oneri_lbl = QLabel(f"Önerilen: {oneri_txt}")
+        oneri_lbl.setObjectName("ayaroneri")
+        kutu.addWidget(oneri_lbl)
+
         layout.addLayout(kutu)
         self.ayar_sliderlar[key] = (sl, tip)
         self._ayar_deger_yaz(tip, sl.value(), deger)
@@ -1426,14 +1400,15 @@ class MainWindow(QMainWindow):
         #ayarinfo {{ background:rgba(18,88,168,0.13); color:{BLUE}; border:none; border-radius:8px;
             font-size:11px; font-weight:800; font-style:italic; }}
         #ayarinfo:hover {{ background:{BLUE}; color:#fff; }}
-        #ayarsl {{ height:34px; }}
-        #ayarsl::groove:horizontal {{ height:6px; border-radius:3px; background:{BD}; margin:0 2px; }}
-        #ayarsl::sub-page:horizontal {{ height:6px; border-radius:3px; background:{BLUE}; margin:0 2px; }}
-        #ayarsl::add-page:horizontal {{ height:6px; border-radius:3px; background:{BD}; margin:0 2px; }}
-        #ayarsl::handle:horizontal {{ width:16px; height:16px; margin:-5px 0; border-radius:8px;
-            background:#fff; border:2px solid {BLUE}; }}
-        #ayarsl::handle:horizontal:hover {{ border:2px solid #0e4a90; }}
-        #ayarsl::handle:horizontal:pressed {{ background:#e8f0fb; }}
+        #ayaroneri {{ font-size:10.5px; color:{TXT3}; background:transparent; }}
+        #ayarsl {{ height:22px; }}
+        #ayarsl::groove:horizontal {{ height:5px; border-radius:2px; background:#dbe3ec; margin:0 2px; }}
+        #ayarsl::sub-page:horizontal {{ height:5px; border-radius:2px; background:{BLUE}; margin:0 2px; }}
+        #ayarsl::add-page:horizontal {{ height:5px; border-radius:2px; background:#dbe3ec; margin:0 2px; }}
+        #ayarsl::handle:horizontal {{ width:16px; height:16px; margin:-6px 0; border-radius:8px;
+            background:#ffffff; border:2px solid {BLUE}; }}
+        #ayarsl::handle:horizontal:hover {{ border:2px solid #0e4a90; background:#f3f8ff; }}
+        #ayarsl::handle:horizontal:pressed {{ background:#dbe9fb; }}
         #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:9px;
             padding:8px 18px; font-size:12px; font-weight:600; min-height:16px; }}
         #ayaralt:hover {{ background:{CARD}; border:1px solid {BD2}; }}
