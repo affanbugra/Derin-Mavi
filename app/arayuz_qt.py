@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
     QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QStyle, QStyleOptionSlider, QGraphicsDropShadowEffect,
+    QSlider, QStyle, QStyleOptionSlider,
 )
 
 import algi
@@ -750,11 +750,9 @@ class MainWindow(QMainWindow):
         self.ayar_panel.setObjectName("ayarpanel")
         self.ayar_panel.setFixedWidth(336)
         self.ayar_panel.move(12, 54)
-        # yumusak golge -> modern "yuzen kart" hissi
-        golge = QGraphicsDropShadowEffect(self.ayar_panel)
-        golge.setBlurRadius(36); golge.setXOffset(0); golge.setYOffset(9)
-        golge.setColor(QColor(15, 22, 32, 95))
-        self.ayar_panel.setGraphicsEffect(golge)
+        # NOT: QGraphicsDropShadowEffect KULLANMA — tum arayuz bir QGraphicsView (proxy) icinde
+        # cizildigi icin efekt render'i bozup siyah kutu artefakti birakiyor. Derinlik hissi
+        # kenarlik + yuvarlak kose + koyu video ustunde durmasiyla zaten var.
 
         pv = QVBoxLayout(self.ayar_panel)
         pv.setContentsMargins(18, 15, 18, 16)
