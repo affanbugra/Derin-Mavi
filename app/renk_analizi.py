@@ -1,20 +1,14 @@
 # -*- coding: utf-8 -*-
-"""Dost/Dusman ayrimi — SARTNAME kurali: ayrim RENK ile yapilir.
+"""Dost/Dusman ayrimi — sartname kurali: ayrim RENK ile yapilir.
 
-  Dusman = Kirmizi  #F50A0A
-  Dost   = Camgobegi #00A3E0
+  Dusman = Kirmizi  #F50A0A      Dost = Camgobegi #00A3E0
 
-BASIT BINARY (kullanici karari, 24.07): kutu icinde MAVIYE mi KIRMIZIYA mi daha
-yakin? maviye yakin -> DOST, kirmiziya yakin -> DUSMAN. ARASI YOK. "Bilinmeyen"
-ve "tipe gore hep dusman" (HEP_DUSMAN) mantigi KALDIRILDI — tipe bakan kural yok,
-sadece renge bakilir. Tip (model) ile taraf (renk) AYRI adimlardir.
+Binary karar: kutu icinde cyan mi kirmizi mi baskin? Arasi yok. Tip (model) ile
+taraf (renk) AYRI adimlardir — tipe bakan hicbir kural yoktur.
+Yalniz Asama 3'te calisir; Asama 1-2'de tum maketler kirmizi, dost yok.
 
-NOT: Bu adim yalniz ASAMA 3'te calisir. Asama 1-2'de tum maketler kirmizi (hepsi
-hedef, dost yok) -> renk isi HIC yapilmaz, sadece tanima yeterli.
-
-Kullanim:
-    from renk_analizi import taraf_binary
-    taraf = taraf_binary(frame_bgr, (x1, y1, x2, y2))   # "Dost" | "Düşman"
+Kullanim (algi.py):
+    kirmizi_orani, cyan_orani = renk_oranlari(frame_bgr, (x1, y1, x2, y2))
 """
 import cv2
 import numpy as np
@@ -58,20 +52,16 @@ def renk_oranlari(frame_bgr, box):
     return float(np.count_nonzero(m_kirmizi)) / n, float(np.count_nonzero(m_cyan)) / n
 
 
-def taraf_binary(frame_bgr, box):
-    """Taraf karari — BINARY, arasi yok.
-
-    Kutu icinde cyan mi kirmizi mi baskin? cyan baskinsa "Dost", degilse "Düşman".
-    (Beraberlik/ikisi de ~0 -> "Düşman"; boyasiz maket A3'te beklenmez.)
-
-    Returns: "Dost" | "Düşman"
-    """
-    kirmizi, cyan = renk_oranlari(frame_bgr, box)
-    return "Dost" if cyan > kirmizi else "Düşman"
-
-
 if __name__ == "__main__":
-    # hizli kendi kendine test: sentetik kirmizi/cyan kutularla dogrula
-    for ad, bgr in (("kirmizi", (10, 10, 245)), ("cyan", (224, 163, 0))):
-        img = np.full((100, 100, 3), bgr, np.uint8)
-        print(f"{ad}: {taraf_binary(img, (0, 0, 100, 100))}")
+    # Kendi kendine test: sentetik kirmizi/cyan kareler dogru oranlari vermeli.
+    # (Taraf karari algi._taraf_belirle icinde verilir; burada olculen oranlardir.)
+    kirmizi_img = np.full((100, 100, 3), (10, 10, 245), np.uint8)     # BGR kirmizi
+    cyan_img = np.full((100, 100, 3), (224, 163, 0), np.uint8)        # BGR cyan
+    kutu = (0, 0, 100, 100)
+
+    k, c = renk_oranlari(kirmizi_img, kutu)
+    assert k > 0.9 and c < 0.01, (k, c)
+    k, c = renk_oranlari(cyan_img, kutu)
+    assert c > 0.9 and k < 0.01, (k, c)
+
+    print("renk_analizi testleri OK — kirmizi ve cyan oranlari dogru olculuyor")

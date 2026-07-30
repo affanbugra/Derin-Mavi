@@ -13,6 +13,13 @@ KOMUT PAKETI (laptop -> ESP32, 8 bayt):
     [6] komut 0=BEKLE 1=ATES 2=ATES_KES 3=ESTOP 4=DEVAM(estop kaldir) 5=HOME
     [7] xor   [0..6] baytlarinin XOR'u
 
+    ⚠ DELTA SEMANTIGI (ESP32 C kodunu yazan arkadas MUTLAKA okusun):
+      dx/dy DELTA'dir ve **dx=dy=0 "hareket etme" DEGIL, "hedefi DEGISTIRME" demektir.**
+      Yani sifir delta gelince ESP32 mevcut hareket hedefini KORUMALI, sifirlamamalidir.
+      Aksi halde hedefe donerken gelen bir ATES paketi (dx=dy=0) sureg elen hareketi
+      iptal eder ve namlu hedefin yarisinda kalir — takip + ates ayni anda calismaz.
+      Kural: yeni hedef = mevcut_hedef + delta   (mevcut_konum + delta DEGIL).
+
 DURUM PAKETI (ESP32 -> laptop, 8 bayt):
     [0] 0xAA  baslik
     [1] durum 0=HAZIR 1=HAREKET 2=ATES 3=ESTOP 4=HATA

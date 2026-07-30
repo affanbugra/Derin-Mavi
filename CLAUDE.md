@@ -257,13 +257,12 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
 2. ✅ **Sentetik veri renkli** — #F50A0A / #00A3E0 gövdeler (cyan yalnız F16+Heli), beyaz ışık.
 3. ✅ **Balon eklendi** — 5. sınıf "balon" (direkte, rastgele renkli); sınıflar artık:
    `['f16','helikopter','drone','fuze','balon']` (nc=5).
-4. ⚠️ **Mesafe — GEÇİCİ OLARAK DEVRE DIŞI** (18.07, kullanıcı kararı): `est_distance`/`MENZIL`
-   fonksiyonları `algi.py`'de duruyor ama **artık `analiz_et()` tarafından çağrılmıyor** ve
-   UI'dan (mesafe sayısı, menzil çubuğu, "Menzil uygun/dışı" rozeti, tablo MESAFE kolonu)
-   **tamamen kaldırıldı**. Sebep: FOCAL_PX=900 kalibre edilmeden gösterilen sayılar (ör.
-   "12.4 m") gerçek ölçüm gibi yanıltıcıydı. Gerçek mesafe ölçüm özelliği (kalibrasyon veya
-   stereo/derinlik) eklenene kadar angajman kararı yalnızca TİP + RENK'e dayanıyor.
-   `mesafe_kalibrasyon.py` altyapısı ileride bu özelliği geri getirmek için hâlâ duruyor.
+4. ⚠️ **Mesafe — DEVRE DIŞI, kodu SİLİNDİ** (karar 18.07, temizlik 30.07): `est_distance`,
+   `MENZIL`, `GERCEK_BOYUT`, `FOCAL_PX` ve `mesafe_kalibrasyon.py` **koddan kaldırıldı.**
+   Sebep: FOCAL_PX=900 kalibre edilmeden gösterilen sayılar (ör. "12.4 m") gerçek ölçüm gibi
+   yanıltıcıydı; özellik kapatıldıktan sonra 12 gün ölü kod olarak durdu. Angajman kararı
+   yalnızca TİP + RENK'e dayanıyor. Şartnamenin imha menzil tablosu **§4'te yazılı** —
+   özellik geri gelince oradan yeniden yazılır (git geçmişinde de duruyor).
 6. ✅ **v2 model eğitildi** (17.07, mAP50 0.995) → **v3 boru hattı kuruldu** (18.07): Roboflow
    1026 gerçek foto + sentetik → `dataset_v3` (2454/382). Bu boru hattı yedeğe alındı
    (`sentetik_veri`), current yaklaşımdan vazgeçildi (bkz. §6 GÜNCEL DURUM).
@@ -277,8 +276,13 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
    3-4 tam davranışı), alt çubukta ESP32/Seri Port canlı durum gösteriyor. Gerçek ESP32 gelince
    `DERINMAVI_ESP=COM5` yeterli — kod değişmez, ESP32 C tarafı bu protokole göre yazılmalı.
    Bekleyen: gimbal sürüş matematiği (piksel hatası→açı), homing, yasak alan mantığı.
-9. **Nişan mantığı:** balon tespiti var ama "aktif hedefin balonuna nişan al" eşleştirmesi
-   (hedef↔balon ilişkilendirme) henüz yazılmadı — kontrol katmanı hazır, bu üstüne kurulacak.
+9. ✅ **Nişan mantığı yazıldı** (29.07): `app/nisan.py` — hedef↔balon eşleştirme
+   (`nisan_noktasi`) + piksel hatası→açı PD kontrol (`PDNisanci`). Otonom modda
+   `AlgiThread._nisan_al` → `MainWindow._nisan_geldi` → `kontrol.nisan()` zinciri çalışıyor.
+   Bekleyen: dwell (lazeri hedefte tutma) mantığı ve gerçek donanımda Kp/FOV kalibrasyonu.
+
+10. ✅ **ALGI/ARAYÜZ SAĞLAMLAŞTIRMASI** (29.07) — "ham YOLO daha iyi tanıyor" şikâyetinin
+   kök sebepleri bulundu ve giderildi. Ayrıntı için bkz. §12.
 
 ---
 
@@ -328,9 +332,9 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
    etiketleniyor (nişan noktası); koyu perde arka planı eklendi (yarışma ortamı). Işık BEYAZ
    tutuldu (renkli ışık HSV analizini bozar). Eğitimde `hsv_h=0.01` (ton kayması kırmızıyı
    cyana çevirmesin!).
-3. ⚠️ **Mesafe (16.07) → GEÇİCİ DEVRE DIŞI (18.07):** `est_distance`/`MENZIL` altyapısı duruyor
-   ama kalibre edilmeden yanıltıcı olduğu için UI'dan ve karar zincirinden kaldırıldı
-   (bkz. §6 madde 4). `app/mesafe_kalibrasyon.py` gerçek ölçüm özelliği gelince kullanılacak.
+3. ⚠️ **Mesafe (16.07) → DEVRE DIŞI (18.07), kodu silindi (30.07):** kalibre edilmeden
+   yanıltıcı olduğu için UI'dan ve karar zincirinden çıkarıldı, sonra ölü kod olarak
+   temizlendi (bkz. §6 madde 4). Menzil tablosu §4'te; özellik gerekince oradan yazılır.
 4. ✅ **v1 Colab eğitimi** (17.07): yolov8n, 100 epoch, T4. **mAP50 0.995 / mAP50-95 0.975**
    (tüm sınıflar; balon 0.995). DİKKAT: sentetik val setinde — gerçek dünya performansı değil,
    boru hattı doğrulaması. `best.pt` + `best.onnx` indirildi, yerel modele kondu.
@@ -351,7 +355,8 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
 - Fotoğraf protokolü: her maket × {5,10,15 m} × {yaw çeşitleri} × {aynı hiza/alt/üst}
   × {balonlu/balonsuz} × farklı ışık → tip başına 150-300 kare. v3 ile ön-etiket + elle düzeltme.
 - **Fine-tune v4:** v3 + yeni gerçek veri karışık, düşük lr → sim-to-real kapanışını tamamlar.
-- `mesafe_kalibrasyon.py` ile FOCAL_PX kalibrasyonu; HSV eşiklerini gerçek boyada doğrula.
+- Mesafe özelliği geri isteniyorsa FOCAL_PX kalibrasyonu yeniden yazılır (§6 madde 4);
+  HSV eşiklerini gerçek boyada doğrula.
 
 **FAZ 4 — Teknofest örnek parkur görüntüleri gelince:** görüntüler `sentetik_veri/backgrounds/`
 klasörüne → `render_synth.py` ZATEN gerçek arka plan destekli (`REAL_BGS`) → v4 eğitimi.
@@ -392,9 +397,10 @@ d:\Masaüstü\Derin Mavi\            ← repo kökü (git init yapıldı)
 ├── app\                         ← uygulama kodu
 │   ├── arayuz_qt.py (ANA, native PySide6; _model_bul() dinamik model)
 │   ├── algi.py (algı çekirdeği=tek kaynak: kamera+YOLO+karar)
+│   ├── nisan.py (piksel hatası→açı PD nişan + hedef↔balon eşleştirme)
 │   ├── renk_analizi.py (HSV dost/düşman)  kontrol.py  protokol.py  mock_esp32.py
-│   ├── mesafe_kalibrasyon.py  kamera_tara.py (teşhis)
 │   └── Grafik\ (logo + kart ikonları)
+│   NOT: her modül `python app/<ad>.py` ile kendi kendini test eder (donanım gerekmez).
 └── models\                      ← BOŞ gelir (README.md + .gitkeep). Model buraya konur.
 ```
 
@@ -402,6 +408,97 @@ d:\Masaüstü\Derin Mavi\            ← repo kökü (git init yapıldı)
 `Analiz\` (Şartname.pdf, KTR [Takım ID 948118], Parkur çizim, temsili fotolar — GİZLİ),
 `Modeller_Kil6t\Modeller.3mf` (TEKNOFEST maket 3D), `Arayuz_legacy\` (eski Flask arayüzü + html + png'ler).
 Gerçek veri eğitimi/kalibrasyon gerekince buradaki `sentetik_veri` boru hattı geri getirilir.
+
+---
+
+## 12. Algı/Arayüz sağlamlaştırması (29.07.2026) — "neden ham YOLO'dan kötüydü?"
+
+Şikâyet: *"Arkadaşım YOLO'yu doğrudan kameraya bağladı, AYNI model çok daha iyi tanıdı.
+Bizimkinde öyle değil, takip edemiyor, odaklanamıyor."* Şikâyet **haklıydı** ve sebebi
+model değil, **bizim kodumuzdaki 5 katmandı.** Kök sebepler ve alınan kararlar:
+
+| # | Kök sebep | Çözüm | Dosya |
+|---|---|---|---|
+| A1 | **Sınıf adı beyaz listesi** tespitleri sessizce siliyordu (`if cls not in DISPLAY: continue`). Model `F16`/`iha`/`balloon` gibi ufak bir ad farkıyla eğitilmişse TÜM kutular uyarısız yok oluyordu. | Sınıf adı `r.names`'ten **dinamik** okunuyor; `ES_ANLAM` ile normalize ediliyor; eşleşmeyen sınıf **ham adıyla çiziliyor**. Kutu asla atılmaz. | `algi.py` |
+| A2 | **ByteTrack yanlış yapılandırılmıştı** (`new_track_thresh 0.1` vs varsayılan 0.25) → herkes ilk karede ID alıyor → "Gösterim eşiği" ayarı **ölü**; çöp tespitler `track_buffer` boyunca **hayalet kutu** olarak ekranda kalıyordu. Ayrıca modele `conf=0.25` verildiği için ByteTrack'in düşük skorlu kutuları hiç görmüyordu (varlık sebebi iptal). | Tracker eşikleri **Ultralytics varsayılanlarına** çekildi; modele `conf=BESLEME_CONF(0.10)` veriliyor, filtreleme tracker'a bırakıldı; `gosterim` gerçek bir çizim filtresi oldu. | `algi.py` |
+| A3 | **Kamera tamponu** → görüntü ~200-350 ms geçmişti (kutu nesnenin arkasında). Ayrıca çözünürlük hiç set edilmiyordu (kamera varsayılanı). | `KameraOkuyucu` ayrı thread'de okuyup **hep en taze kareyi** tutuyor; `BUFFERSIZE=1`, MJPG + 1280×720 isteniyor. | `algi.py` |
+| A4 | **Qt sinyal kuyruğu birikiyordu** (queued connection olayları düşmez) → gecikme kartopu. | "Son kare kazanır": GUI kareyi çizmeden thread yeni kare göndermiyor. | `arayuz_qt.py` |
+| A5 | `KeepAspectRatioByExpanding` görüntüyü **kırpıyordu** (kadraj kenarındaki tespit görünmüyordu) + QGraphicsView proxy'si ile **iki kez smooth ölçekleme** (bulanıklık + boşa CPU). | `KeepAspectRatio` + `FastTransformation`. | `arayuz_qt.py` |
+| A6 | `cv2.flip` her kareyi **koşulsuz aynalıyordu** → ham YOLO'dan farklı görüntü + nişan matematiğinde işaret hatası (gimbal hedeften kaçar). | Varsayılan **KAPALI**, ayar panelinde seçenek; açıkken yaw işareti otomatik telafi ediliyor. | `arayuz_qt.py`, `nisan.py` |
+
+**Şartname/güvenlik hataları (giderildi):**
+- **B1** `_fire_bas` → `kontrol.ates()` zorunlu argümansız çağrılıyordu (**TypeError**) ve
+  **E-Stop kontrolü yoktu**. Ölü yol kaldırıldı; ateşin **tek kapısı** `_ates_bas`.
+- **B2** E-Stop yalnız ATEŞ butonunu kilitliyordu; **D-pad/WASD hareket komutu gitmeye devam
+  ediyordu** ve arayüzdeki açı etiketleri gerçek konumdan kopuyordu (Yetenek 3 ihlali).
+  Artık hareketin de tek kapısı var (`_aci_hareket`), E-Stop'ta en başta kapanıyor.
+- **B4** `ates()` `dx=dy=0` gönderdiği için mock ESP32'de **süregelen hareketi iptal
+  ediyordu** (takip + ateş aynı anda çalışmıyordu). Delta artık **mevcut hedefe** eklenir,
+  konuma değil. ⚠ **ESP32 C kodunu yazan arkadaş `protokol.py` başındaki DELTA SEMANTİĞİ
+  notunu okumalı** — kural: `yeni_hedef = mevcut_hedef + delta`.
+
+**Tasarım ilkesi (bundan sonra korunacak):** ayarların varsayılanları **Ultralytics'in kendi
+varsayılanlarıdır.** Hiçbir kaydırıcıya dokunmayan biri, ham `yolo track source=0` ile aynı
+davranışı görür. Kodun içinde gizli "iyileştirme" YOKTUR; sapmak isteyen **ayar panelinden** sapar.
+
+**Bu makinede ölçülenler (29.07):** kamera 1280×720 @ **10 FPS** (YUY2; dahili kamera MJPG
+desteklemiyor, çözünürlük düşürmek FPS'i ARTIRMIYOR — ölçüldü) · inference 640px'te ~20 FPS ·
+**darboğaz KAMERA.** → Takip akıcılığı için **30 FPS'lik USB kamera** en yüksek getirili
+donanım yatırımı. CPU tarafında OpenVINO (`yolo export ... format=openvino`) 2-3× ek pay verir;
+`models/best_openvino_model/` varsa uygulama **otomatik** tercih eder.
+
+**⚠ MODEL GERÇEĞİ:** `models/best.pt` şu an **yalnızca 2 sınıf** tanıyor: `fuze`, `helikopter`.
+**F-16, İHA ve BALON modelde YOK → tespit edilemiyor.** Balon olmadığı için nişan noktası
+gövde merkezine düşüyor (nişan zinciri hazır, balon gelince otomatik devreye girer).
+Arayüz artık bu gerçeği alt çubukta açıkça yazıyor. Gerçek maket fotoğraflarıyla eğitilecek
+yeni modelde **5 sınıfın tamamı** bulunmalı.
+
+---
+
+## 13. Kod sadeleştirme (30.07.2026) — ne silindi, neden
+
+Kullanıcı tespiti: kod bir yığın haline gelmişti; "elle yazsak asla koymayacağımız"
+spekülatif parçalar birikmişti. Kural: **davranış değişmeyecek, sadece silinecek.**
+
+**Ölü kod (hiç çalışmıyordu):**
+- `arayuz_qt.py`'de `_asama1_panel()` **iki kez tanımlıydı** → Python ikincisiyle üzerine
+  yazdığı için birincisi hiç çalışmıyordu. Gerçek hataydı, silindi.
+- `est_distance` / `MENZIL` / `GERCEK_BOYUT` / `FOCAL_PX` — mesafe özelliği 18.07'de
+  kapatılmış, kod 12 gün ölü durmuştu (bkz. §6 madde 4).
+- `FLOOR`, `INFER_IMGSZ` — "geriye dönük uyumluluk" notu vardı, referans eden kimse yoktu.
+- `GRAY` — yorumu bile "kullanılmıyor; ileride gerekebilir" diyordu.
+- `renk_analizi.taraf_binary()` — uygulama `renk_oranlari()` kullanıyor; bu yalnızca kendi
+  testinde geçiyordu.
+- Kullanılmayan `QDialog`, `QSizePolicy` import'ları.
+- `mesafe_kalibrasyon.py`, `kamera_tara.py` — hiçbir yerden çağrılmıyordu.
+
+**Spekülatif kod (bir ihtiyaca değil "belki gerekir"e yazılmıştı):**
+- `ES_ANLAM` eşanlamlı sözlüğü: `"quadcopter"`, `"rocket"`, `"fighter"`, `"jet"`, `"plane"`…
+  Projede hiçbirinin karşılığı yok. **Asıl hata düzeltmesi kaldı** (bilinmeyen sınıf artık
+  sessizce silinmiyor, ham adıyla çiziliyor); `kanonik()` yalnızca ad sadeleştirmesi yapıyor.
+  Yeni model farklı ad kullanırsa `DISPLAY`'e **tek satır** eklenir.
+- `tanila.py` teşhis aracı (319 satır) — istenmemişti, silindi.
+
+**Tekrar (aynı şey birden çok yerde yazılmıştı):**
+- Kaydırıcı stilinde iki neredeyse aynı CSS bloğu → tek şablon + iki renk takımı.
+- D-pad'de dört neredeyse aynı CSS bloğu → tek şablon + dört renk takımı.
+- Üç "yasak alan" bölümü (onay kutusu + min/max) → tek `_yasak_alan_bolumu()` kalıbı.
+- `_ayar_yukle()` dosya yolunu tekrar yazıyordu → mevcut `_ayar_dosya()` kullanılıyor.
+- `_manuel_kontrol_panel()` 379 satırdı → adlandırılmış alt kuruculara bölündü
+  (`_dpad_sayfasi`, `_aci_gostergesi`, `_dpad_izgarasi`, `_adim_butonlari`,
+  `_aci_ayar_sayfasi`, `_aci_durum_baslat`).
+
+**Yorumlar:** "neden böyle yapıldı" açıklamaları KALDI (kodu okuyanın soracağı soru o).
+Giden: uzun anlatı paragrafları, ölçüm günlüğü notları, plan maddesi atıfları (A1/C3 gibi —
+kodu okuyan için anlamsız).
+
+**Sonuç:** `app/` 4481 → 3697 satır · yorum oranı %19 → %18 · `algi.py` %28 → %21 ·
+`nisan.py` %37 → %29.
+
+**Davranış korundu — nasıl doğrulandı:** temizlik öncesi/sonrası aynı 4 ekran (Manuel,
+ayar paneli açık, Aşama 3, Aşama 2) yakalanıp **piksel piksel** karşılaştırıldı; tek fark
+saatin ilerlemesiydi. CSS şablonları eski kopyalarla anlamsal olarak eşit çıktı (test edildi).
+Tüm modül testleri + E-Stop/ateş/nişan kapıları başsız testle yeniden geçti.
 
 ---
 
@@ -414,7 +511,14 @@ Takım ID: 948118 · Başvuru ID: 5007261.
 
 ---
 
-*Son güncelleme: 2026-07-24 · Faz: Video hazırlığı · Durum: Proje GitHub public repo için temizlendi
+*Son güncelleme: 2026-07-29 · Faz: Video hazırlığı · Durum: ALGI/ARAYÜZ SAĞLAMLAŞTIRILDI (bkz. §12) —
+ham YOLO ile davranış farkı giderildi (sınıf beyaz listesi, ByteTrack yapılandırması, kamera gecikmesi,
+görüntü kırpma, ayna), E-Stop artık hareketi de kesiyor, otonom nişan döngüsü (`nisan.py`) yazıldı.
+30.07'de KOD SADELEŞTİRİLDİ (§13): ölü kod + spekülatif parçalar silindi, davranış birebir korundu
+(ekran görüntüleri piksel piksel karşılaştırıldı). Bir sonraki iş: dwell mantığı + gerçek veriyle
+5 sınıflı model (şu anki model yalnız 2 sınıf) + donanım gelince Kp/FOV kalibrasyonu.*
+
+*Önceki güncelleme: 2026-07-24 · Durum: Proje GitHub public repo için temizlendi
 (2 doküman: CLAUDE.md + README.md; model/veri/legacy Flask yedeğe taşındı, repo modelsiz gelir,
 `models/` klasörüne konan best.pt otomatik bulunur). mock-ESP32 kontrol iskeleti çalışıyor (ATEŞ/E-Stop
 arayüze bağlı), mesafe/menzil UI'ı gerçek ölçüm gelene kadar devre dışı. Model/veri current yaklaşımdan

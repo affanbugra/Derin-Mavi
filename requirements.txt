@@ -9,5 +9,17 @@ opencv-python>=4.8.0
 numpy>=1.24.0
 PySide6>=6.6.0
 
-# ONNX ile hızlı CPU çıkarımı isteyenler için (opsiyonel — DERINMAVI_MODEL=onnx):
+# Gerçek ESP32 ile seri haberleşme (kontrol.py). Mock ile çalışırken gerekmez ama
+# donanım gelince ŞART — bu yüzden zorunlu bağımlılık, "bende çalışıyordu" olmasın.
+pyserial>=3.5
+
+# --- Opsiyonel: CPU'da hızlı çıkarım ---
+# Bu proje GPU'suz laptopta koşuyor ve tek gerçek darboğaz CPU inference'ı.
+# OpenVINO Intel işlemcide tipik 2-3× hızlandırır. Kurup modeli bir kez çevirin:
+#     pip install openvino
+#     yolo export model=models/best.pt format=openvino
+# Çıktı models/best_openvino_model/ olarak kalır; uygulama onu OTOMATİK tercih eder.
+# openvino>=2024.0
+#
+# ONNX alternatifi (DERINMAVI_MODEL=onnx):
 # onnxruntime>=1.16.0

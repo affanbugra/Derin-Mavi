@@ -90,12 +90,11 @@ Derin Mavi/
 ├── app/                    # uygulama kodu
 │   ├── arayuz_qt.py        #   ANA uygulama (native PySide6 kontrol istasyonu)
 │   ├── algi.py             #   Algı çekirdeği: kamera + YOLO + karar (tek kaynak)
+│   ├── nisan.py            #   Nişan matematiği: piksel hatası → gimbal açı komutu
 │   ├── renk_analizi.py     #   HSV ile dost/düşman (renk tarafı)
 │   ├── kontrol.py          #   Yüksek seviye kontrol API'si
 │   ├── protokol.py         #   UART paket protokolü (XOR checksum)
 │   ├── mock_esp32.py       #   Sahte ESP32 (donanımsız test)
-│   ├── mesafe_kalibrasyon.py  # Monoküler mesafe kalibrasyon yardımcısı
-│   ├── kamera_tara.py      #   Kamera teşhis aracı
 │   └── Grafik/             #   Logo + arayüz ikonları
 └── models/                 # Eğitilmiş model buraya (repoda boş gelir)
 ```

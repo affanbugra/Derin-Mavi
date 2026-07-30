@@ -79,9 +79,16 @@ class MockESP32:
                 self.hedef_yaw = self.hedef_pitch = 0.0
                 self.homed = True
             else:
-                # dx/dy = DELTA duzeltme (piksel hatasindan gelen aci)
-                self.hedef_yaw = self.yaw + k["dx"]
-                self.hedef_pitch = max(PITCH_MIN, min(PITCH_MAX, self.pitch + k["dy"]))
+                # dx/dy = DELTA duzeltme (piksel hatasindan gelen aci).
+                # Delta MEVCUT HEDEFE eklenir, mevcut KONUMA degil (bkz. protokol.py):
+                #   * hedefe dogru yurunurken gelen yeni duzeltme birikerek dogru yerde toplanir
+                #   * dx=dy=0 (or. ATES paketi) sureg elen hareketi IPTAL ETMEZ
+                # Eski kod `self.yaw + dx` yaziyordu; ates komutu her seferinde hedefi
+                # o anki konuma cekip hareketi kesiyordu (takip + ates ayni anda calismiyordu).
+                if k["dx"] or k["dy"]:
+                    self.hedef_yaw = self.hedef_yaw + k["dx"]
+                    self.hedef_pitch = max(PITCH_MIN, min(PITCH_MAX,
+                                                          self.hedef_pitch + k["dy"]))
                 if k["komut"] == P.K_ATES:
                     self.lazer = True
                 elif k["komut"] == P.K_ATES_KES:
@@ -107,4 +114,17 @@ if __name__ == "__main__":
     assert d["durum_ad"] != "E-STOP", d
     bozuk = bytearray(P.komut_paketle(0, 0, 0)); bozuk[3] ^= 0xFF
     assert P.durum_coz(m.islet(bytes(bozuk)))["durum_ad"] == "HATA"   # checksum reddi
-    print("mock_esp32 testleri OK — hareket/ates/ESTOP/checksum zinciri dogru")
+
+    # B4 REGRESYONU: ATES paketi (dx=dy=0) sureg elen hareketi IPTAL ETMEMELI.
+    m2 = MockESP32()
+    P.durum_coz(m2.islet(P.komut_paketle(1, 90.0, 0, P.K_BEKLE)))     # 90 dereceye don
+    assert m2.hedef_yaw == 90.0
+    time.sleep(0.05)                                                  # yolun bir kismi
+    P.durum_coz(m2.islet(P.komut_paketle(1, 0, 0, P.K_ATES)))         # yoldayken ATES
+    assert m2.hedef_yaw == 90.0, f"ates hedefi bozdu: {m2.hedef_yaw}"
+    assert m2.yaw < 90.0 and m2.lazer                                 # hala yolda + lazer acik
+    # Delta MEVCUT HEDEFE eklenir (konuma degil) -> duzeltmeler birikir
+    P.durum_coz(m2.islet(P.komut_paketle(1, 10.0, 0, P.K_BEKLE)))
+    assert m2.hedef_yaw == 100.0, m2.hedef_yaw
+
+    print("mock_esp32 testleri OK — hareket/ates/ESTOP/checksum + ates-hareket bagimsizligi")
