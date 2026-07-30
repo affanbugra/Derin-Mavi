@@ -20,6 +20,13 @@ KOMUT PAKETI (laptop -> ESP32, 8 bayt):
       iptal eder ve namlu hedefin yarisinda kalir — takip + ates ayni anda calismaz.
       Kural: yeni hedef = mevcut_hedef + delta   (mevcut_konum + delta DEGIL).
 
+    ⚠ EKSEN TANIMI (arayuz, mock ve gercek ESP32 AYNI tanimi kullanmali):
+      YAW  (dx) : azimut, 0-360 sarmali, + = saga.
+      PITCH(dy) : yukselis, **0° = ufuk, + = yukari, tavan arayuzdeki tilt limiti (varsayilan 60°).**
+      Negatif pitch YOKTUR (sistem ufkun altina bakmaz). Arayuz de bu araligi uygular ve
+      ESP32'ye yalnizca GERCEKTEN UYGULANAN delta'yi gonderir; boylece ekrandaki aci ile
+      cihazin hedefi asla birbirinden kopmaz.
+
 DURUM PAKETI (ESP32 -> laptop, 8 bayt):
     [0] 0xAA  baslik
     [1] durum 0=HAZIR 1=HAREKET 2=ATES 3=ESTOP 4=HATA

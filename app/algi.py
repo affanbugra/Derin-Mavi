@@ -349,60 +349,38 @@ def _ac_index(idx):
     return None
 
 
+# Telefonu webcam yapan uygulamalar (kamera darbogazinda pratik bir yedek — bkz. CLAUDE.md §12).
+TELEFON_UYG = {"droidcam": "DroidCam", "ivcam": "iVCam", "iriun": "Iriun"}
+# Dahili kamera ipuclari: "Integrated Camera" gibi acik adlar + laptop sensor kod adlari.
+DAHILI_IPUCU = ("integrated", "built-in", "facetime", "techfront", "ov97", "ov56", "ov27")
+
+
 def _guzel_kamera_adi(raw: str) -> str:
-    """Ham aygit adini kullanici dostu Turkce isme cevirir.
+    """Ham aygit adini secim listesinde okunakli hale getirir. Amac tek: operator
+    "hangisi laptopun kamerasi, hangisi taktigim kamera" ayrimini gorsun.
 
-    Ornekler:
-        'ov9734_techfront_camera'          -> 'PC Kamerası'
-        'Integrated Camera'                -> 'PC Kamerası'
-        'OBSBOT Meet SE StreamCamera'      -> 'USB Kamera · OBSBOT Meet SE'
-        'USB2.0 HD UVC WebCam'             -> 'USB Kamera'
-        'DroidCam Source 3'                -> 'Telefon Kamerası · DroidCam'
-        'e2eSoft iVCam'                    -> 'Telefon Kamerası · iVCam'
-        'OBS Virtual Camera'               -> 'Sanal Kamera · OBS'
-    """
+        'ov9734_techfront_camera'      -> 'PC Kamerası'
+        'OBSBOT Meet SE StreamCamera'  -> 'USB Kamera · OBSBOT Meet SE'
+        'USB2.0 HD UVC WebCam'         -> 'USB Kamera'
+
+    Tanimadigi cihaz HAM adiyla gecer — hicbir kamera listede kaybolmaz.
+    (Bu ad yalnizca gorunustur; kamera secimi/karar mantigi index ile calisir.)"""
     low = raw.lower().replace("_", " ")
-
-    # --- Telefon kamera uygulamalari ---
-    if "droidcam" in low:
-        return "Telefon Kamerası · DroidCam"
-    if "ivcam" in low:
-        return "Telefon Kamerası · iVCam"
-    if "iriun" in low:
-        return "Telefon Kamerası · Iriun"
-    if "epoccam" in low:
-        return "Telefon Kamerası · EpocCam"
-    if "camo" in low and "virtual" not in low:
-        return "Telefon Kamerası · Camo"
-
-    # --- Sanal kameralar ---
-    if "obs virtual" in low or "obs-virtual" in low:
-        return "Sanal Kamera · OBS"
+    for anahtar, ad in TELEFON_UYG.items():
+        if anahtar in low:
+            return f"Telefon Kamerası · {ad}"
     if "virtual" in low:
         return "Sanal Kamera"
-
-    # --- Dahili / entegre kameralar ---
-    dahili_ipuclari = ("integrated", "built-in", "facetime", "techfront",
-                       "ov9734", "ov5693", "ov2740", "front camera",
-                       "ir camera", "laptop", "notebook")
-    if any(k in low for k in dahili_ipuclari):
-        if "ir " in low or "infrared" in low:
-            return "PC Kamerası · IR"
+    if any(k in low for k in DAHILI_IPUCU):
         return "PC Kamerası"
 
-    # --- USB / harici kameralar ---
-    # Marka adini cikar: bilinen teknik son ekleri kaldir
+    # Harici/USB: teknik son ekleri atip marka adini birak.
     temizle = raw
-    for suf in ("StreamCamera", "Stream Camera", "WebCam", "Webcam",
-                "webcam", "HD UVC", "UVC", "USB2.0", "USB 2.0",
-                "USB3.0", "USB 3.0", "Video", "Camera", "camera",
-                "Cam", "cam", "Source", "Pro", "HD"):
-        temizle = temizle.replace(suf, "")
+    for suf in ("StreamCamera", "Stream Camera", "WebCam", "Webcam", "UVC",
+                "USB2.0", "USB 2.0", "USB3.0", "USB 3.0", "Camera", "Cam", "HD"):
+        temizle = temizle.replace(suf, "").replace(suf.lower(), "")
     marka = " ".join(temizle.split()).strip(" -·.,")
-
-    if marka:
-        return f"USB Kamera · {marka}"
-    return "USB Kamera"
+    return f"USB Kamera · {marka}" if marka else "USB Kamera"
 
 
 def kameralari_listele_qt():
@@ -429,12 +407,10 @@ def kameralari_listele_qt():
         return []
 
 
-def kameralari_listele(max_idx=5, haric=()):
+def kameralari_listele(max_idx=5):
     """Eski OpenCV index taramasi (fallback). Yeni kod kameralari_listele_qt() kullanir."""
     bulunan = []
     for i in range(max_idx):
-        if i in haric:
-            continue
         for backend, _ in _BACKENDS:
             cap = cv2.VideoCapture(i, backend)
             ok = cap.isOpened()

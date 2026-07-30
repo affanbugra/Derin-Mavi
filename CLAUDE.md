@@ -370,6 +370,10 @@ maketlerin altında → `draw_balloon` buna göre sabitlenir.)
 - ⏳ Yasak alan (atışa/harekete) mantığı — arayüzde görsel var, işlevsel değil.
 - ⏳ Tur sayacı — arayüzde gösterge var, gerçek tur ilerleme mantığı yok (donanım/otonom
   döngüsü gelince bağlanacak).
+- ⏳ **Aşama-1 zarf sırası bağlanmadı (yarım uç).** Sürükle-sırala kartlar çalışıyor ve
+  `SiraliKartlar.sirali_tipler()` kullanıcının dizdiği sırayı veriyor, ama bu sırayı **hiçbir
+  yer okumuyor** — "yanlış sırada vurma = −5 ceza" mantığı yok. Otonom/atış döngüsü kurulunca
+  hedef seçimi bu listeyi tüketmeli.
 - ⏳ Gimbal sürüş matematiği: piksel hatası → açı komutu (PD kontrol, KTR referans).
 - Hedef↔balon eşleştirme (nişan noktası) + dwell (lazeri üstünde tutma) mantığı.
 - **Test protokolü:** Aşama 1/2/3 senaryo simülasyonları + kabul kriterleri + regresyon
@@ -399,6 +403,7 @@ d:\Masaüstü\Derin Mavi\            ← repo kökü (git init yapıldı)
 │   ├── algi.py (algı çekirdeği=tek kaynak: kamera+YOLO+karar)
 │   ├── nisan.py (piksel hatası→açı PD nişan + hedef↔balon eşleştirme)
 │   ├── renk_analizi.py (HSV dost/düşman)  kontrol.py  protokol.py  mock_esp32.py
+│   ├── kapi_testleri.py (E-Stop/ateş/yasak alan güvenlik kapıları — pencere açmaz)
 │   └── Grafik\ (logo + kart ikonları)
 │   NOT: her modül `python app/<ad>.py` ile kendi kendini test eder (donanım gerekmez).
 └── models\                      ← BOŞ gelir (README.md + .gitkeep). Model buraya konur.
@@ -495,6 +500,42 @@ kodu okuyan için anlamsız).
 **Sonuç:** `app/` 4481 → 3697 satır · yorum oranı %19 → %18 · `algi.py` %28 → %21 ·
 `nisan.py` %37 → %29.
 
+### 13.1 İkinci tur (30.07.2026 — sadeleştirmenin denetimi)
+
+Sadeleştirme adımı denetlendi: davranışsal regresyon çıkmadı, ama (a) düzeltilen bir
+hatanın **kardeşi**, (b) bir şartname boşluğu ve (c) kuralın uygulanmadığı yerler bulundu.
+
+**Gerçek hatalar (düzeltildi):**
+1. **Ekran açısı ↔ cihaz hedefi kopması (B2'nin kardeşi).** `_aci_hareket` açıyı tilt
+   limitine kırpıyor ama ESP32'ye **ham delta** gönderiyordu: 55°'de +8 istenince ekran
+   60 derken cihazın hedefi 63 oluyordu. Artık **gerçekten uygulanan delta** gider;
+   uygulanacak bir şey yoksa boş paket de gönderilmez.
+2. **Eksen tanımı çelişkisi.** Arayüz tilt'i `0..60`, mock ESP32 pitch'i `-30..+30` idi —
+   aynı ekseni iki farklı tanımlıyorlardı. Tek tanım `protokol.py`'ye yazıldı:
+   **0° = ufuk, + = yukarı, tavan 60°, negatif pitch YOK.** ESP32 C kodu bunu kullanmalı.
+3. **Atışa yasak alan ateş sırasında denetlenmiyordu.** `_ates_bas` yalnız butona basılan
+   anı kontrol ediyordu; lazer açıkken bölgeye girmek serbestti. Ateşi kesmenin tek yolu
+   artık `_ates_kes()`; hem yasak bölgeye girişte hem E-Stop'ta oradan geçilir.
+
+**Kuralın uygulanmadığı yerler (tekrar → tek kalıp):** iki yasak alan kartı → `_yasak_kart()` ·
+adım butonu iki CSS kopyası → tek şablon · `keyPress/keyRelease` iki tuş haritası → tek
+`TUS_YON` sözlüğü · `_dpad_press/release` 5'er dal → `YON_TABLO`.
+
+**Kalan spekülatif kod:** `_guzel_kamera_adi` 55 → 25 satır (EpocCam/Camo/OBS-özel/IR
+dalları ve 16 kelimelik sonek listesi gitti; DroidCam/iVCam/Iriun kaldı — kamera darboğazında
+telefonu webcam yapmak gerçek bir ihtimal). `kameralari_listele(haric=)` parametresi silindi.
+
+**Tek kaynak (kırılmıştı):** `kp/kd/olu_bolge` varsayılanları üç yerde yazılıydı
+(`algi.VARSAYILAN_AYAR`, `nisan.py` sabitleri, ayar tablosundaki `oneri` sütunu). Artık
+**tek kaynak `algi.VARSAYILAN_AYAR`**: `nisan.py` oradan okur, ayar tablosundan `oneri`
+sütunu kaldırıldı, kaydırıcının yeşil "önerilen" işareti doğrudan oradan türer.
+
+**Yeni: `app/kapi_testleri.py`** — arayüzün `__main__`'i uygulamayı açtığı için güvenlik
+kapılarının testi yoktu; oysa geçmişte hepsi en az bir kez sessizce bozuldu. Bu dosya
+E-Stop, ateş, atışa/harekete yasak alan ve uygulanan-delta davranışlarını **pencere açmadan**
+dener (`python app/kapi_testleri.py`). Testlerin gerçekten yakaladığı doğrulandı: düzeltme
+geri alındığında kırmızıya düşüyor.
+
 **Davranış korundu — nasıl doğrulandı:** temizlik öncesi/sonrası aynı 4 ekran (Manuel,
 ayar paneli açık, Aşama 3, Aşama 2) yakalanıp **piksel piksel** karşılaştırıldı; tek fark
 saatin ilerlemesiydi. CSS şablonları eski kopyalarla anlamsal olarak eşit çıktı (test edildi).
@@ -511,7 +552,14 @@ Takım ID: 948118 · Başvuru ID: 5007261.
 
 ---
 
-*Son güncelleme: 2026-07-29 · Faz: Video hazırlığı · Durum: ALGI/ARAYÜZ SAĞLAMLAŞTIRILDI (bkz. §12) —
+*Son güncelleme: 2026-07-30 · Faz: Video hazırlığı · Durum: SADELEŞTİRME DENETLENDİ (bkz. §13.1) —
+ekran açısı ↔ cihaz hedefi kopması (tilt limitinde ham delta), eksen tanımı çelişkisi (mock pitch
+−30..30 vs arayüz 0..60) ve ateş sırasında atışa-yasak alan denetimi giderildi; kalan tekrarlar tek
+kalıba indirildi; ayar varsayılanları tek kaynağa (`algi.VARSAYILAN_AYAR`) bağlandı; güvenlik
+kapıları için `app/kapi_testleri.py` eklendi. Bir sonraki iş: dwell mantığı + Aşama-1 zarf sırasının
+bağlanması + gerçek veriyle 5 sınıflı model.*
+
+*Önceki güncelleme: 2026-07-29 · Durum: ALGI/ARAYÜZ SAĞLAMLAŞTIRILDI (bkz. §12) —
 ham YOLO ile davranış farkı giderildi (sınıf beyaz listesi, ByteTrack yapılandırması, kamera gecikmesi,
 görüntü kırpma, ayna), E-Stop artık hareketi de kesiyor, otonom nişan döngüsü (`nisan.py`) yazıldı.
 30.07'de KOD SADELEŞTİRİLDİ (§13): ölü kod + spekülatif parçalar silindi, davranış birebir korundu

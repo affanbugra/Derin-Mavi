@@ -7,6 +7,8 @@ kamera secimi arayuzden yapilir, DERINMAVI_CAM env override desteklenir.
 
 Calistir:  python app/arayuz_qt.py   (veya kokteki Baslat.bat)
 """
+import glob
+import json
 import os
 import sys
 import time
@@ -56,7 +58,6 @@ def _model_bul():
 
     Hicbiri yoksa None (uygulama modelsiz calisir: kamera akar, tespit yapmaz).
     """
-    import glob
     sec = os.environ.get("DERINMAVI_MODEL", "").strip()
     if sec:
         dusuk = sec.lower()
@@ -150,50 +151,66 @@ DPAD_MERKEZ = {"arka": "#1e4b7a", "kenar": "#1e4b7a", "kalinlik": "1px",
 DPAD_MERKEZ_BASILI = {"arka": "#17395d", "kenar": "#17395d", "kalinlik": "1.5px",
                       "yazi": "#ffffff", "punto": "11px"}
 
+# Adim hassasiyeti butonlari (1°/5°/10°): D-pad ile ayni mantik — tek govde sablonu,
+# secili/normal yalnizca renk-kalinlikta ayrisir (secilide hover kurali yok).
+_ADIM_GOVDE = ("QPushButton {{ background: {arka}; border: {kalinlik} solid {kenar}; "
+               "border-radius: 8px; color: {yazi}; font-size: 12px;{ek} }} ")
+ADIM_STIL_SECILI = _ADIM_GOVDE.format(arka="#eaf1f8", kalinlik="1.5px", kenar="#1e4b7a",
+                                      yazi="#1e4b7a", ek=" font-weight: 700;")
+ADIM_STIL_NORMAL = (_ADIM_GOVDE.format(arka="#ffffff", kalinlik="1px", kenar="#dfe4ea",
+                                       yazi="#5f6b78", ek="")
+                    + "QPushButton:hover { border-color: #c3d3e2; color: #2b3540; }")
+
+# Klavye -> D-pad yonu (WASD + ok tuslari; R/C/Space = merkeze al).
+TUS_YON = {Qt.Key_W: "up", Qt.Key_Up: "up", Qt.Key_S: "down", Qt.Key_Down: "down",
+           Qt.Key_A: "left", Qt.Key_Left: "left", Qt.Key_D: "right", Qt.Key_Right: "right",
+           Qt.Key_R: "center", Qt.Key_C: "center", Qt.Key_Space: "center"}
+
 # Ayar paneli sekmeleri: kalabalik tek liste yerine iki grup.
 #   "Tespit"  — YOLO/ByteTrack davranisi
 #   "Nişan"   — gimbal/kamera geometrisi (Otonom takip)
 #
-# (key, baslik, tip, min, max, oneri, aciklama)
+# (key, baslik, tip, min, max, aciklama)  — tablo yalnizca GORUNUMU tarif eder.
 #   tip "yuzde": slider /100 · "kare"/"sayi": tam sayi · "secim": COZUNURLUK_SECENEK
 #   "onda": slider /10 (ondalikli) · "anahtar": ac/kapa (0/1)
 #
-# ONEMLI: her ayarin "oneri" degeri ULTRALYTICS VARSAYILANIDIR. Yani hicbir kaydiriciya
-# dokunmayan biri, ham `yolo track source=0` ile AYNI sonucu alir. Sapmak isteyen buradan sapar.
+# ONEMLI: "onerilen" (yesil) deger burada YAZILI DEGILDIR; algi.VARSAYILAN_AYAR'dan okunur
+# ve o degerler ULTRALYTICS VARSAYILANIDIR. Yani hicbir kaydiriciya dokunmayan biri, ham
+# `yolo track source=0` ile AYNI sonucu alir. Sapmak isteyen buradan sapar.
 AYAR_TANIM_TESPIT = [
-    ("hassasiyet", "Hassasiyet", "yuzde", 5, 90, 25,
+    ("hassasiyet", "Hassasiyet", "yuzde", 5, 90,
      "Bir nesnenin YENİ HEDEF olarak takibe alınması için gereken güven.\n"
      "(Teknik: ByteTrack new_track_thresh / track_high_thresh — Ultralytics varsayılanı 0.25)\n\n"
      "↑ ARTTIRIRSAN: sadece net nesneler takibe girer, yanlış hedef azalır — ama zayıf/uzak "
      "nesneyi kaçırabilir.\n"
      "↓ AZALTIRSAN: zayıf/uzak nesneleri de yakalar — ama arka plana yanlış kutu atma riski artar."),
-    ("gosterim", "Gösterim eşiği", "yuzde", 5, 90, 25,
+    ("gosterim", "Gösterim eşiği", "yuzde", 5, 90,
      "Bir kutunun EKRANDA ÇİZİLMESİ için gereken güven. Bunun altındaki kutu çizilmez.\n"
      "(Takibe girmiş nesneye küçük bir tolerans tanınır — tek karelik zayıflamada titremesin diye.)\n\n"
      "↑ ARTTIRIRSAN: ekran temizlenir, sadece emin olunanlar görünür.\n"
      "↓ AZALTIRSAN: nesneler daha çabuk belirir — ama zayıf/hayalet kutu görülebilir."),
-    ("kararlilik", "Kutu kararlılığı", "kare", 5, 120, 30,
+    ("kararlilik", "Kutu kararlılığı", "kare", 5, 120,
      "Bir nesne bir an görünmez olursa takibi kaç kare hafızada tutulsun.\n"
      "(Teknik: ByteTrack track_buffer — Ultralytics varsayılanı 30)\n\n"
      "↑ ARTTIRIRSAN: kısa kayıplarda (önünden bir şey geçmesi) takip kopmaz — ama gerçekten "
      "kadraj dışına çıkan nesne geç silinir.\n"
      "↓ AZALTIRSAN: giden nesne hızlı silinir — ama takip daha çok kopar, ID değişir."),
-    ("cozunurluk", "Çözünürlük", "secim", 0, len(COZUNURLUK_SECENEK) - 1, 640,
+    ("cozunurluk", "Çözünürlük", "secim", 0, len(COZUNURLUK_SECENEK) - 1,
      "Modele verilen görüntü çözünürlüğü — HIZ ile UZAK NESNE görme arasındaki denge.\n"
      "(Ultralytics varsayılanı 640)\n\n"
      "↑ BÜYÜTÜRSEN (960/1280): 15 m'deki küçük hedefi daha iyi görür — ama FPS düşer.\n"
      "↓ KÜÇÜLTÜRSEN (416): akıcı olur, takip gecikmesi azalır — ama uzakta zayıflar.\n\n"
      "NOT: FPS düşerse hareketli hedefte nişan gecikmesi artar — ikisini birlikte düşün."),
-    ("iou", "Kutu ayrıştırma (IoU)", "yuzde", 10, 95, 70,
+    ("iou", "Kutu ayrıştırma (IoU)", "yuzde", 10, 95,
      "Üst üste binen iki kutunun AYNI nesne mi sayılacağı (NMS eşiği).\n"
      "(Ultralytics varsayılanı 0.70)\n\n"
      "↑ ARTTIRIRSAN: yan yana duran hedefler ayrı ayrı kalır — ama aynı nesneye çift kutu riski.\n"
      "↓ AZALTIRSAN: çift kutu temizlenir — ama sürüde (Aşama 2) bitişik hedefler birleşebilir."),
-    ("maks_tespit", "En fazla hedef", "sayi", 5, 300, 300,
+    ("maks_tespit", "En fazla hedef", "sayi", 5, 300,
      "Bir karede en fazla kaç kutu işlensin.\n(Ultralytics varsayılanı 300)\n\n"
      "Düşürmek çok kalabalık sahnede işi hafifletir; yarışma senaryosunda (en fazla 3-4 hedef) "
      "varsayılan zaten fazlasıyla yeterli."),
-    ("ayna", "Aynala (yatay çevir)", "anahtar", 0, 1, 0,
+    ("ayna", "Aynala (yatay çevir)", "anahtar", 0, 1,
      "Görüntüyü yatay çevirir (selfie görünümü).\n\n"
      "VARSAYILAN KAPALI — ham YOLO çıktısıyla birebir aynı görüntü.\n\n"
      "⚠ Webcam ile demo yaparken hareket yönü ters geldiği için açmak isteyebilirsiniz. "
@@ -202,24 +219,24 @@ AYAR_TANIM_TESPIT = [
 ]
 
 AYAR_TANIM_NISAN = [
-    ("fov", "Kamera görüş açısı", "onda", 200, 1200, 600,
+    ("fov", "Kamera görüş açısı", "onda", 200, 1200,
      "Kameranın YATAY görüş açısı (derece). Piksel hatasını açıya çevirmek için kullanılır — "
      "otonom takibin doğruluğu buna bağlıdır.\n\n"
      "Bilmiyorsanız: kameradan bilinen uzaklığa (ör. 2 m) bir cetvel koyup kadraja tam sığan "
      "genişliği (G) ölçün → FOV = 2 × atan(G / (2×2 m)).\n\n"
      "Yanlış girilirse gimbal ya hedefi aşar ya da yavaş yaklaşır."),
-    ("kp", "Takip gücü (Kp)", "yuzde", 10, 150, 50,
+    ("kp", "Takip gücü (Kp)", "yuzde", 10, 150,
      "Hedef merkezden kaçtığında hatanın ne kadarını TEK adımda kapatmaya çalışsın.\n\n"
      "↑ ARTTIRIRSAN: hedefe daha hızlı kilitlenir, hareketli hedefte geride kalma azalır — "
      "ama aşma (overshoot) ve salınım riski artar.\n"
      "↓ AZALTIRSAN: yumuşak ve kararlı — ama hareketli hedefin arkasında kalır.\n\n"
      "Hareketli hedefte kalıcı gecikme ≈ (hedef hızı × kare süresi) / Kp."),
-    ("kd", "Öngörü süresi (Kd)", "onda", 0, 30, 6,
+    ("kd", "Öngörü süresi (Kd)", "onda", 0, 30,
      "Hedefin KAÇ SANİYE SONRAKİ yerine nişan alınsın (ileri görüş).\n\n"
      "Kamera + işlem gecikmesini telafi eder; tipik olarak bir kare süresi kadar (0.06 sn).\n\n"
      "↑ ARTTIRIRSAN: hızlanan hedefte önünü keser — ama gürültüde zıplama yapar.\n"
      "↓ 0 YAPARSAN: saf oransal kontrol, en sakin ama en geç tepki."),
-    ("olu_bolge", "Ölü bölge", "yuzde", 0, 10, 2,
+    ("olu_bolge", "Ölü bölge", "yuzde", 0, 10,
      "Hedef merkeze bu kadar yakınsa (kare genişliğinin yüzdesi) motora komut GÖNDERİLMEZ.\n\n"
      "Amaç: lazer balonun üstünde SABİT dursun (dwell). Sıfırlanırsa sistem her karede "
      "titrer ve balonu patlatacak süre boyunca noktada kalamaz.\n\n"
@@ -950,7 +967,7 @@ class MainWindow(QMainWindow):
         self.ayar_btn.raise_()
 
     def _ayar_satiri(self, layout, tanim):
-        key, baslik, tip, mn, mx, oneri, aciklama = tanim
+        key, baslik, tip, mn, mx, aciklama = tanim
         kutu = QVBoxLayout()          # her ayar kendi grubunda (ic bosluk dar, gruplar arasi genis)
         kutu.setSpacing(6)
         ust = QHBoxLayout()
@@ -977,8 +994,10 @@ class MainWindow(QMainWindow):
         sl = QSlider(Qt.Horizontal)
         sl.setMinimum(0 if tip == "secim" else mn)
         sl.setMaximum(len(COZUNURLUK_SECENEK) - 1 if tip == "secim" else mx)
-        sl.setValue(self._ayar_slider_deger(key, tip))
-        sl.oneri_val = (COZUNURLUK_SECENEK.index(oneri) if tip == "secim" else oneri)
+        sl.setValue(self._slider_birimi(algi.AYAR[key], tip))
+        # "Onerilen" (yesil) isaret = ALGI'NIN VARSAYILANI. Tek kaynak orasi; burada
+        # ikinci bir kopya tutulsaydi varsayilan degisince yesil isaret sessizce yalan soylerdi.
+        sl.oneri_val = self._slider_birimi(algi.VARSAYILAN_AYAR[key], tip)
         sl.setObjectName("ayarsl")
         sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger, s=sl: self._ayar_degisti(k, t, val, d, s))
         kutu.addWidget(sl)
@@ -988,9 +1007,8 @@ class MainWindow(QMainWindow):
         self._ayar_degisti(key, tip, sl.value(), deger, sl)
 
     # --- ayar deger donusumleri: slider tam sayidir, ayar degeri olcekli olabilir ---
-    def _ayar_slider_deger(self, key, tip):
-        """algi.AYAR'daki degeri slider tam sayisina cevirir."""
-        v = algi.AYAR[key]
+    def _slider_birimi(self, v, tip):
+        """Bir ayar degerini slider tam sayisina cevirir (algi.AYAR ve VARSAYILAN_AYAR icin)."""
         if tip == "secim":
             # Kayitli cozunurluk listede yoksa en yakinina yuvarla (bozuk ayarlar.json)
             if int(v) in COZUNURLUK_SECENEK:
@@ -1077,13 +1095,12 @@ class MainWindow(QMainWindow):
     def _ayar_sifirla(self):
         algi.ayar_guncelle(**algi.VARSAYILAN_AYAR)
         for key, (sl, tip) in self.ayar_sliderlar.items():
-            sl.setValue(self._ayar_slider_deger(key, tip))
+            sl.setValue(self._slider_birimi(algi.AYAR[key], tip))
 
     def _ayar_dosya(self):
         return os.path.join(HERE, "ayarlar.json")
 
     def _ayar_yukle(self):
-        import json
         p = self._ayar_dosya()
         if os.path.isfile(p):
             try:
@@ -1094,7 +1111,6 @@ class MainWindow(QMainWindow):
                 pass
 
     def _ayar_kaydet(self):
-        import json
         try:
             with open(self._ayar_dosya(), "w", encoding="utf-8") as f:
                 json.dump(algi.AYAR, f, ensure_ascii=False, indent=2)
@@ -1428,34 +1444,25 @@ class MainWindow(QMainWindow):
         layout.addLayout(kutu)
         return (cb, *spinler)
 
+    # yon -> (buton adi, pan carpani, tilt carpani). "home"/"center" ayri ele alinir
+    # (aci degisimi degil, sifirlama). Tek tablo: basma ve birakma ayni yerden okur.
+    YON_TABLO = {"up": ("btn_up", 0.0, 1.0), "down": ("btn_down", 0.0, -1.0),
+                 "left": ("btn_left", -1.0, 0.0), "right": ("btn_right", 1.0, 0.0)}
+
     def _dpad_press(self, direction):
-        if direction == "up":
-            self.btn_up.setStyleSheet(self._key_active_style)
-            self._aci_hareket(0.0, self.aci_adim)
-        elif direction == "down":
-            self.btn_down.setStyleSheet(self._key_active_style)
-            self._aci_hareket(0.0, -self.aci_adim)
-        elif direction == "left":
-            self.btn_left.setStyleSheet(self._key_active_style)
-            self._aci_hareket(-self.aci_adim, 0.0)
-        elif direction == "right":
-            self.btn_right.setStyleSheet(self._key_active_style)
-            self._aci_hareket(self.aci_adim, 0.0)
-        elif direction in ("home", "center"):
+        if direction in ("home", "center"):
             self.btn_center.setStyleSheet(self._key_center_active_style)
             self._aci_reset()
+            return
+        ad, kpan, ktilt = self.YON_TABLO[direction]
+        getattr(self, ad).setStyleSheet(self._key_active_style)
+        self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)
 
     def _dpad_release(self, direction):
-        if direction == "up":
-            self.btn_up.setStyleSheet(self._key_normal_style)
-        elif direction == "down":
-            self.btn_down.setStyleSheet(self._key_normal_style)
-        elif direction == "left":
-            self.btn_left.setStyleSheet(self._key_normal_style)
-        elif direction == "right":
-            self.btn_right.setStyleSheet(self._key_normal_style)
-        elif direction in ("home", "center"):
+        if direction in ("home", "center"):
             self.btn_center.setStyleSheet(self._key_center_normal_style)
+            return
+        getattr(self, self.YON_TABLO[direction][0]).setStyleSheet(self._key_normal_style)
 
     # NOT (B1): burada eskiden ikinci bir ates yolu vardi (`_fire_bas`). Iki sorunu vardi:
     #   1. `self.kontrol.ates()` zorunlu `ac` argumani olmadan cagriliyordu -> TypeError
@@ -1540,7 +1547,9 @@ class MainWindow(QMainWindow):
         hem manuel (D-pad/WASD) hem otonom (_nisan_geldi) bu kapidan gecer.
         """
         # B2 — E-Stop: hicbir hareket komutu gecmez, aci etiketleri de DEGISMEZ.
-        if getattr(self, "thread", None) is not None and getattr(self.thread, "estop", False):
+        # (isinstance ile bakilir: QObject'in yerlesik thread() metodu yuzunden
+        #  hasattr/getattr(self,"thread") thread olusmadan once de dolu gorunur.)
+        if isinstance(getattr(self, "thread", None), AlgiThread) and self.thread.estop:
             return False
 
         yeni_pan = (self.pan_aci + d_pan) % 360.0
@@ -1558,23 +1567,31 @@ class MainWindow(QMainWindow):
             self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
             return False
 
+        # ESP32'ye HAM delta degil, GERCEKTEN UYGULANAN delta gider. Tilt limitinde
+        # (or. 60°) yukari basildiginda ekrandaki aci sabit kalir; ham delta gonderilseydi
+        # ESP32 hedefi buyumeye devam eder ve ekran gercek konumdan KOPARDI — B2'de
+        # duzeltilen hatanin aynisi. Pan sarmali oldugu icin daima tam uygulanir.
+        uyg_tilt = yeni_tilt - self.tilt_aci
+
         self.pan_aci = yeni_pan
         self.tilt_aci = yeni_tilt
         self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
         self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
 
-        # Atisa yasak bolgede miyiz ikazi
+        # Atisa yasak bolgede miyiz? Yalnizca ikaz DEGIL: lazer acikken bolgeye
+        # girilirse ates KESILIR (sartname: atisa-yasak alan, ates sirasinda da gecerli).
         if self.atis_yasak_aktif and (self.atis_pan_min <= self.pan_aci <= self.atis_pan_max):
             self.bolge_status.setText("⚠️ ATIŞA YASAK BÖLGEDESİNİZ — ATEŞ KİLİTLİ")
             self.bolge_status.setStyleSheet(f"color:{AMB}; font-size:11px; font-weight:700; padding:2px 0;")
+            self._ates_kes("ATIŞA YASAK AÇI BÖLGESİNE GİRİLDİ")
         else:
             self.bolge_status.setText("● BÖLGE GÜVENLİ")
             self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
 
         # ESP32 komutu gonder. mod: 0=Manuel 1=Otonom (protokol.py) — eskiden hep 1
         # gonderiliyordu; ESP32 tarafi moda gore davranacagi icin dogru mod sart.
-        if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
-            d = self.kontrol.nisan(1 if self.mod == "Otonom" else 0, d_pan, d_tilt)
+        if (d_pan or uyg_tilt) and getattr(self, "kontrol", None) and self.kontrol.bagli:
+            d = self.kontrol.nisan(1 if self.mod == "Otonom" else 0, d_pan, uyg_tilt)
             self._esp_goster(d)
         return True
 
@@ -1612,31 +1629,7 @@ class MainWindow(QMainWindow):
             self.aci_ayar_btn.setText("⚙ Açı Ayarları")
 
     def _step_btn_stil_guncelle(self, btn, secili):
-        if secili:
-            btn.setStyleSheet(
-                "QPushButton { "
-                "  background: #eaf1f8; "
-                "  border: 1.5px solid #1e4b7a; "
-                "  border-radius: 8px; "
-                "  color: #1e4b7a; "
-                "  font-size: 12px; "
-                "  font-weight: 700; "
-                "}"
-            )
-        else:
-            btn.setStyleSheet(
-                "QPushButton { "
-                "  background: #ffffff; "
-                "  border: 1px solid #dfe4ea; "
-                "  border-radius: 8px; "
-                "  color: #5f6b78; "
-                "  font-size: 12px; "
-                "} "
-                "QPushButton:hover { "
-                "  border-color: #c3d3e2; "
-                "  color: #2b3540; "
-                "}"
-            )
+        btn.setStyleSheet(ADIM_STIL_SECILI if secili else ADIM_STIL_NORMAL)
 
     def _aci_adim_sec(self, val):
         self.aci_adim = val
@@ -1738,61 +1731,44 @@ class MainWindow(QMainWindow):
         ev.addWidget(self.eng)
         h.addWidget(eng_card, 2)
 
-        # --- yasak alan kartlari ---
-        # 1. Atisa Yasak Alan Kart
-        atis_card = QFrame()
-        atis_card.setObjectName("panelk")
-        atv = QVBoxLayout(atis_card)
-        atv.setContentsMargins(15, 10, 15, 10)
-        atv.setSpacing(6)
-        ph_atis = QLabel("ATIŞA YASAK ALAN")
-        ph_atis.setObjectName("ph")
-        atv.addWidget(ph_atis)
-
-        tgl_atis = QFrame()
-        tgl_atis.setObjectName("angtgl")
-        th_atis = QHBoxLayout(tgl_atis)
-        th_atis.setContentsMargins(12, 9, 12, 9)
-        th_atis.setSpacing(10)
-        self.atis_yasak_lbl = QLabel('<small style="color:#8094a8">Devre Dışı — Serbest</small>')
-        self.atis_yasak_lbl.setObjectName("tgll")
-        self.atis_yasak_sw = QLabel()
-        self.atis_yasak_sw.setFixedSize(32, 16)
-        self.atis_yasak_sw.setStyleSheet("background:#c3d3e2;border-radius:8px;")
-        th_atis.addWidget(self.atis_yasak_lbl, 1)
-        th_atis.addWidget(self.atis_yasak_sw)
-        atv.addWidget(tgl_atis)
+        # --- yasak alan kartlari (ikisi ayni kaliptan) ---
+        atis_card, self.atis_yasak_lbl, self.atis_yasak_sw = self._yasak_kart("ATIŞA YASAK ALAN")
         h.addWidget(atis_card, 2)
-
-        # 2. Harekete Yasak Alan Kart
-        hareket_card = QFrame()
-        hareket_card.setObjectName("panelk")
-        hrv = QVBoxLayout(hareket_card)
-        hrv.setContentsMargins(15, 10, 15, 10)
-        hrv.setSpacing(6)
-        ph_hrk = QLabel("HAREKETE YASAK ALAN")
-        ph_hrk.setObjectName("ph")
-        hrv.addWidget(ph_hrk)
-
-        tgl_hrk = QFrame()
-        tgl_hrk.setObjectName("angtgl")
-        th_hrk = QHBoxLayout(tgl_hrk)
-        th_hrk.setContentsMargins(12, 9, 12, 9)
-        th_hrk.setSpacing(10)
-        self.hareket_yasak_lbl = QLabel('<small style="color:#8094a8">Devre Dışı — Serbest</small>')
-        self.hareket_yasak_lbl.setObjectName("tgll")
-        self.hareket_yasak_sw = QLabel()
-        self.hareket_yasak_sw.setFixedSize(32, 16)
-        self.hareket_yasak_sw.setStyleSheet("background:#c3d3e2;border-radius:8px;")
-        th_hrk.addWidget(self.hareket_yasak_lbl, 1)
-        th_hrk.addWidget(self.hareket_yasak_sw)
-        hrv.addWidget(tgl_hrk)
-        h.addWidget(hareket_card, 2)
+        hrk_card, self.hareket_yasak_lbl, self.hareket_yasak_sw = self._yasak_kart("HAREKETE YASAK ALAN")
+        h.addWidget(hrk_card, 2)
 
         # Ilk durum yansitmasi
         self._yasak_kartlari_guncelle()
 
         return alt
+
+    def _yasak_kart(self, baslik):
+        """Alt paneldeki bir yasak alan karti: baslik + (durum yazisi | anahtar rozeti).
+        Atisa ve harekete yasak kartlari birebir ayni kaliptir; icerigi
+        _yasak_kartlari_guncelle() doldurur. Doner: (kart, durum_label, anahtar_label)"""
+        kart = QFrame()
+        kart.setObjectName("panelk")
+        kv = QVBoxLayout(kart)
+        kv.setContentsMargins(15, 10, 15, 10)
+        kv.setSpacing(6)
+        ph = QLabel(baslik)
+        ph.setObjectName("ph")
+        kv.addWidget(ph)
+
+        tgl = QFrame()
+        tgl.setObjectName("angtgl")
+        th = QHBoxLayout(tgl)
+        th.setContentsMargins(12, 9, 12, 9)
+        th.setSpacing(10)
+        lbl = QLabel('<small style="color:#8094a8">Devre Dışı — Serbest</small>')
+        lbl.setObjectName("tgll")
+        sw = QLabel()
+        sw.setFixedSize(32, 16)
+        sw.setStyleSheet("background:#c3d3e2;border-radius:8px;")
+        th.addWidget(lbl, 1)
+        th.addWidget(sw)
+        kv.addWidget(tgl)
+        return kart, lbl, sw
 
     # ================= STATUS BAR =================
     def _sbar(self):
@@ -1901,47 +1877,28 @@ class MainWindow(QMainWindow):
                 self.sag_stack.setCurrentWidget(self.tk)
         self._asama_uygula()
 
+    def _tus_yonu(self, event):
+        """Klavye olayindan D-pad yonu. None = bizim tusumuz degil, Qt'ye birak.
+        (Basma ve birakma AYNI haritayi okur — ikisi ayri yazilirsa biri unutulur.)"""
+        if getattr(self, "mod", "") != "Manuel" or not hasattr(self, "pan_aci"):
+            return None
+        if event.isAutoRepeat():
+            return None
+        return TUS_YON.get(event.key())
+
     def keyPressEvent(self, event):
-        if getattr(self, "mod", "") == "Manuel" and hasattr(self, "pan_aci"):
-            if not event.isAutoRepeat():
-                k = event.key()
-                if k in (Qt.Key_W, Qt.Key_Up):
-                    self._dpad_press("up")
-                    return
-                elif k in (Qt.Key_S, Qt.Key_Down):
-                    self._dpad_press("down")
-                    return
-                elif k in (Qt.Key_A, Qt.Key_Left):
-                    self._dpad_press("left")
-                    return
-                elif k in (Qt.Key_D, Qt.Key_Right):
-                    self._dpad_press("right")
-                    return
-                elif k in (Qt.Key_R, Qt.Key_C, Qt.Key_Space):
-                    self._dpad_press("center")
-                    return
-        super().keyPressEvent(event)
+        yon = self._tus_yonu(event)
+        if yon is None:
+            super().keyPressEvent(event)
+            return
+        self._dpad_press(yon)
 
     def keyReleaseEvent(self, event):
-        if getattr(self, "mod", "") == "Manuel" and hasattr(self, "pan_aci"):
-            if not event.isAutoRepeat():
-                k = event.key()
-                if k in (Qt.Key_W, Qt.Key_Up):
-                    self._dpad_release("up")
-                    return
-                elif k in (Qt.Key_S, Qt.Key_Down):
-                    self._dpad_release("down")
-                    return
-                elif k in (Qt.Key_A, Qt.Key_Left):
-                    self._dpad_release("left")
-                    return
-                elif k in (Qt.Key_D, Qt.Key_Right):
-                    self._dpad_release("right")
-                    return
-                elif k in (Qt.Key_R, Qt.Key_C, Qt.Key_Space):
-                    self._dpad_release("center")
-                    return
-        super().keyReleaseEvent(event)
+        yon = self._tus_yonu(event)
+        if yon is None:
+            super().keyReleaseEvent(event)
+            return
+        self._dpad_release(yon)
 
     def _asama_sec(self, ad):
         if not self.asama_btns[ad].isEnabled():
@@ -2002,11 +1959,10 @@ class MainWindow(QMainWindow):
         aktif = self.estop_btn.isChecked()
         self.thread.estop = aktif
         self.estop_btn.setText("▶ DEVAM ET" if aktif else "⏻ ACİL DURDUR")
-        # 1. ATES kapisi (Yetenek 4)
+        # 1. ATES kapisi (Yetenek 4) — kesme islemi tek yoldan (_ates_kes) gecer.
+        if aktif:
+            self._ates_kes("ACİL DURDUR")
         self.fire_btn.setEnabled(not aktif)
-        if aktif and self.fire_btn.isChecked():
-            self.fire_btn.setChecked(False)
-            self.fire_btn.setText("A T E Ş")
         # 2. HAREKET kapisi (Yetenek 3): manuel yon kontrolleri kilitlenir.
         #    (Otonom nisan dongusu de AlgiThread._nisan_al icinde estop'ta durur.)
         for ad in ("btn_up", "btn_down", "btn_left", "btn_right", "btn_center"):
@@ -2054,6 +2010,20 @@ class MainWindow(QMainWindow):
         self.sb_msg.setText(f'<span style="color:{renk}">●</span>&nbsp;'
                             f'{"LAZER AKTİF" if ac else "Ateş kesildi"} ({kaynak})')
         self._esp_goster(d)
+
+    def _ates_kes(self, sebep):
+        """Devam eden atesi GUVENLIK gerekcesiyle keser (buton + donanim + alt cubuk).
+
+        `_ates_bas` yalnizca butona BASILDIGI ANI denetler; ates surerken kosullar
+        degisirse (or. gimbal atisa-yasak bolgeye girerse) kesme yolu burasidir.
+        Ates zaten kapaliysa hicbir sey yapmaz."""
+        if not self.fire_btn.isChecked():
+            return
+        self.fire_btn.setChecked(False)
+        self.fire_btn.setText("A T E Ş")
+        if self.kontrol.bagli:
+            self._esp_goster(self.kontrol.ates(False, mod=1 if self.mod == "Otonom" else 0))
+        self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;Ateş kesildi — {sebep}')
 
     def _esp_goster(self, d):
         """ESP32 durum paketini alt cubuga yansitir."""

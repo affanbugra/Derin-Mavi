@@ -95,6 +95,7 @@ Derin Mavi/
 │   ├── kontrol.py          #   Yüksek seviye kontrol API'si
 │   ├── protokol.py         #   UART paket protokolü (XOR checksum)
 │   ├── mock_esp32.py       #   Sahte ESP32 (donanımsız test)
+│   ├── kapi_testleri.py    #   Güvenlik kapıları testi (E-Stop / ateş / yasak alan)
 │   └── Grafik/             #   Logo + arayüz ikonları
 └── models/                 # Eğitilmiş model buraya (repoda boş gelir)
 ```
@@ -121,6 +122,14 @@ Gerçek donanım gelince `DERINMAVI_ESP=COM<n>` yeterlidir, uygulama kodu deği�
   `requirements.txt`'e ekle. Kodda her yol `__file__`'a görelidir → indir-çalıştır.
 - Model dosyaları (`*.pt`, `*.onnx`) ve veri setleri `.gitignore` ile repoya **girmez** —
   herkes kendi modelini lokalde tutar veya ekiple ayrı bir kanaldan paylaşır.
+- **Push'tan önce testleri çalıştır** (donanım/kamera gerektirmez, saniyeler sürer):
+  ```bash
+  python app/protokol.py && python app/renk_analizi.py && python app/mock_esp32.py
+  python app/kontrol.py && python app/nisan.py && python app/algi.py
+  python app/kapi_testleri.py     # E-Stop / ateş / yasak alan güvenlik kapıları
+  ```
+  Her modül kendi kendini test eder; `kapi_testleri.py` ise şartnamenin can alıcı
+  davranışlarını (E-Stop hareketi keser, yasak açıda ateş verilmez) pencere açmadan dener.
 
 ---
 

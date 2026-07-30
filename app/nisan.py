@@ -21,15 +21,18 @@ import algi
 #   ezip sistemi geri geri surer — olculdu). Bunun yerine once hata ONGORULUR
 #   (tahmin = e + Kd*de/dt), sonra tek Kp uygulanir: birimler tutarli, davranis
 #   kare hizindan bagimsiz.
-VARSAYILAN_KP = 0.50
-VARSAYILAN_KD = 0.06        # saniye (~1 kare @ 15 FPS)
+#
+# Degerler algi.VARSAYILAN_AYAR'dan gelir — ayarin TEK KAYNAGI orasidir (ayar paneli de
+# oradan okur). Burada ikinci bir kopya tutulsaydi biri degisince digeri sessizce yanlis kalirdi.
+VARSAYILAN_KP = algi.VARSAYILAN_AYAR["kp"]
+VARSAYILAN_KD = algi.VARSAYILAN_AYAR["kd"]      # saniye (~1 kare @ 15 FPS)
 
 # Tespit kutusu kare kare birkac piksel oynar; ham turev bunu buyutur (0-1, 1=yok).
 TUREV_YUMUSATMA = 0.5
 
 # Olu bolge: merkeze bu kadar yakinsa komut YOK. Aksi halde sistem her karede titrer
 # ve lazer balonun uzerinde sabit duramaz (dwell — CLAUDE.md §7).
-OLU_BOLGE_ORAN = 0.02        # %2 — 1280 px'te ±26 px
+OLU_BOLGE_ORAN = algi.VARSAYILAN_AYAR["olu_bolge"]   # %2 — 1280 px'te ±26 px
 
 # Tek komutta gonderilebilecek en buyuk delta (guvenlik: kacak komut olmasin).
 MAKS_ADIM_DER = 8.0
