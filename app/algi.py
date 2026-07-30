@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """DERIN MAVI - Algi cekirdegi (perception core).
 
-Kamera + YOLO tespit + RENK ile dost/dusman + bilinen-boyut mesafe mantiginin
-TEK KAYNAGI. Hem native arayuz (arayuz_qt.py) hem baska moduller bunu kullanir;
-kod tekrari olmaz. Donanim-bagimsizdir (bkz. CLAUDE.md ilke 7).
+Kamera + YOLO tespit + RENK ile dost/dusman mantiginin TEK KAYNAGI. Arayuz
+(arayuz_qt.py) bunu kullanir. Donanim-bagimsizdir (bkz. CLAUDE.md ilke 7).
 
 Kamera kaynagi: DERINMAVI_CAM env (index / dosya / RTSP-URL); tanimsizsa otomatik tarama.
 """
@@ -12,13 +11,14 @@ import time
 import tempfile
 import threading
 import cv2
-import numpy as np
 
-# QMediaDevices icin lazy import (PySide6.QtMultimedia)
+from renk_analizi import renk_oranlari
+
 _qmedia_ready = False
 
+
 def _ensure_qmedia():
-    """QMediaDevices'i kullanmak icin QApplication gerekir; arayuz varsa zaten olusturulmustur."""
+    """QMediaDevices kullanilabilir mi? (PySide6.QtMultimedia lazy import)"""
     global _qmedia_ready
     if _qmedia_ready:
         return True
@@ -29,75 +29,151 @@ def _ensure_qmedia():
     except ImportError:
         return False
 
-from renk_analizi import renk_oranlari
 
-# ---------------- Sabitler (sartname) ----------------
-# Ekran adlari. TARAF tipe DEGIL renge baglidir (kirmizi=dusman, cyan=dost).
+# ---------------- Sinif adlari ----------------
+# Model hangi sinifi uretirse uretsin kutu ASLA sessizce atilmaz; DISPLAY yalnizca
+# "guzel Turkce ad" tablosudur, bilinmeyen sinif modelin HAM adiyla gosterilir.
+# (Eski kod `if cls not in DISPLAY: continue` diyordu; model 'F16'/'iha' gibi ufak
+#  bir ad farkiyla egitilmisse TUM tespitler uyarisiz yok oluyordu.)
+# Anahtarlar _sadelestir()'den gecmis halleriyle yazilir. Yeni bir model farkli ad
+# kullaniyorsa buraya tek satir eklemek yeterli.
 DISPLAY = {"f16": "F-16", "helikopter": "Helikopter", "drone": "İHA", "fuze": "Füze"}
 DISPLAY_CV = {"f16": "F-16", "helikopter": "Helikopter", "drone": "IHA", "fuze": "Fuze"}
 
-# Asama-3 imha menzilleri (m), tipe gore. 10-15 m bandi TUM tipler icin ortak gecerli.
-MENZIL = {"f16": (10.0, 15.0), "helikopter": (5.0, 15.0),
-          "fuze": (5.0, 15.0), "drone": (0.0, 15.0)}
+BALON = "balon"      # nisan noktasi sinifi (CLAUDE.md §7: balon maketin ALTINDA)
 
-# Hedeflerin gercek boyutlari (m) — sartname tablosu. Monokuler mesafe icin.
-GERCEK_BOYUT = {"f16": 0.50, "helikopter": 0.50, "drone": 0.30, "fuze": 0.40}
 
-# Kamera odak uzakligi (piksel). mesafe_kalibrasyon.py ile olculur.
-# DIKKAT: kalibre edilmeden mesafeler YAKLASIKTIR. Env ile makineye ozel gecilebilir.
-FOCAL_PX = float(os.environ.get("DERINMAVI_FOCAL", "900"))
+def kanonik(ad):
+    """Sinif adini karsilastirilabilir hale getirir: kucuk harf, ayirici yok.
+    'F-16' -> 'f16' · 'Mini_Drone' -> 'minidrone'. Eslesme aranmaz, kutu atilmaz."""
+    s = str(ad).strip().lower()
+    for ch in ("-", "_", ".", " "):
+        s = s.replace(ch, "")
+    return s
 
-# =====================================================================
-#  CANLI AYARLAR (arayuzdeki "⚙ Ayarlar" panelinden anlik degistirilir)
-# =====================================================================
-# Her ayarin "onerilen" (varsayilan) degeri VARSAYILAN_AYAR'da. Panel bu degerleri
-# okur, kaydiriciyla degistirir; analiz_et her karede AYAR'i okur -> canli etki.
-#   hassasiyet  -> model.track(conf=..)  : nesneyi "gordu" saymak icin gereken guven
-#   gosterim    -> yeni kutuyu ekranda gostermek icin esik (takiptekiler zaten gosterilir)
-#   kararlilik  -> ByteTrack track_buffer: kaybolan kutu kac kare hafizada tutulur (titreme)
-#   cozunurluk  -> model.track(imgsz=..) : uzak nesne <-> hiz dengesi
-VARSAYILAN_AYAR = {"hassasiyet": 0.25, "gosterim": 0.35, "kararlilik": 30, "cozunurluk": 640}
+
+def goster_ad(kanon, ham):
+    """Arayuz adi: bilineni Turkce'ye cevir, bilinmeyeni HAM haliyle goster."""
+    return DISPLAY.get(kanon, str(ham))
+
+
+def goster_ad_cv(kanon, ham):
+    """OpenCV cizimi icin ASCII ad (cv2.putText Turkce karakter basamaz)."""
+    if kanon in DISPLAY_CV:
+        return DISPLAY_CV[kanon]
+    return str(ham).encode("ascii", "replace").decode("ascii")
+
+
+def model_sinif_ozeti(model):
+    """Alt cubuk teshisi: '2 sınıf · fuze, helikopter'. Arayuz 4 tip + balon vaat
+    ederken model 2 sinifliysa bu gercek gizli kalmasin."""
+    adlar = list(getattr(model, "names", {}).values())
+    if not adlar:
+        return "model sınıfları okunamadı"
+    kisa = ", ".join(adlar[:6]) + ("…" if len(adlar) > 6 else "")
+    return f"{len(adlar)} sınıf · {kisa}"
+
+
+def eksik_siniflar(model):
+    """Sartnamenin gerektirdigi ama modelde OLMAYAN siniflar (uyari icin)."""
+    var = {kanonik(a) for a in getattr(model, "names", {}).values()}
+    return [g for g in ("f16", "helikopter", "drone", "fuze", BALON) if g not in var]
+
+# ---------------- Canli ayarlar (arayuzdeki "⚙" panelinden) ----------------
+# Varsayilanlar ULTRALYTICS'IN KENDI VARSAYILANLARIDIR: ayarlara dokunmayan biri ham
+# `yolo track source=0` ile ayni davranisi gorur. Sapmak isteyen panelden sapar.
+#
+# model.track()'e verilen conf KASITLI olarak dusuktur (BESLEME_CONF): ByteTrack'in
+# fikri dusuk skorlu kutulari da alip ikinci asamada eslestirmektir, modele yuksek
+# conf verilirse o kutular NMS'te olur. Filtreleme tracker (hassasiyet) + cizim
+# (gosterim) katmanlarinda yapilir.
+BESLEME_CONF = 0.10
+
+VARSAYILAN_AYAR = {
+    "hassasiyet": 0.25,     # ByteTrack new_track_thresh + track_high_thresh
+    "gosterim": 0.25,       # bu guvenin altindaki kutu CIZILMEZ
+    "kararlilik": 30,       # ByteTrack track_buffer: kayip kutu kac kare yasar
+    "cozunurluk": 640,      # model.track(imgsz=)
+    "iou": 0.70,            # NMS IoU esigi
+    "maks_tespit": 300,     # kare basina en fazla kutu (max_det)
+    "ayna": 0,              # goruntuyu yatay cevir. 0 = ham YOLO ile birebir ayni
+    # --- nisan.py (Otonom takip geometrisi) ---
+    "fov": 60.0,            # kameranin yatay gorus acisi (derece)
+    "kp": 0.50,             # takip gucu: hatanin ne kadari tek adimda kapatilsin
+    "kd": 0.06,             # ongoru suresi (sn) — gecikme telafisi
+    "olu_bolge": 0.02,      # merkeze bu kadar yakinsa komut yok (dwell icin sart)
+}
 AYAR = dict(VARSAYILAN_AYAR)
-_tracker_yeniden_kur = True   # kararlilik degisince (ve ilk kullanimda) tracker yeniden kurulur
 
-# geriye donuk uyumluluk (eski koda referans varsa)
-FLOOR = VARSAYILAN_AYAR["gosterim"]
-INFER_IMGSZ = VARSAYILAN_AYAR["cozunurluk"]
+# Bozuk/eski ayarlar.json degerleri sisteme sizmasin diye gecerli araliklar.
+AYAR_SINIR = {
+    "hassasiyet": (0.05, 0.95), "gosterim": (0.05, 0.95),
+    "kararlilik": (5, 300), "cozunurluk": (320, 1280),
+    "iou": (0.10, 0.95), "maks_tespit": (1, 1000),
+    "ayna": (0, 1), "fov": (20.0, 140.0),
+    "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
+}
 
-# ByteTrack config'i track_buffer'i canli degistirebilmek icin kendi yaml'imiza yazariz.
+_ayar_kilit = threading.Lock()   # AYAR: GUI thread yazar, algi thread okur
+_tracker_yeniden_kur = True      # hassasiyet/kararlilik degisince tracker yeniden kurulur
+
+# ByteTrack ayarlarini canli degistirebilmek icin kendi yaml'imizi yazariz.
 _TRACKER_YAML = os.path.join(tempfile.gettempdir(), "derinmavi_bytetrack.yaml")
 
 
-def _tracker_yaml_yaz():
-    """Guncel track_buffer ile ByteTrack config dosyasini yazar."""
+def _tracker_yaml_yaz(a):
+    """Guncel ayarlarla ByteTrack config'i yazar. Ultralytics varsayilan sablonu;
+    yalnizca hassasiyet ve kararlilik kullanicidan gelir."""
+    hass = float(a["hassasiyet"])
     with open(_TRACKER_YAML, "w", encoding="utf-8") as f:
         f.write(
             "tracker_type: bytetrack\n"
-            "track_high_thresh: 0.1\n"      # esik dusuk; asil hassasiyet model conf'unda
-            "track_low_thresh: 0.05\n"
-            "new_track_thresh: 0.1\n"
-            f"track_buffer: {int(AYAR['kararlilik'])}\n"
+            f"track_high_thresh: {hass:.3f}\n"
+            "track_low_thresh: 0.1\n"
+            f"new_track_thresh: {hass:.3f}\n"
+            f"track_buffer: {int(a['kararlilik'])}\n"
             "match_thresh: 0.8\n"
             "fuse_score: True\n"
         )
 
 
-def ayar_guncelle(**kw):
-    """Arayuzden gelen ayar degisikligini uygular (canli). kararlilik degisirse
-    tracker'in yeniden kurulmasi gerekir (bir sonraki karede yapilir)."""
-    global _tracker_yeniden_kur
-    for k, v in kw.items():
-        if k not in AYAR:
-            continue
-        if k == "kararlilik" and int(v) != int(AYAR[k]):
-            _tracker_yeniden_kur = True
-        AYAR[k] = v
+def ayar_al():
+    """Ayarlarin o anki kopyasi. analiz_et kare basina TEK kez cagirir ki kare
+    ortasinda ayar degisince yari-eski/yari-yeni karisim olusmasin."""
+    with _ayar_kilit:
+        return dict(AYAR)
 
-# BGR renkler (arayuz cizimleri)
-RED = (32, 32, 191)      # dusman (A3)
-BLUE = (168, 88, 18)     # dost (A3)
-HEDEF = (0, 170, 255)    # notr hedef rengi (A1/A2 — dost/dusman ayrimi yok, hepsi hedef)
-GRAY = (140, 140, 140)   # (kullanilmiyor; ileride gerekebilir)
+
+def _kirp(k, v):
+    """Bir ayar degerini gecerli araliga kirpar; cevrilemezse varsayilana doner."""
+    alt, ust = AYAR_SINIR.get(k, (None, None))
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return VARSAYILAN_AYAR[k]
+    if alt is not None:
+        v = max(alt, min(ust, v))
+    return int(round(v)) if isinstance(VARSAYILAN_AYAR[k], int) else v
+
+
+def ayar_guncelle(**kw):
+    """Arayuzden gelen ayar degisikligini uygular (canli). Bilinmeyen anahtar yok
+    sayilir, bozuk deger araliga kirpilir. Tracker'i etkileyen ayar degisirse
+    tracker bir sonraki karede yeniden kurulur."""
+    global _tracker_yeniden_kur
+    with _ayar_kilit:
+        for k, v in kw.items():
+            if k not in AYAR:
+                continue
+            yeni = _kirp(k, v)
+            if k in ("kararlilik", "hassasiyet") and yeni != AYAR[k]:
+                _tracker_yeniden_kur = True
+            AYAR[k] = yeni
+
+# BGR renkler (kutu cizimleri)
+RED = (32, 32, 191)      # dusman (yalniz A3)
+BLUE = (168, 88, 18)     # dost (yalniz A3)
+HEDEF = (0, 170, 255)    # A1/A2: taraf ayrimi yok, hepsi hedef
 YELLOW = (60, 200, 235)  # balon (nisan noktasi)
 
 CAM_SOURCE = os.environ.get("DERINMAVI_CAM", "").strip()
@@ -115,6 +191,106 @@ AKTIF_INDEX = None   # su an acik olan kamera index'i (arayuz secim listesi icin
 
 # ---------------- Kamera (donanim-bagimsiz) ----------------
 AC_TIMEOUT = 4.0   # tek bir VideoCapture acilisi icin ust sinir (sn) — asla asili kalma
+
+# Istenen kamera formati (kamera desteklemezse OpenCV en yakinina duser).
+# 640x480'de 15 m'deki 30 cm'lik IHA ~8 piksel olur, model goremez.
+ISTENEN_W = int(os.environ.get("DERINMAVI_CAM_W", "1280"))
+ISTENEN_H = int(os.environ.get("DERINMAVI_CAM_H", "720"))
+ISTENEN_FPS = int(os.environ.get("DERINMAVI_CAM_FPS", "30"))
+
+
+def _cap_ayarla(cap):
+    """Acilan kameraya format + tampon ayarlarini uygular.
+
+    BUFFERSIZE=1: OpenCV birkac kare tamponlar ve cap.read() tamponun EN ESKI
+    karesini verir. Inference kameradan yavas olunca tampon dolu kalir ve goruntu
+    ~200-350 ms geride gider (kutu nesnenin arkasinda kalir).
+    MJPG: cogu webcam 720p'yi sikistirilmamis YUY2 ile ~10 FPS, MJPG ile 30 FPS
+    verir; MJPG istenmezse cozunurluk yukseltmek kare hizini sessizce dusurur.
+    SIRA: FOURCC once, cozunurluk sonra (tersi bazi surucularde yok sayilir)."""
+    try:
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    except Exception:
+        pass
+    for prop, deger in ((cv2.CAP_PROP_BUFFERSIZE, 1),
+                        (cv2.CAP_PROP_FRAME_WIDTH, ISTENEN_W),
+                        (cv2.CAP_PROP_FRAME_HEIGHT, ISTENEN_H),
+                        (cv2.CAP_PROP_FPS, ISTENEN_FPS)):
+        try:
+            cap.set(prop, deger)
+        except Exception:
+            pass   # her backend her prop'u desteklemez
+    return cap
+
+
+def kamera_bilgi(cap):
+    """Kameranin GERCEKTEN verdigi format (istenen degil) — alt cubuk/teshis icin."""
+    if cap is None:
+        return None
+    try:
+        return {"w": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                "h": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                "fps": float(cap.get(cv2.CAP_PROP_FPS) or 0.0)}
+    except Exception:
+        return None
+
+
+class KameraOkuyucu:
+    """Kamerayi kendi thread'inde surekli okur, yalnizca EN SON kareyi tutar.
+
+    cap.read() ana dongude cagrilirsa, inference kameradan yavas oldugu anda surucu
+    tamponu dolar ve read() hep eski kareyi verir -> goruntu gecikir.
+    Tampon drenaji cozum degil: grab() bloklayici oldugu icin "n kare at" yapmak
+    FPS'i kamera_fps/n'e bolerdi. Ayri thread kamera hiziyla doner; oku() her zaman
+    en taze kareyi verir, islenemeyen kareler atlanir."""
+
+    def __init__(self, cap):
+        self.cap = cap
+        self._kare = None
+        self._sira = 0            # kac kare uretildi (ayni kareyi iki kez islememek icin)
+        self._kilit = threading.Lock()
+        self._calis = True
+        self.hata_sayaci = 0
+        self._th = threading.Thread(target=self._dongu, daemon=True)
+        self._th.start()
+
+    def _dongu(self):
+        while self._calis:
+            cap = self.cap
+            if cap is None:
+                time.sleep(0.01)
+                continue
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                self.hata_sayaci += 1
+                time.sleep(0.01)
+                continue
+            self.hata_sayaci = 0
+            with self._kilit:
+                self._kare = frame
+                self._sira += 1
+
+    def oku(self, son_sira=None):
+        """En taze kareyi dondurur: (kare, sira). Yeni kare yoksa (None, sira).
+        `son_sira` verilirse ayni kare tekrar islenmez."""
+        with self._kilit:
+            if self._kare is None or (son_sira is not None and self._sira == son_sira):
+                return None, self._sira
+            return self._kare, self._sira
+
+    def cap_degistir(self, yeni_cap):
+        """Kamera degisiminde (arayuzden secim) okuyucuyu yeni cap'e baglar."""
+        with self._kilit:
+            self._kare = None
+        self.cap = yeni_cap
+        self.hata_sayaci = 0
+
+    def kapat(self):
+        self._calis = False
+        self._th.join(timeout=1.0)
+        if self.cap is not None:
+            self.cap.release()
+            self.cap = None
 
 
 def _grab_gercek(cap):
@@ -151,10 +327,14 @@ def _dene(idx, backend, ad):
     """idx+backend'i zaman asimiyla acar; gercek kare verirse cap, yoksa None."""
     global AKTIF_INDEX
     cap = _ac_timeout(idx, backend)
-    if cap is not None and cap.isOpened() and _grab_gercek(cap):
-        print(f"Kamera acildi: index {idx}, backend {ad}")
-        AKTIF_INDEX = idx
-        return cap
+    if cap is not None and cap.isOpened():
+        _cap_ayarla(cap)                      # format + BUFFERSIZE=1 (A3) — test KARESINDEN ONCE
+        if _grab_gercek(cap):
+            bilgi = kamera_bilgi(cap) or {}
+            print(f"Kamera acildi: index {idx}, backend {ad}, "
+                  f"format {bilgi.get('w')}x{bilgi.get('h')} @{bilgi.get('fps')}")
+            AKTIF_INDEX = idx
+            return cap
     if cap is not None:
         cap.release()
     return None
@@ -169,60 +349,38 @@ def _ac_index(idx):
     return None
 
 
+# Telefonu webcam yapan uygulamalar (kamera darbogazinda pratik bir yedek — bkz. CLAUDE.md §12).
+TELEFON_UYG = {"droidcam": "DroidCam", "ivcam": "iVCam", "iriun": "Iriun"}
+# Dahili kamera ipuclari: "Integrated Camera" gibi acik adlar + laptop sensor kod adlari.
+DAHILI_IPUCU = ("integrated", "built-in", "facetime", "techfront", "ov97", "ov56", "ov27")
+
+
 def _guzel_kamera_adi(raw: str) -> str:
-    """Ham aygit adini kullanici dostu Turkce isme cevirir.
+    """Ham aygit adini secim listesinde okunakli hale getirir. Amac tek: operator
+    "hangisi laptopun kamerasi, hangisi taktigim kamera" ayrimini gorsun.
 
-    Ornekler:
-        'ov9734_techfront_camera'          -> 'PC Kamerası'
-        'Integrated Camera'                -> 'PC Kamerası'
-        'OBSBOT Meet SE StreamCamera'      -> 'USB Kamera · OBSBOT Meet SE'
-        'USB2.0 HD UVC WebCam'             -> 'USB Kamera'
-        'DroidCam Source 3'                -> 'Telefon Kamerası · DroidCam'
-        'e2eSoft iVCam'                    -> 'Telefon Kamerası · iVCam'
-        'OBS Virtual Camera'               -> 'Sanal Kamera · OBS'
-    """
+        'ov9734_techfront_camera'      -> 'PC Kamerası'
+        'OBSBOT Meet SE StreamCamera'  -> 'USB Kamera · OBSBOT Meet SE'
+        'USB2.0 HD UVC WebCam'         -> 'USB Kamera'
+
+    Tanimadigi cihaz HAM adiyla gecer — hicbir kamera listede kaybolmaz.
+    (Bu ad yalnizca gorunustur; kamera secimi/karar mantigi index ile calisir.)"""
     low = raw.lower().replace("_", " ")
-
-    # --- Telefon kamera uygulamalari ---
-    if "droidcam" in low:
-        return "Telefon Kamerası · DroidCam"
-    if "ivcam" in low:
-        return "Telefon Kamerası · iVCam"
-    if "iriun" in low:
-        return "Telefon Kamerası · Iriun"
-    if "epoccam" in low:
-        return "Telefon Kamerası · EpocCam"
-    if "camo" in low and "virtual" not in low:
-        return "Telefon Kamerası · Camo"
-
-    # --- Sanal kameralar ---
-    if "obs virtual" in low or "obs-virtual" in low:
-        return "Sanal Kamera · OBS"
+    for anahtar, ad in TELEFON_UYG.items():
+        if anahtar in low:
+            return f"Telefon Kamerası · {ad}"
     if "virtual" in low:
         return "Sanal Kamera"
-
-    # --- Dahili / entegre kameralar ---
-    dahili_ipuclari = ("integrated", "built-in", "facetime", "techfront",
-                       "ov9734", "ov5693", "ov2740", "front camera",
-                       "ir camera", "laptop", "notebook")
-    if any(k in low for k in dahili_ipuclari):
-        if "ir " in low or "infrared" in low:
-            return "PC Kamerası · IR"
+    if any(k in low for k in DAHILI_IPUCU):
         return "PC Kamerası"
 
-    # --- USB / harici kameralar ---
-    # Marka adini cikar: bilinen teknik son ekleri kaldir
+    # Harici/USB: teknik son ekleri atip marka adini birak.
     temizle = raw
-    for suf in ("StreamCamera", "Stream Camera", "WebCam", "Webcam",
-                "webcam", "HD UVC", "UVC", "USB2.0", "USB 2.0",
-                "USB3.0", "USB 3.0", "Video", "Camera", "camera",
-                "Cam", "cam", "Source", "Pro", "HD"):
-        temizle = temizle.replace(suf, "")
+    for suf in ("StreamCamera", "Stream Camera", "WebCam", "Webcam", "UVC",
+                "USB2.0", "USB 2.0", "USB3.0", "USB 3.0", "Camera", "Cam", "HD"):
+        temizle = temizle.replace(suf, "").replace(suf.lower(), "")
     marka = " ".join(temizle.split()).strip(" -·.,")
-
-    if marka:
-        return f"USB Kamera · {marka}"
-    return "USB Kamera"
+    return f"USB Kamera · {marka}" if marka else "USB Kamera"
 
 
 def kameralari_listele_qt():
@@ -249,12 +407,10 @@ def kameralari_listele_qt():
         return []
 
 
-def kameralari_listele(max_idx=5, haric=()):
+def kameralari_listele(max_idx=5):
     """Eski OpenCV index taramasi (fallback). Yeni kod kameralari_listele_qt() kullanir."""
     bulunan = []
     for i in range(max_idx):
-        if i in haric:
-            continue
         for backend, _ in _BACKENDS:
             cap = cv2.VideoCapture(i, backend)
             ok = cap.isOpened()
@@ -326,51 +482,45 @@ def open_camera():
     return None
 
 
-# ---------------- Mesafe ----------------
-# DIKKAT: MESAFE OZELLIGI GECICI OLARAK DEVRE DISI (18.07.2026, kullanici karari).
-# FOCAL_PX kalibre edilmeden uretilen sayilar YANILTICI oldugu icin (or. "12.4 m" gercekte
-# olcum degil, kaba tahmin) UI'dan ve karar zincirinden CIKARILDI. Asagidaki fonksiyon ve
-# MENZIL/GERCEK_BOYUT/FOCAL_PX sabitleri, gercek mesafe olcum ozelligi (kalibrasyon + belki
-# stereo/derinlik) eklenene kadar KULLANILMIYOR; sartname kurallarini (imha menzil tablosu)
-# ve gelecekteki entegrasyonu belgelemek icin korunuyor. Yeniden aktif etmek icin analiz_et
-# icinde est_distance()/MENZIL cagrisini geri ekleyin.
-def est_distance(cls, box_px):
-    """Bilinen gercek boyuttan monokuler mesafe: d = boyut * odak / piksel_boyut.
-    NOT: su an analiz_et() tarafindan CAGRILMIYOR (yukaridaki notu okuyun)."""
-    x1, y1, x2, y2 = box_px
-    boyut_px = max(x2 - x1, y2 - y1)
-    if boyut_px <= 0:
-        return 25.0
-    d = GERCEK_BOYUT.get(cls, 0.5) * FOCAL_PX / boyut_px
-    return float(np.clip(round(d, 1), 0.5, 30.0))
-
-
-# ---------------- Takip (ByteTrack tabanli, KARARLI) ----------------
-# model.track(persist=True) ByteTrack ile her nesneye kalici bir ID verir ve kisa
-# kayiplarda takibi surdurur. KENDI coasting/EMA katmanimizi TUTMUYORUZ (o yol
-# hayalet + cift kutu + gecikme yaratiyordu). Bunun yerine dogrudan ByteTrack'in
-# O KAREDEKI kutusunu cizeriz -> kutu her zaman nesnenin GERCEK/ANLIK yerinde,
-# gecikme yok, hayalet yok, cift kutu yok.
+# ---------------- Takip (ByteTrack) ----------------
+# model.track(persist=True) her nesneye kalici ID verir ve kisa kayiplarda takibi
+# surdurur. Kendi coasting/EMA katmanimiz YOK (hayalet + cift kutu yaratiyordu);
+# dogrudan ByteTrack'in o karedeki kutusu cizilir.
 #
-# Titremeyi onleyen kilit fikir: bir kutunun takip ID'si varsa ByteTrack onu
-# ONAYLAMISTIR; guveni FLOOR altinda olsa bile GOSTERIRIZ (eski kod bunlari
-# gizleyip titretiyordu). ID yoksa (ilk kare/zayif) FLOOR ile gurultu elenir.
-#
-# Taraf hafizasi: yalniz RENK karari icin (kutu konumuna DOKUNMAZ) ve yalniz ASAMA 3'te.
-# Renk bir an okunamazsa (ikisi de ~0) son bilinen taraf korunur -> dost/dusman yanip sonmez.
-_taraf_hafiza = {}   # id -> son bilinen taraf ("Düşman"/"Dost")
+# ID'li kutuya gosterim esiginde kucuk bir tolerans taninir: onaylanmis nesne bir
+# kare zayiflayinca titremesin. Ama esik yine UYGULANIR — eski kod "ID varsa guven
+# ne olursa olsun goster" diyordu ve olu tespitler track_buffer boyunca hayalet
+# kutu olarak ekranda kaliyordu.
+ID_TOLERANS = 0.80   # ID'li kutu icin esik bu oranla yumusatilir (0.25 -> 0.20)
 
-RENK_ESIK = 0.02     # bu oranin altinda renk "okunamadi" sayilir (hafizaya dusulur)
+# Taraf hafizasi: yalniz A3 renk karari icin, kutu konumuna DOKUNMAZ. Renk bir an
+# okunamazsa son bilinen taraf korunur -> dost/dusman etiketi yanip sonmez.
+_taraf_hafiza = {}   # takip id -> "Düşman" | "Dost"
+_budama_sayaci = 0
+
+RENK_ESIK = 0.02      # bu oranin altinda renk "okunamadi" sayilir
+BUDAMA_PERIYOT = 300  # kac karede bir olu ID'ler temizlenir
 
 
 def takip_sifirla():
-    """Takip yardimci hafizasini temizler (or. kamera degisince cagirilir)."""
+    """Taraf hafizasini temizler (kamera degisince cagirilir)."""
     _taraf_hafiza.clear()
 
 
+def _hafiza_buda(canli_idler):
+    """Goruntude olmayan ID'leri taraf hafizasindan siler; sozluk sinirsiz buyumesin."""
+    global _budama_sayaci
+    _budama_sayaci += 1
+    if _budama_sayaci < BUDAMA_PERIYOT:
+        return
+    _budama_sayaci = 0
+    for tid in [k for k in _taraf_hafiza if k not in canli_idler]:
+        del _taraf_hafiza[tid]
+
+
 def _taraf_belirle(frame, box, tid):
-    """ASAMA 3 taraf karari — BINARY: maviye yakin=Dost, kirmiziya yakin=Düşman, arasi yok.
-    Renk hic okunamazsa (ikisi de ~0) son bilinen tarafa duseriz (yanip sonmesin)."""
+    """A3 taraf karari — binary: cyan baskin=Dost, degilse Düşman (arasi yok).
+    Renk hic okunamazsa son bilinen tarafa duseriz."""
     kirmizi, cyan = renk_oranlari(frame, box)
     if max(kirmizi, cyan) < RENK_ESIK and tid in _taraf_hafiza:
         return _taraf_hafiza[tid]
@@ -384,61 +534,65 @@ def _taraf_belirle(frame, box, tid):
 def analiz_et(model, frame, estop=False, asama=None):
     """Bir kareyi analiz eder. Doner: (dets, balonlar, active_idx).
 
-    asama: 1 | 2 | 3 | None  — SARTNAME'ye gore davranis degisir:
-      * Asama 1-2: TUM maketler kirmizi, dost YOK -> renk isi HIC yapilmaz.
-        Her tespit "Hedef"tir; hepsi angaje edilebilir (A2: hepsi vurulur, A1: sirayla manuel).
-      * Asama 3: taraf RENKTEN belirlenir (mavi=Dost, kirmizi=Düşman, arasi yok);
-        YALNIZCA "Düşman" kilitlenir (dost vurmak -10).
+    asama (sartname davranisi):
+      1-2 : tum maketler kirmizi, dost YOK -> renk isi hic yapilmaz, her tespit "Hedef"
+      3   : taraf RENKTEN belirlenir; yalnizca "Düşman" kilitlenir (dost vurmak -10)
 
-    dets: her biri {cls, ad, tip, conf, box, id}
-          tip: A3'te "Düşman"/"Dost"; A1/A2/None'da "Hedef"
-    balonlar: [(x1,y1,x2,y2), ...]  (nisan noktalari — balon maketin ALTINDA)
-    active_idx: kilitlenen hedefin index'i; estop veya hedef yoksa -1.
-
-    Kutular ByteTrack'in ANLIK ciktisidir: nesnenin gercek yerinde, gecikmesiz.
-    Takip ID'li kutular dusuk guvende de gosterilir -> titremez, hayalet/cift kutu olmaz.
+    dets        : [{cls, ham, ad, tip, conf, box, id}, ...]
+    balonlar    : [(x1,y1,x2,y2), ...] — nisan noktalari
+    active_idx  : kilitli hedefin index'i; estop veya hedef yoksa -1
     """
-    # CANLI AYAR: kararlilik (track_buffer) degistiyse tracker'i yeniden kur.
+    a = ayar_al()
+    gosterim = float(a["gosterim"])
+
     global _tracker_yeniden_kur
     if _tracker_yeniden_kur:
-        _tracker_yaml_yaz()
-        try:   # mevcut tracker'i dusur ki yeni track_buffer ile yeniden kurulsun
+        _tracker_yaml_yaz(a)
+        try:   # mevcut tracker'i dusur ki yeni ayarlarla yeniden kurulsun
             if getattr(model, "predictor", None) is not None and hasattr(model.predictor, "trackers"):
                 del model.predictor.trackers
         except Exception:
             pass
         _tracker_yeniden_kur = False
 
-    gosterim = AYAR["gosterim"]
-    results = model.track(frame, persist=True, conf=AYAR["hassasiyet"],
-                          imgsz=AYAR["cozunurluk"], tracker=_TRACKER_YAML, verbose=False)
+    # conf=BESLEME_CONF kasitli dusuk (bkz. dosya basi): filtrelemeyi tracker
+    # (hassasiyet) ve cizim (gosterim) yapar, NMS degil.
+    results = model.track(frame, persist=True,
+                          conf=BESLEME_CONF,
+                          iou=float(a["iou"]),
+                          max_det=int(a["maks_tespit"]),
+                          imgsz=int(a["cozunurluk"]),
+                          tracker=_TRACKER_YAML, verbose=False)
     r = results[0]
     balonlar = []
     dets = []
+    canli_idler = set()
     if r.boxes is not None:
         for b in r.boxes:
-            cls = r.names[int(b.cls)]
+            ham_ad = r.names[int(b.cls)]     # modelin kendi sinif adi
+            cls = kanonik(ham_ad)
             conf = float(b.conf)
             x1, y1, x2, y2 = [int(v) for v in b.xyxy[0].tolist()]
             tid = int(b.id.item()) if b.id is not None else None
-            if cls == "balon":
-                if conf >= gosterim or tid is not None:
-                    balonlar.append((x1, y1, x2, y2))
-                continue
-            if cls not in DISPLAY:
-                continue
-            # Takip ID'si varsa ByteTrack onaylamis -> dusuk conf'ta da goster (titremez).
-            # ID yoksa (ilk kare / zayif tespit) "gosterim" esigi ile gurultuyu ele.
-            if tid is None and conf < gosterim:
-                continue
-            # SARTNAME: taraf = RENK, ama YALNIZ Asama 3'te. A1-A2'de hepsi kirmizi/hedef.
-            taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
-            dets.append({"cls": cls, "ad": DISPLAY[cls], "tip": taraf,
-                         "conf": int(round(conf * 100)), "box": (x1, y1, x2, y2), "id": tid})
+            if tid is not None:
+                canli_idler.add(tid)
 
-    # Aktif hedef (kilit). E-Stop'ta kilit YOK.
-    #   A3 : yalnizca "Düşman" kilitlenir (dosta ates edilmez, -10).
-    #   A1/A2/None : dost kavrami yok -> her tespit angaje edilebilir hedeftir.
+            esik = gosterim * ID_TOLERANS if tid is not None else gosterim
+            if conf < esik:
+                continue
+
+            if cls == BALON:                 # nisan noktasi, hedef listesine girmez
+                balonlar.append((x1, y1, x2, y2))
+                continue
+
+            taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
+            dets.append({"cls": cls, "ham": ham_ad, "ad": goster_ad(cls, ham_ad),
+                         "tip": taraf, "conf": int(round(conf * 100)),
+                         "box": (x1, y1, x2, y2), "id": tid})
+
+    _hafiza_buda(canli_idler)
+
+    # Kilit: A3'te yalniz Düşman (dosta ates yok), A1/A2'de her tespit hedeftir.
     active_idx = -1
     if not estop and dets:
         if asama == 3:
@@ -459,24 +613,56 @@ def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, YELLOW, 1, cv2.LINE_AA)
     for i, d in enumerate(dets):
         tip = d["tip"]
-        # Renk: A3'te taraf rengi (kirmizi/mavi); A1-A2'de notr HEDEF rengi (taraf yok).
         color = RED if tip == "Düşman" else (BLUE if tip == "Dost" else HEDEF)
         x1, y1, x2, y2 = d["box"]
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
-        # Kutu etiketi: A3'te "Dusman/Dost - Tip - %.."; A1-A2'de (tip=="Hedef") SADECE tip adi.
+        # Etiket: A3'te "Dusman/Dost - Tip - %.."; A1-A2'de yalniz "Tip - %.."
         tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(tip)
-        ad_cv = DISPLAY_CV.get(d['cls'], d['cls'])
+        ad_cv = goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
         txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
         f, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
         (tw, th), _ = cv2.getTextSize(txt, f, fs, ft)
         ly = max(y1, th + 10)
         cv2.rectangle(frame, (x1, ly - th - 8), (x1 + tw + 12, ly), color, -1, cv2.LINE_AA)
         cv2.putText(frame, txt, (x1 + 6, ly - 4), f, fs, (255, 255, 255), ft, cv2.LINE_AA)
-        # Aktif hedefe nisan reticle (E-Stop'ta cizilmez). active_idx zaten asamaya gore
-        # secildi (A3=dusman, A1-A2=herhangi hedef) -> dosta asla nisan cizilmez.
+        # Nisan isareti yalniz kilitli hedefe (active_idx asamaya gore secildi, dosta cizilmez)
         if i == active_idx and not estop:
             cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
             cv2.circle(frame, (cx, cy), 16, color, 2, cv2.LINE_AA)
             cv2.line(frame, (cx - 22, cy), (cx + 22, cy), color, 1, cv2.LINE_AA)
             cv2.line(frame, (cx, cy - 22), (cx, cy + 22), color, 1, cv2.LINE_AA)
     return frame
+
+
+if __name__ == "__main__":
+    # Kendi kendine test — kamera/model gerektirmez.
+
+    # Sinif adi sadelestirme; bilinmeyen sinif ATILMAZ, ham adiyla gosterilir.
+    assert kanonik("F-16") == "f16"
+    assert kanonik("Mini_Drone") == "minidrone"
+    assert kanonik("kus") == "kus"
+    assert goster_ad("f16", "F-16") == "F-16"           # bilinen -> Turkce ad
+    assert goster_ad("kus", "kus") == "kus"             # bilinmeyen -> ham ad
+    assert goster_ad_cv("drone", "drone") == "IHA"      # cizim icin ASCII
+
+    # Bozuk/asiri ayar degerleri araliga kirpilir, bilinmeyen anahtar yok sayilir.
+    ayar_guncelle(hassasiyet=9.9, kararlilik=-5, cozunurluk="abc", bilinmeyen=1)
+    assert AYAR["hassasiyet"] == 0.95 and AYAR["kararlilik"] == 5
+    assert AYAR["cozunurluk"] == VARSAYILAN_AYAR["cozunurluk"]   # cevrilemedi -> varsayilan
+    assert "bilinmeyen" not in AYAR
+    ayar_guncelle(**VARSAYILAN_AYAR)
+    assert ayar_al() == VARSAYILAN_AYAR
+
+    # Tracker yaml ultralytics varsayilanlariyla yazilmali.
+    _tracker_yaml_yaz(ayar_al())
+    ic = open(_TRACKER_YAML, encoding="utf-8").read()
+    assert "new_track_thresh: 0.250" in ic and "track_buffer: 30" in ic, ic
+
+    # Taraf hafizasi budanmali (sinirsiz buyumemeli).
+    _taraf_hafiza.update({i: "Düşman" for i in range(50)})
+    for _ in range(BUDAMA_PERIYOT):
+        _hafiza_buda({1, 2, 3})
+    assert set(_taraf_hafiza) == {1, 2, 3}, _taraf_hafiza
+    takip_sifirla()
+
+    print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, hafiza budama")
