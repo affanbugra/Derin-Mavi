@@ -21,7 +21,7 @@ import cv2
 # hazir modulu kullanir (agirlik yukleme + tensor islemleri thread-guvenli).
 from ultralytics import YOLO
 
-from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect, QPointF
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
@@ -33,7 +33,9 @@ from PySide6.QtWidgets import (
 
 import algi
 import nisan
+import gamepad as gamepad_mod
 import kontrol as kontrol_mod
+import protokol as P          # hiz duzeyi/durum sabitleri — TEK KAYNAK (bkz. protokol.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Model klasoru: repo kokunde "models/". Ekip arkadaslari kendi egittikleri agirligi
@@ -41,13 +43,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.abspath(os.path.join(HERE, "..", "models"))
 
 
-def _model_bul():
-    """Kullanilacak modeli DINAMIK bulur. Doner: yol (str) veya None.
-
-    Oncelik:
-      1. DERINMAVI_MODEL=<dosya/klasor yolu>  -> tam o model
-      2. DERINMAVI_MODEL=onnx | openvino      -> models/best.onnx | best_openvino_model
-      3. (tanimsiz) HIZ SIRASI: OpenVINO klasoru -> ONNX -> .pt -> ilk bulunan
+def _modelleri_bul():
+    """Kullanilacak modelleri DINAMIK bulur (oncelik sirasiyla). Doner: liste.
 
     HIZ NOTU (C1): bu proje GPU'suz laptopta calisiyor (CLAUDE.md §8) ve tek gercek
     darbogaz CPU inference'i. Ultralytics ayni agirligi OpenVINO'ya cevirebilir ve
@@ -55,35 +52,42 @@ def _model_bul():
         yolo export model=models/best.pt format=openvino
     Ciktiyi (models/best_openvino_model/) models/ icine birakmak yeterli; burasi
     onu otomatik tercih eder. Yoksa .pt ile calismaya devam eder.
-
-    Hicbiri yoksa None (uygulama modelsiz calisir: kamera akar, tespit yapmaz).
     """
+    modeller = []
     sec = os.environ.get("DERINMAVI_MODEL", "").strip()
     if sec:
         dusuk = sec.lower()
-        if dusuk == "onnx":
+        if dusuk == "engine" or dusuk == "trt":
+            p = os.path.join(MODELS_DIR, "best.engine")
+            if os.path.isfile(p): modeller.append(p)
+        elif dusuk == "onnx":
             p = os.path.join(MODELS_DIR, "best.onnx")
-            return p if os.path.isfile(p) else None
-        if dusuk == "openvino":
+            if os.path.isfile(p): modeller.append(p)
+        elif dusuk == "openvino":
             p = os.path.join(MODELS_DIR, "best_openvino_model")
-            return p if os.path.isdir(p) else None
-        if dusuk in ("pt", "torch"):
+            if os.path.isdir(p): modeller.append(p)
+        elif dusuk in ("pt", "torch"):
             p = os.path.join(MODELS_DIR, "best.pt")
-            return p if os.path.isfile(p) else None
-        return sec if (os.path.isfile(sec) or os.path.isdir(sec)) else None
+            if os.path.isfile(p): modeller.append(p)
+        else:
+            if os.path.isfile(sec) or os.path.isdir(sec): modeller.append(sec)
 
-    ov = os.path.join(MODELS_DIR, "best_openvino_model")
-    if os.path.isdir(ov):
-        return ov
-    for aday in ("best.onnx", "best.pt"):
+    for aday in ("best.engine", "best_openvino_model", "best.onnx", "best.pt"):
         p = os.path.join(MODELS_DIR, aday)
-        if os.path.isfile(p):
-            return p
-    for kalip in ("*_openvino_model", "*.onnx", "*.pt"):
+        if (os.path.isfile(p) or os.path.isdir(p)) and p not in modeller:
+            modeller.append(p)
+            
+    for kalip in ("*.engine", "*_openvino_model", "*.onnx", "*.pt"):
         bulunan = sorted(glob.glob(os.path.join(MODELS_DIR, kalip)))
-        if bulunan:
-            return bulunan[0]
-    return None
+        for b in bulunan:
+            if b not in modeller: modeller.append(b)
+            
+    return modeller
+
+def _model_bul():
+    """Tarihsel uyumluluk icin sadece ilk modeli veya None doner."""
+    m = _modelleri_bul()
+    return m[0] if m else None
 
 # ---- HTML tasarim tokenlari (gorev_kontrol_yedek.html :root) ----
 BG = "#dde3ea"; PANEL = "#ffffff"; CARD = "#edf1f6"; BD = "#bbc8d6"; BD2 = "#96aabb"
@@ -131,8 +135,8 @@ _DPAD_GOVDE = ("QPushButton {{ "
                "  color: {yazi}; "
                "  font-size: {punto}; "
                "  font-weight: 700; "
-               "  min-width: 68px; max-width: 68px; "
-               "  min-height: 54px; max-height: 54px; "
+               "  min-width: 86px; max-width: 86px; "
+               "  min-height: 68px; max-height: 68px; "
                "}} ")
 DPAD_STIL = _DPAD_GOVDE + ("QPushButton:hover {{ "
                            "  background: {ust_arka}; "
@@ -160,6 +164,10 @@ ADIM_STIL_SECILI = _ADIM_GOVDE.format(arka="#eaf1f8", kalinlik="1.5px", kenar="#
 ADIM_STIL_NORMAL = (_ADIM_GOVDE.format(arka="#ffffff", kalinlik="1px", kenar="#dfe4ea",
                                        yazi="#5f6b78", ek="")
                     + "QPushButton:hover { border-color: #c3d3e2; color: #2b3540; }")
+
+# ATES butonu metinleri — tek kaynak (uc yerde ayri ayri yazilinca biri unutuluyordu).
+ATES_METIN_KAPALI = "A T E Ş   [L]"
+ATES_METIN_ACIK = "ATEŞİ KES   [L]"
 
 # Klavye -> D-pad yonu (WASD + ok tuslari; R/C/Space = merkeze al).
 TUS_YON = {Qt.Key_W: "up", Qt.Key_Up: "up", Qt.Key_S: "down", Qt.Key_Down: "down",
@@ -189,6 +197,18 @@ AYAR_TANIM_TESPIT = [
      "(Takibe girmiş nesneye küçük bir tolerans tanınır — tek karelik zayıflamada titremesin diye.)\n\n"
      "↑ ARTTIRIRSAN: ekran temizlenir, sadece emin olunanlar görünür.\n"
      "↓ AZALTIRSAN: nesneler daha çabuk belirir — ama zayıf/hayalet kutu görülebilir."),
+    ("onay_esigi", "Kesin tanıma eşiği", "yuzde", 10, 99,
+     "Bir hedefin TİPİ (F-16 / İHA / Füze / Helikopter) kesin sayılması için gereken güven.\n\n"
+     "Bu eşiğin üstünde yeterince kare gören hedef ONAYLANIR: tipi artık sabitlenir ve "
+     "güveni düşse bile kutu kaybolmaz — takip kopmaz. Onaylanana kadar hedef '?' görünür.\n\n"
+     "↑ ARTTIRIRSAN: yanlış tip etiketi azalır — ama onay geç gelir, hedef uzun süre '?' kalır.\n"
+     "↓ AZALTIRSAN: hedef çabuk tanınır — ama zayıf/hatalı bir tahmin onaylanabilir."),
+    ("onay_tekrari", "Onay için kare sayısı", "sayi", 1, 10,
+     "Kesin tanıma eşiğini kaç kare geçerse hedef ONAYLANSIN.\n\n"
+     "Ardışık olmak ZORUNDA DEĞİL: eşiği geçen kare puanı artırır, geçmeyen bir puan düşürür "
+     "(çoğunluk oylaması). Böylece güven dalgalandığında onay yine de gerçekleşir.\n\n"
+     "↑ ARTTIRIRSAN: onay daha güvenilir — ama geç gelir.\n"
+     "↓ AZALTIRSAN: anında tanır — ama tek şanslı kare yanlış tipi onaylatabilir."),
     ("kararlilik", "Kutu kararlılığı", "kare", 5, 120,
      "Bir nesne bir an görünmez olursa takibi kaç kare hafızada tutulsun.\n"
      "(Teknik: ByteTrack track_buffer — Ultralytics varsayılanı 30)\n\n"
@@ -206,6 +226,17 @@ AYAR_TANIM_TESPIT = [
      "(Ultralytics varsayılanı 0.70)\n\n"
      "↑ ARTTIRIRSAN: yan yana duran hedefler ayrı ayrı kalır — ama aynı nesneye çift kutu riski.\n"
      "↓ AZALTIRSAN: çift kutu temizlenir — ama sürüde (Aşama 2) bitişik hedefler birleşebilir."),
+    ("ortusme", "Çakışan kutu temizliği", "yuzde", 30, 99,
+     "Üst üste binen iki kutudan birini eler: küçük kutunun bu kadarı diğerinin içinde "
+     "kalıyorsa ikisi AYNI nesne sayılır.\n\n"
+     "Neden gerekli: NMS (yukarıdaki 'Kutu ayrışması') yalnızca AYNI SINIF içinde çalışır. "
+     "Model aynı maketi hem 'Füze' hem 'Helikopter' sanarsa kutular %90 örtüşse bile ikisi de "
+     "ekranda kalır. Görevde aynı alanda iki hedef bulunmadığı için bu her zaman hatadır.\n\n"
+     "Kesin tanınmış (onaylanmış) hedef önceliklidir; eşitlikte güveni yüksek olan kalır.\n"
+     "Balon buna dahil değildir — maketin altında olduğu için gövdeyle örtüşür.\n\n"
+     "↓ AZALTIRSAN: çift kutular daha agresif temizlenir — ama yan yana gelen iki gerçek "
+     "hedeften biri elenebilir (Aşama 2 sürüsü).\n"
+     "↑ ARTTIRIRSAN: temizlik gevşer; %99 pratikte kapalı demektir."),
     ("maks_tespit", "En fazla hedef", "sayi", 5, 300,
      "Bir karede en fazla kaç kutu işlensin.\n(Ultralytics varsayılanı 300)\n\n"
      "Düşürmek çok kalabalık sahnede işi hafifletir; yarışma senaryosunda (en fazla 3-4 hedef) "
@@ -216,6 +247,9 @@ AYAR_TANIM_TESPIT = [
      "⚠ Webcam ile demo yaparken hareket yönü ters geldiği için açmak isteyebilirsiniz. "
      "Açıldığında nişan matematiğindeki yaw işareti OTOMATİK düzeltilir (yoksa gimbal hedeften "
      "kaçardı). Yarışma kamerasında KAPALI kalmalı."),
+    ("kamera_fps", "Kamera FPS", "sayi", 5, 120,
+     "Kameradan alınması istenen kare hızı (FPS).\n\n"
+     "NOT: Değişikliğin etkili olması için yukarıdan kamerayı tekrar seçmelisiniz."),
 ]
 
 AYAR_TANIM_NISAN = [
@@ -247,42 +281,124 @@ AYAR_TANIM_NISAN = [
 
 
 # =====================================================================
-#  Algilama is parcacigi
+#  Ortak Veri (Kamera ve Algi threadleri arasi)
 # =====================================================================
-class AlgiThread(QThread):
-    kare_hazir = Signal(QImage, dict)
-    durum = Signal(str, bool)               # mesaj, hata_mi
-    kameralar_bulundu = Signal(list)        # [{"index": int, "name": str, "is_default": bool}, ...]
+import threading
+
+class OrtakVeri:
+    def __init__(self):
+        self.kilit = threading.Lock()
+        self.kare = None
+        self.kare_sira = -1
+        self.dets = []
+        self.balonlar = []
+        self.active_idx = -1
+        self.fps = 0.0          # YOLO inference FPS
+        self.kamera_fps = 0.0   # Kamera okuma FPS
+
+# =====================================================================
+#  Algilama (Inference) is parcacigi (Thread 2)
+# =====================================================================
+class InferenceThread(QThread):
     model_bilgi = Signal(str, list)         # ozet metni, eksik siniflar (C7)
     nisan_komut = Signal(float, float)      # d_yaw, d_pitch — Otonom takip (B3)
 
-    def __init__(self):
+    def __init__(self, veri):
+        super().__init__()
+        self.veri = veri
+        self._calis = True
+        self.model = None
+        self.asama = 3                      # 1/2/3/0 — SARTNAME davranisi
+        self.estop = False
+        self.otonom = False                 # Otonom modda mi
+        self.nisanci = nisan.PDNisanci()
+
+    def run(self):
+        # Mevcut modelleri sirasiyla dener, ilk yuklenenle devam eder
+        for model_yolu in _modelleri_bul():
+            try:
+                self.model = YOLO(os.path.abspath(model_yolu))
+                self.model_bilgi.emit(algi.model_sinif_ozeti(self.model), algi.eksik_siniflar(self.model))
+                break # Basariyla yuklendi, denemeyi birak
+            except Exception as e:
+                print(f"Model yuklenemedi ({model_yolu}): {e}")
+                self.model = None
+
+        son_islenen_sira = -1
+        t_son, fps = time.perf_counter(), 0.0
+
+        while self._calis:
+            try:
+                with self.veri.kilit:
+                    kare = self.veri.kare
+                    sira = self.veri.kare_sira
+
+                if kare is None or sira == son_islenen_sira or self.model is None:
+                    self.msleep(3)
+                    continue
+
+                son_islenen_sira = sira
+                frame = kare.copy()
+
+                dets, balonlar, active_idx = algi.analiz_et(self.model, frame, self.estop, self.asama)
+
+                if self.otonom and not self.estop and active_idx >= 0 and active_idx < len(dets):
+                    h, w = frame.shape[:2]
+                    hedef_xy = nisan.nisan_noktasi(dets[active_idx]["box"], balonlar)
+                    d_yaw, d_pitch = self.nisanci.adim(hedef_xy, (w, h))
+                    if d_yaw is not None:
+                        self.nisan_komut.emit(d_yaw, d_pitch)
+                else:
+                    self.nisanci.sifirla()
+
+                now = time.perf_counter()
+                dt = now - t_son
+                t_son = now
+                if dt > 0:
+                    fps = 0.9 * fps + 0.1 * (1.0 / dt)
+
+                with self.veri.kilit:
+                    self.veri.dets = dets
+                    self.veri.balonlar = balonlar
+                    self.veri.active_idx = active_idx
+                    self.veri.fps = fps
+            except Exception as e:
+                import traceback
+                print("INFERENCE THREAD ERROR:")
+                traceback.print_exc()
+                self.msleep(100)
+
+    def durdur(self):
+        self._calis = False
+
+# =====================================================================
+#  Video Goruntu is parcacigi (Thread 3 / GUI feed)
+# =====================================================================
+class VideoThread(QThread):
+    kare_hazir = Signal(QImage, dict)
+    durum = Signal(str, bool)               # mesaj, hata_mi
+    kameralar_bulundu = Signal(list)        # [{"index": int, "name": str, "is_default": bool}, ...]
+
+    def __init__(self, inference_thread, veri):
         super().__init__()
         self._calis = True
         self.estop = False
-        self.model_yok = False              # models/ klasorunde model bulunamadi mi
-        self.asama = 3                      # 1/2/3/0 — SARTNAME davranisi (renk yalniz A3)
-        self.kaynak_istegi = None           # None | "auto" | int
-        self.otonom = False                 # Otonom modda mi (nisan dongusu yalniz o zaman)
-        self.nisanci = nisan.PDNisanci()    # ayarlari algi.AYAR'dan canli okur
-        # A4: "son kare kazanir". GUI yavassa Qt sinyal kuyrugu BIRIKIR (olaylar
-        # dusmez!) ve gecikme kartopu gibi buyur. Bu bayrak sayesinde onceki kare
-        # ekrana cizilmeden yenisi gonderilmez; ara kareler islenmeden atlanir.
+        self.asama = 3                      
+        self.kaynak_istegi = None           
+        self.veri = veri
+        self.inference_thread = inference_thread
         self._gui_mesgul = False
 
     def kare_islendi(self):
-        """GUI bir kareyi cizdiginde cagirir -> yeni kare gonderilebilir (A4)."""
         self._gui_mesgul = False
 
     def run(self):
-        # --- 1. Kamerayi hemen ac (hizli ~0.2s) ---
         self.durum.emit("Kamera aranıyor…", False)
         cap = algi.open_camera()
         if cap is None:
             self.durum.emit("Kamera bulunamadı — bağlı mı / başka uygulama kullanıyor mu?", True)
             return
 
-        # Kamera listesini hemen bildir
         if algi.AKTIF_INDEX is not None:
             qt_cams = algi.kameralari_listele_qt()
             if qt_cams:
@@ -292,37 +408,19 @@ class AlgiThread(QThread):
                                               "name": f"Kamera {algi.AKTIF_INDEX}",
                                               "is_default": True}])
 
-        # --- 2. Modeli yukle (torch ANA THREAD'de import edildi -> burada guvenli) ---
-        model = None
-        model_yolu = _model_bul()
-        if model_yolu is None:
-            # Repo modelsiz gelir. Kamera + OpenCV calisir; tespit icin models/ klasorune
-            # bir best.pt eklenmelidir (bkz. models/README.md).
-            self.model_yok = True
-            self.durum.emit("Model yok — kamera aktif · models/ klasörüne best.pt ekleyin", True)
-        else:
-            self.durum.emit("Model yükleniyor…", False)
-            try:
-                model = YOLO(os.path.abspath(model_yolu))
-                # C7: modelin GERCEKTEN kac sinif tanidigini ekibe goster. Arayuz 4 tip +
-                # balon vaat ederken model 2 sinifliysa bu gercek gizli kalmamali.
-                self.model_bilgi.emit(algi.model_sinif_ozeti(model), algi.eksik_siniflar(model))
-                self.durum.emit("Sistem hazır", False)
-            except Exception as e:
-                self.durum.emit(f"Model yüklenemedi: {e}", True)  # ham goruntu akmaya devam
+        self.durum.emit("Sistem hazır", False)
 
-        # A3: kamerayi kendi thread'inde okuyup HEP EN TAZE kareyi tut.
         okuyucu = algi.KameraOkuyucu(cap)
         son_sira = None
-        t_son, fps = time.time(), 0.0
+        t_kamera, kamera_fps = time.perf_counter(), 0.0
+        
         try:
             while self._calis:
-                # kamera degisim istegi (arayuzden secim)
                 if self.kaynak_istegi is not None:
                     istek = self.kaynak_istegi
                     self.kaynak_istegi = None
-                    algi.takip_sifirla()   # kamera degisiyor: eski takip kutulari kalmasin
-                    self.nisanci.sifirla()
+                    algi.takip_sifirla()   
+                    self.inference_thread.nisanci.sifirla()
                     eski = okuyucu.cap
                     okuyucu.cap_degistir(None)
                     if eski is not None:
@@ -338,10 +436,8 @@ class AlgiThread(QThread):
                             continue
                     okuyucu.cap_degistir(yeni)
                     son_sira = None
-                    self.durum.emit("Sistem hazır" if model else "Model yükleniyor… (kamera aktif)",
-                                    False)
+                    self.durum.emit("Sistem hazır", False)
 
-                # Kamera koptu mu? (okuyucu thread'i ust uste hata aliyorsa)
                 if okuyucu.hata_sayaci > 60:
                     self.durum.emit("Kamera koptu — yeniden deneniyor…", True)
                     eski = okuyucu.cap
@@ -353,44 +449,42 @@ class AlgiThread(QThread):
                     self.msleep(500)
                     continue
 
-                # A4: onceki kare henuz ekrana cizilmediyse yeni kare GONDERME.
-                # (Qt kuyrugu birikmesin; gecikme sabit kalsin.)
                 if self._gui_mesgul:
                     self.msleep(3)
                     continue
 
                 frame, sira = okuyucu.oku(son_sira)
-                if frame is None:              # henuz yeni kare yok
+                if frame is None:              
                     self.msleep(3)
                     continue
                 son_sira = sira
-                frame = frame.copy()           # okuyucu thread'i uzerine yazmasin
+                frame = frame.copy()           
 
-                # A6: AYNA artik varsayilan KAPALI ve ayardan yonetiliyor.
-                # (Eski kod her kareyi kosulsuz cevirirdi: ham YOLO'dan farkli goruntu
-                #  + nisan matematiginde isaret hatasi -> gimbal hedeften kacar.)
+                # Kamera FPS ölçümü
+                now_k = time.perf_counter()
+                dt_k = now_k - t_kamera
+                t_kamera = now_k
+                if dt_k > 0:
+                    kamera_fps = 0.9 * kamera_fps + 0.1 * (1.0 / dt_k)
+
                 if int(algi.AYAR.get("ayna", 0)):
                     frame = cv2.flip(frame, 1)
 
-                # Model hazirsa: algilama yap. Degilse: ham goruntu gonder
-                if model is not None:
-                    dets, balonlar, active_idx = algi.analiz_et(model, frame,
-                                                                self.estop, self.asama)
-                    self._nisan_al(frame, dets, balonlar, active_idx)
-                    frame = algi.draw_overlay(frame, dets, active_idx, balonlar, self.estop)
-                    data = self._panel_verisi(dets, active_idx, fps)
-                else:
-                    mesaj = ("Model yok — models/ klasörüne best.pt ekleyin"
-                             if self.model_yok else "Model yükleniyor…")
-                    data = {"active": None, "hedefler": [], "mesaj": mesaj, "fps": fps,
-                            "a3": self.asama == 3}
+                with self.veri.kilit:
+                    self.veri.kare = frame
+                    self.veri.kare_sira = sira
+                    self.veri.kamera_fps = kamera_fps
+                    dets = list(self.veri.dets)
+                    balonlar = list(self.veri.balonlar)
+                    active_idx = self.veri.active_idx
+                    fps = self.veri.fps
+                    k_fps = self.veri.kamera_fps
 
-                now = time.time()
-                dt = now - t_son
-                t_son = now
-                if dt > 0:
-                    fps = 0.9 * fps + 0.1 * (1.0 / dt)
-                data["fps"] = fps
+                data = self._panel_verisi(dets, active_idx, fps, k_fps)
+                data["dets"] = dets
+                data["balonlar"] = balonlar
+                data["active_idx"] = active_idx
+                data["estop"] = self.estop
 
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
@@ -400,30 +494,7 @@ class AlgiThread(QThread):
         finally:
             okuyucu.kapat()
 
-    def _nisan_al(self, frame, dets, balonlar, active_idx):
-        """B3 — OTONOM TAKIP: aktif hedefin piksel hatasindan gimbal komutu uretir.
-
-        Bu katman eskiden HIC YOKTU: sistem hedefi goruyor ama gimbal'a tek komut
-        gondermiyordu, yani Otonom modda takip fiilen calismiyordu (Yetenek 5).
-
-        Guvenlik kapilari (sirayla):
-          * E-Stop aktifse komut YOK (sartname: E-Stop hareketi keser)
-          * Manuel moddaysa komut YOK (operator suruyor)
-          * Kilitli hedef yoksa komut YOK + kontrolcu sifirlanir (yeni hedefte sicrama olmasin)
-          * Olu bolge icindeysek nisanci zaten (None, None) doner -> komut YOK (dwell)
-        Yasak alan kontrolu arayuz tarafinda (_nisan_geldi) yapilir — tek kapi.
-        """
-        if self.estop or not self.otonom or active_idx < 0 or active_idx >= len(dets):
-            self.nisanci.sifirla()
-            return
-        h, w = frame.shape[:2]
-        hedef_xy = nisan.nisan_noktasi(dets[active_idx]["box"], balonlar)
-        d_yaw, d_pitch = self.nisanci.adim(hedef_xy, (w, h))
-        if d_yaw is not None:
-            self.nisan_komut.emit(d_yaw, d_pitch)
-
-    def _panel_verisi(self, dets, active_idx, fps):
-        # SARTNAME: A1-A2'de dost yok (hepsi hedef); A3'te dost/dusman (renk). Panel buna gore.
+    def _panel_verisi(self, dets, active_idx, fps, kamera_fps=0.0):
         a3 = (self.asama == 3)
         hedefler = []
         for i, d in enumerate(dets):
@@ -437,15 +508,18 @@ class AlgiThread(QThread):
             hedefler.append({"ad": d["ad"], "tip": d["tip"], "durum": durum, "aktif": aktif})
         active = None
         if active_idx >= 0 and not self.estop:
-            d = dets[active_idx]
-            active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"]}
+            try:
+                d = dets[active_idx]
+                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"]}
+            except IndexError:
+                pass
         if self.estop:
             mesaj = "ACİL DURDURULDU — ateş ve kilit kesildi"
         elif active:
             mesaj = f"{active['ad']} kilitlendi — %{active['conf']} güven"
         else:
             mesaj = "Hedef aranıyor…"
-        return {"active": active, "hedefler": hedefler, "mesaj": mesaj, "fps": fps, "a3": a3}
+        return {"active": active, "hedefler": hedefler, "mesaj": mesaj, "fps": fps, "kamera_fps": kamera_fps, "a3": a3}
 
     def durdur(self):
         self._calis = False
@@ -588,6 +662,12 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("DERİN MAVİ — Görev Kontrol İstasyonu")
         self.mod = "Manuel"
         self.asama = "Aşama 1"
+        # Motor hiz duzeyi (ESP32'deki iki step motorun tavan hizi). Her iki modda da
+        # gecerli oldugu icin manuel panelde DEGIL, sag kolonun altinda durur.
+        self.hiz_seviye = P.HIZ_VARSAYILAN
+        # Lazer gucu (%). Her acilista GUVENLI VARSAYILANA doner — kalici olarak
+        # kaydedilmez: "gecen sefer %100'de birakmisiz" diye baslamak istemeyiz.
+        self.lazer_guc = P.LAZER_GUC_VARSAYILAN
         self._ayar_yukle()   # kayitli ayarlar varsa algi.AYAR'a yukle (sliderlar bunu okur)
 
         # Icerik tuvali: yuksekligi sabit 900, GENISLIGI EKRANIN ORANINA gore ayarlanir.
@@ -626,8 +706,8 @@ class MainWindow(QMainWindow):
         uh.setContentsMargins(0, 0, 0, 0)
         uh.setSpacing(12)
 
-        uh.addWidget(self._sol_kolon(), 5)
-        uh.addWidget(self._sag_kolon(), 4)
+        uh.addWidget(self._sol_kolon(), 6)
+        uh.addWidget(self._sag_kolon(), 3)
         mv.addWidget(ust_alan, 1)
 
         # 2. Alt Panel (Sistem Durumu + Hedef Durumu + Yasak Alanlar)
@@ -672,8 +752,27 @@ class MainWindow(QMainWindow):
             etiket = "· mock (simülasyon)" if self.kontrol.mock_mu else f"· {self.kontrol.kaynak}"
             self._ci("ESP32", AMB if self.kontrol.mock_mu else GRN, etiket)
             self._ci("Seri Port", AMB if self.kontrol.mock_mu else GRN, "· 115200 baud")
+            self._hiz_sec(self.hiz_seviye)   # acilista karti ekrandakiyle ayni hiza al
+            # ESP32 durum yoklamasi: motorlar hedefe YURURKEN konum, lazer ve (varsa)
+            # DONANIMSAL E-Stop yalnizca boyle gorulur — komut gonderilmedigi surece
+            # arayuz kartin durumunu ogrenemez. Bos komut hicbir seyi degistirmez.
+            self.esp_timer = QTimer(self)
+            self.esp_timer.timeout.connect(self._esp_yokla)
+            # Periyot ATES TAZELEMESINI de belirler: bu dongu durursa kart lazeri keser.
+            self.esp_timer.start(P.ATES_TAZELE_MS)
         elif self.kontrol.hata:
             self._ci("ESP32", BD2, "· hata")
+
+        # USB GAMEPAD — manuel kontrolun ucuncu girdisi (sartname Yetenek 1: UI/joystick/
+        # klavye). Cihaz yoksa timer yine calisir ve periyodik tarar: gamepad uygulama
+        # acikken takilabilmeli (yarisma gunu kablo cikip takilir).
+        self.gamepad = gamepad_mod.Gamepad()
+        self._gp_son_t = time.time()
+        self._gp_tarama = 0
+        self._gamepad_durum_yaz()
+        self.gp_timer = QTimer(self)
+        self.gp_timer.timeout.connect(self._gamepad_tik)
+        self.gp_timer.start(self.TEKRAR_PERIYOT_MS)   # D-pad tekrariyla ayni tempo
 
         # Kamera secici listesini HEMEN doldur (kamera acilisini bekleme)
         try:
@@ -681,15 +780,21 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-        # algi thread
-        self.thread = AlgiThread()
-        self.thread.asama = self.ASAMA_IDX[self.asama]   # ilk asamayi ilet (renk yalniz A3)
-        self.thread.otonom = (self.mod == "Otonom")      # nisan dongusu yalniz Otonom'da
+        # algi thread (3-thread architecture)
+        self.veri = OrtakVeri()
+        
+        self.inference_thread = InferenceThread(self.veri)
+        self.inference_thread.asama = self.ASAMA_IDX[self.asama]
+        self.inference_thread.otonom = (self.mod == "Otonom")
+        self.inference_thread.model_bilgi.connect(self._model_bilgi_geldi)
+        self.inference_thread.nisan_komut.connect(self._nisan_geldi)
+        self.inference_thread.start()
+        
+        self.thread = VideoThread(self.inference_thread, self.veri)
+        self.thread.asama = self.ASAMA_IDX[self.asama]
         self.thread.kare_hazir.connect(self._kare_geldi)
         self.thread.durum.connect(self._durum_geldi)
         self.thread.kameralar_bulundu.connect(self._kameralar_geldi)
-        self.thread.model_bilgi.connect(self._model_bilgi_geldi)   # C7
-        self.thread.nisan_komut.connect(self._nisan_geldi)         # B3 otonom takip
         self.thread.start()
 
         # Ayar paneli acikken panel disina tiklaninca kapansin (uygulama geneli olay filtresi)
@@ -764,6 +869,13 @@ class MainWindow(QMainWindow):
         self.kam_sec.addItem("Otomatik", "auto")
         self.kam_sec.currentIndexChanged.connect(self._kamera_sec)
         krh.addWidget(self.kam_sec, 0, Qt.AlignVCenter)
+        
+        self.res_sec = QComboBox()
+        self.res_sec.setObjectName("camsel")
+        self.res_sec.addItem("Çözünürlük", None)
+        self.res_sec.currentIndexChanged.connect(self._res_sec)
+        krh.addWidget(self.res_sec, 0, Qt.AlignVCenter)
+        
         # CANLI rozeti (kamera seçicinin sağında)
         self.live_dot = QLabel()
         self.live_dot.setFixedSize(7, 7)
@@ -1000,11 +1112,19 @@ class MainWindow(QMainWindow):
         sl.oneri_val = self._slider_birimi(algi.VARSAYILAN_AYAR[key], tip)
         sl.setObjectName("ayarsl")
         sl.valueChanged.connect(lambda val, k=key, t=tip, d=deger, s=sl: self._ayar_degisti(k, t, val, d, s))
+        if key == "kamera_fps":
+            sl.sliderReleased.connect(self._fps_degistirildi)
         kutu.addWidget(sl)
 
         layout.addLayout(kutu)
         self.ayar_sliderlar[key] = (sl, tip)
         self._ayar_degisti(key, tip, sl.value(), deger, sl)
+
+    def _fps_degistirildi(self):
+        """FPS degistirildikten (slider birakildiktan) sonra kamerayi yeni ayarlarla yeniden baslatir."""
+        idx = self.kam_sec.currentData()
+        if idx is not None:
+            self.thread.kaynak_istegi = idx
 
     # --- ayar deger donusumleri: slider tam sayidir, ayar degeri olcekli olabilir ---
     def _slider_birimi(self, v, tip):
@@ -1127,43 +1247,9 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(12)
 
-        # --- aktif hedef ---
-        kart = QFrame()
-        kart.setObjectName("panelk")
-        kv = QVBoxLayout(kart)
-        kv.setContentsMargins(19, 13, 19, 13)
-        kv.setSpacing(8)
-        t = QLabel("AKTİF HEDEF")
-        t.setObjectName("ph")
-        kv.addWidget(t)
-
-        hrow = QHBoxLayout()
-        hrow.setSpacing(10)
-        self.h_ad = QLabel("—")
-        self.h_ad.setObjectName("hname")
-        hrow.addWidget(self.h_ad)
-        self.h_badge = QLabel("—")
-        self.h_badge.setObjectName("badge")
-        self._badge_stil(self.h_badge, None)
-        hrow.addWidget(self.h_badge)
-        hrow.addStretch(1)
-        self.h_conf = QLabel("")
-        self.h_conf.setObjectName("hconf")
-        hrow.addWidget(self.h_conf)
-        kv.addLayout(hrow)
-
-        self.fire_btn = QPushButton("A T E Ş")
-        self.fire_btn.setObjectName("fire")
-        self.fire_btn.setFixedHeight(44)
-        self.fire_btn.setCheckable(True)
-        self.fire_btn.clicked.connect(self._ates_bas)
-        kv.addWidget(self.fire_btn)
-
-        self.fire_status = QLabel("Hedef aranıyor…")
-        self.fire_status.setObjectName("firest")
-        self.fire_status.setAlignment(Qt.AlignCenter)
-        kv.addWidget(self.fire_status)
-        v.addWidget(kart)
+        # AKTIF HEDEF karti KALDIRILDI (06.08): gosterdigi her sey zaten ust seritte
+        # duruyordu (eng_name/eng_sub: "Hedef kilitli · F16 · %92 guven"). Bosalan yer
+        # manuel yon kontrollerine verildi; ATES butonu da oraya tasindi.
 
         # --- tespit tablosu ---
         self.tk = QFrame()
@@ -1195,7 +1281,132 @@ class MainWindow(QMainWindow):
         self.sag_stack.addWidget(self.manuel_panel)             # 1: Manuel
         v.addWidget(self.sag_stack, 1)
 
+        # Motor hizi ve lazer stack'in DISINDA: ikisi de otonom takipte de gecerli
+        # oldugu icin her iki modda gorunur ve degistirilebilir olmali.
+        v.addWidget(self._hiz_karti(), 0)
+        v.addWidget(self._lazer_karti(), 0)
+
         return kol
+
+    def _hiz_karti(self):
+        """MOTOR HIZI — ESP32'deki iki step motorun tavan hizi + ivmesi (3 kademe).
+
+        Duzeyler protokol.HIZ_TABLO'da (tek kaynak); burada yalnizca secim yapilir.
+        Karta iki satir gider: S<derece/sn> (tavan hiz) ve A<derece/sn²> (ivme);
+        step'e cevirmek kartin isi (iki eksenin disli orani farkli)."""
+        kart = QFrame()
+        kart.setObjectName("panelk")
+        kv = QVBoxLayout(kart)
+        kv.setContentsMargins(19, 11, 19, 13)
+        kv.setSpacing(7)
+
+        ust = QHBoxLayout()
+        t = QLabel("MOTOR HIZI")
+        t.setObjectName("ph")
+        ust.addWidget(t, 1)
+        self.hiz_bilgi = QLabel()
+        self.hiz_bilgi.setObjectName("engsub")
+        ust.addWidget(self.hiz_bilgi, 0, Qt.AlignVCenter)
+        kv.addLayout(ust)
+
+        satir, self.hiz_btns = self._seviye_butonlari(
+            [(s, P.HIZ_AD[s]) for s in P.HIZ_SEVIYELER], self.hiz_seviye, self._hiz_sec)
+        kv.addLayout(satir)
+        self._hiz_bilgi_yaz()
+        return kart
+
+    def _hiz_bilgi_yaz(self):
+        hiz, ivme = P.HIZ_TABLO[self.hiz_seviye]
+        self.hiz_bilgi.setText(f"{hiz:.0f}°/s · ivme {ivme:.0f}°/s²")
+
+    def _hiz_sec(self, seviye):
+        """Hiz duzeyini degistirir ve ESP32'ye bildirir (mock/gercek fark etmez)."""
+        self.hiz_seviye = seviye
+        for v, b in self.hiz_btns.items():
+            b.setChecked(v == seviye)
+            self._step_btn_stil_guncelle(b, v == seviye)
+        self._hiz_bilgi_yaz()
+        if getattr(self, "kontrol", None) and self.kontrol.bagli:
+            self._esp_goster(self.kontrol.hiz_ayarla(seviye))
+            self.sb_msg.setText(f'<span style="color:{BLUE}">●</span>&nbsp;'
+                                f'Motor hızı: {P.HIZ_AD[seviye]}')
+
+    def _lazer_karti(self):
+        """LAZER — imha gucu (%) ve anlik ates durumu.
+
+        "Ne kadar" ile "ne zaman" AYRI: guc kalici bir ayardir (karta G<yuzde> gider),
+        ates ac/kes ayri komuttur (L1/L0, ATES butonu). Motor tarafindaki S/A ile P/T
+        ayriminin aynisi. Guc ATES SIRASINDA da degistirilebilir — kart yeni duty'yi
+        aninda uygular, atesi kesmeden.
+
+        ⚠ Tam guc kullanilmiyor (varsayilan %40) ve dusuk guc DWELL SURESINI uzatir:
+          %40'ta balonun patlamasi tam guce gore ~2.5 kat surer. Sure yarismada puana
+          baglidir (Asama 1 bonus suresi, Asama 2-3 tur sureleri)."""
+        kart = QFrame()
+        kart.setObjectName("panelk")
+        kv = QVBoxLayout(kart)
+        kv.setContentsMargins(19, 11, 19, 13)
+        kv.setSpacing(7)
+
+        ust = QHBoxLayout()
+        t = QLabel("LAZER")
+        t.setObjectName("ph")
+        ust.addWidget(t, 1)
+        self.lazer_durum = QLabel()
+        self.lazer_durum.setObjectName("engsub")
+        ust.addWidget(self.lazer_durum, 0, Qt.AlignVCenter)
+        kv.addLayout(ust)
+
+        self.lazer_sl = QSlider(Qt.Horizontal)
+        self.lazer_sl.setObjectName("ayarsl")
+        self.lazer_sl.setMinimum(P.LAZER_GUC_MIN)
+        self.lazer_sl.setMaximum(P.LAZER_GUC_MAX)
+        self.lazer_sl.setSingleStep(5)
+        self.lazer_sl.setPageStep(10)
+        self.lazer_sl.setValue(self.lazer_guc)
+        self.lazer_sl.setStyleSheet(SLIDER_TASLAK.format(**SLIDER_DEGISIK))
+        self.lazer_sl.valueChanged.connect(self._lazer_guc_degisti)
+        kv.addWidget(self.lazer_sl)
+
+        # Sik kullanilan guclere tek dokunusla gitmek icin (kaydiriciyi hassas surmek
+        # zor); ayni "kademe secici" kalibi motor hizinda ve adim hassasiyetinde de var.
+        satir, self.lazer_btns = self._seviye_butonlari(
+            [(20, "%20"), (40, "%40"), (70, "%70"), (100, "%100")],
+            self.lazer_guc, self._lazer_guc_degisti)
+        kv.addLayout(satir)
+
+        self._lazer_bilgi_yaz()
+        return kart
+
+    def _lazer_bilgi_yaz(self):
+        """Kart basligindaki durum: ates suruyor mu + hangi gucte."""
+        if not hasattr(self, "lazer_durum"):
+            return
+        acik = bool(getattr(self, "kontrol", None)
+                    and self.kontrol.bagli and self.kontrol.lazer_acik)
+        self.lazer_durum.setText(
+            f"● ATEŞ · %{self.lazer_guc}" if acik else f"○ Kapalı · %{self.lazer_guc}")
+        self.lazer_durum.setStyleSheet(
+            f"color:{RED if acik else TXT3}; font-weight:{700 if acik else 600};")
+        for v, b in getattr(self, "lazer_btns", {}).items():
+            b.setChecked(v == self.lazer_guc)
+            self._step_btn_stil_guncelle(b, v == self.lazer_guc)
+
+    def _lazer_guc_degisti(self, deger):
+        """Guc degisiminin TEK kapisi (kaydirici + kademe butonlari ayni yoldan gecer)."""
+        deger = P.guc_kirp(deger)
+        if deger == self.lazer_guc:
+            return                              # ayni deger: hatta bos komut dolasmasin
+        self.lazer_guc = deger
+        if self.lazer_sl.value() != deger:      # kademe butonuyla gelindiyse kaydirici da izlesin
+            self.lazer_sl.blockSignals(True)    # (yoksa valueChanged geri cagirir)
+            self.lazer_sl.setValue(deger)
+            self.lazer_sl.blockSignals(False)
+        self._lazer_bilgi_yaz()
+        if getattr(self, "kontrol", None) and self.kontrol.bagli:
+            self._esp_goster(self.kontrol.guc_ayarla(deger))
+            self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;'
+                                f'Lazer gücü: %{deger}')
 
     # ================= MANUEL YÖN VE NİŞAN KONTROLÜ =================
     def _manuel_kontrol_panel(self):
@@ -1229,9 +1440,15 @@ class MainWindow(QMainWindow):
 
     def _aci_durum_baslat(self):
         """Gimbal aci durumu ve yasak alan sinirlari (arayuz tarafindaki tek kaynak)."""
-        self.pan_aci = 0.0            # azimut, 0-360
+        self.pan_aci = 0.0            # azimut, 0-360 (EKRAN icin sarmali)
+        # ESP32'ye giden azimut SARMASIZ (birikimli) olmalidir: 350°'den 10°'ye gecerken
+        # "P370" denir, "P10" degil — yoksa motor kisa yoldan degil 340° geri doner.
+        self.pan_ham = 0.0
         self.tilt_aci = 0.0           # yukselis, 0 - max_tilt_limit
-        self.max_tilt_limit = 60.0
+        # Operatorun calisma siniri; mekanik tavan protokol.TILT_MAX'tir ve bunun
+        # USTUNE cikilamaz (kontrol katmani ayrica kirpar). Acilista tavanin tamami
+        # DEGIL, guvenli bir varsayilan gelir — daha yukarisi ⚙ panelinden acilir.
+        self.max_tilt_limit = float(P.TILT_CALISMA_VARSAYILAN)
         self.aci_adim = 5.0           # D-pad adim hassasiyeti (derece)
 
         self.pan_yasak_aktif = False  # harekete yasak alan (azimut)
@@ -1239,10 +1456,23 @@ class MainWindow(QMainWindow):
         self.pan_yasak_max = 160.0
         self.tilt_yasak_aktif = False # harekete yasak alan (yukselis)
         self.tilt_yasak_min = 45.0
-        self.tilt_yasak_max = 60.0
+        self.tilt_yasak_max = float(P.TILT_CALISMA_VARSAYILAN)
         self.atis_yasak_aktif = False # atisa yasak alan (azimut)
         self.atis_pan_min = 45.0
         self.atis_pan_max = 75.0
+
+        # Tusa BASILI TUTUNCA surekli hareket (klavye tekrari mantigi: once kisa bir
+        # gecikme, sonra sabit araliklarla tik). Qt'nin kendi auto-repeat'i KULLANILMAZ;
+        # hizi isletim sistemi ayari belirlerdi ve iki tus ayni anda basiliyken caprazlama
+        # calismazdi.
+        self._basili_yonler = set()
+        self._son_tekrar_t = 0.0
+        self._tekrar_gecikme = QTimer(self)
+        self._tekrar_gecikme.setSingleShot(True)
+        self._tekrar_gecikme.timeout.connect(self._tekrar_baslat)
+        self._tekrar_timer = QTimer(self)
+        self._tekrar_timer.setInterval(self.TEKRAR_PERIYOT_MS)
+        self._tekrar_timer.timeout.connect(self._tekrar_tik)
 
     # ---- Ic sayfa 0: D-pad ----
     def _dpad_sayfasi(self):
@@ -1260,7 +1490,25 @@ class MainWindow(QMainWindow):
 
         dv.addWidget(self._dpad_izgarasi(), 0, Qt.AlignCenter)
         dv.addLayout(self._adim_butonlari())
+        dv.addStretch(1)                       # bosalan yer tuslarin ustune degil altina
+        dv.addWidget(self._ates_butonu())
         return sayfa
+
+    def _ates_butonu(self):
+        """ATES butonu — AKTIF HEDEF kartindan buraya tasindi (06.08).
+
+        Atesin TEK kapisi hala `_ates_bas`; buton yalnizca yer degistirdi. Klavyeden
+        [L] de ayni kapiya baglidir (bkz. keyPressEvent) ve L HER MODDA calisir —
+        buton manuel panelde oldugu icin otonom modda gorunmez, ama lazeri kesmenin
+        yolu kapanmamalidir (E-Stop ve otomatik kesme yollari da yerinde durur)."""
+        self.fire_btn = QPushButton(ATES_METIN_KAPALI)
+        self.fire_btn.setObjectName("fire")
+        self.fire_btn.setFixedHeight(52)
+        self.fire_btn.setCheckable(True)
+        self.fire_btn.setCursor(Qt.PointingHandCursor)
+        self.fire_btn.setToolTip("[L] — ateşi aç / kes")
+        self.fire_btn.clicked.connect(self._ates_bas)
+        return self.fire_btn
 
     def _aci_gostergesi(self):
         """Canli azimut/yukselis sayi gostergesi."""
@@ -1326,21 +1574,30 @@ class MainWindow(QMainWindow):
             setattr(self, isim, b)
         return dpad
 
-    def _adim_butonlari(self):
-        """Adim hassasiyeti secimi (1° / 5° / 10°)."""
+    def _seviye_butonlari(self, secenekler, secili, geri_cagri):
+        """Yatay 'kademe secici' buton satiri — adim hassasiyeti ve motor hizi AYNI kalip.
+        secenekler: [(deger, etiket), ...]   Doner: (satir_layout, {deger: buton})"""
         satir = QHBoxLayout()
         satir.setSpacing(6)
-        self.step_btns = {}
-        for val, etiket in ((1.0, "1° Hassas"), (5.0, "5° Normal"), (10.0, "10° Hızlı")):
-            sb = QPushButton(etiket)
-            sb.setCheckable(True)
-            sb.setChecked(val == self.aci_adim)
-            sb.setFixedHeight(30)
-            sb.setCursor(Qt.PointingHandCursor)
-            sb.clicked.connect(lambda _, v=val: self._aci_adim_sec(v))
-            satir.addWidget(sb, 1)
-            self.step_btns[val] = sb
-            self._step_btn_stil_guncelle(sb, val == self.aci_adim)
+        btns = {}
+        for val, etiket in secenekler:
+            b = QPushButton(etiket)
+            b.setCheckable(True)
+            b.setChecked(val == secili)
+            b.setFixedHeight(30)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda _, v=val: geri_cagri(v))
+            self._step_btn_stil_guncelle(b, val == secili)
+            satir.addWidget(b, 1)
+            btns[val] = b
+        return satir, btns
+
+    def _adim_butonlari(self):
+        """Adim hassasiyeti secimi (1° / 5° / 10°) — D-pad'in bir basista attigi aci.
+        (Motor HIZI ile karistirilmamali: bu 'ne kadar', hiz 'ne kadar cabuk'.)"""
+        satir, self.step_btns = self._seviye_butonlari(
+            [(1.0, "1° Hassas"), (5.0, "5° Orta"), (10.0, "10° Geniş")],
+            self.aci_adim, self._aci_adim_sec)
         return satir
 
     # ---- Ic sayfa 1: Aci ve yasak alan ayarlari ----
@@ -1381,7 +1638,10 @@ class MainWindow(QMainWindow):
         self.ap_tilt_sl = QSlider(Qt.Horizontal)
         self.ap_tilt_sl.setObjectName("ayarsl")
         self.ap_tilt_sl.setMinimum(10)
-        self.ap_tilt_sl.setMaximum(90)
+        # Tavan MEKANIK sinirdan turer (tek kaynak: protokol.TILT_MAX). Eskiden burada
+        # sabit 90 yaziyordu ama protokol 60'ta kirpiyordu: kaydirici 90'a cekilse bile
+        # gimbal 60'ta takili kaliyor, operator sebebini goremiyordu.
+        self.ap_tilt_sl.setMaximum(int(P.TILT_MAX))
         self.ap_tilt_sl.setValue(int(self.max_tilt_limit))
         self.ap_tilt_sl.valueChanged.connect(self._ap_tilt_degisti)
         ust.addWidget(self.ap_tilt_sl)
@@ -1393,7 +1653,8 @@ class MainWindow(QMainWindow):
             self.pan_yasak_aktif, self.pan_yasak_min, self.pan_yasak_max, 360)
         self.ap_tilt_cb, self.ap_tmin_spin, self.ap_tmax_spin = self._yasak_alan_bolumu(
             apv, "Tilt (Yükseliş) Harekete Yasak Açı Aralığı",
-            self.tilt_yasak_aktif, self.tilt_yasak_min, self.tilt_yasak_max, 90)
+            self.tilt_yasak_aktif, self.tilt_yasak_min, self.tilt_yasak_max,
+            int(P.TILT_MAX))
         self.ap_atis_cb, self.ap_amin_spin, self.ap_amax_spin = self._yasak_alan_bolumu(
             apv, "Pan (Azimut) Atışa Yasak Açı Aralığı",
             self.atis_yasak_aktif, self.atis_pan_min, self.atis_pan_max, 360)
@@ -1449,6 +1710,12 @@ class MainWindow(QMainWindow):
     YON_TABLO = {"up": ("btn_up", 0.0, 1.0), "down": ("btn_down", 0.0, -1.0),
                  "left": ("btn_left", -1.0, 0.0), "right": ("btn_right", 1.0, 0.0)}
 
+    # Basili tutma davranisi: ilk dokunus SECILI ADIM kadar hareket eder (hassas nisan
+    # icin tek tik = 1°/5°/10°); tus TEKRAR_GECIKME_MS'den uzun basili kalirsa surekli
+    # harekete gecilir.
+    TEKRAR_GECIKME_MS = 300
+    TEKRAR_PERIYOT_MS = 50
+
     def _dpad_press(self, direction):
         if direction in ("home", "center"):
             self.btn_center.setStyleSheet(self._key_center_active_style)
@@ -1456,13 +1723,135 @@ class MainWindow(QMainWindow):
             return
         ad, kpan, ktilt = self.YON_TABLO[direction]
         getattr(self, ad).setStyleSheet(self._key_active_style)
-        self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)
+        self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)   # tek dokunus
+        self._basili_yonler.add(direction)
+        if not self._tekrar_timer.isActive():
+            self._tekrar_gecikme.start(self.TEKRAR_GECIKME_MS)
 
     def _dpad_release(self, direction):
         if direction in ("home", "center"):
             self.btn_center.setStyleSheet(self._key_center_normal_style)
             return
         getattr(self, self.YON_TABLO[direction][0]).setStyleSheet(self._key_normal_style)
+        self._basili_yonler.discard(direction)
+        if not self._basili_yonler:
+            self._tekrar_durdur()
+
+    # ---- USB GAMEPAD ----
+    GP_TARAMA_TIK = 40      # cihaz yokken kac tikta bir yeniden taransin (~2 sn)
+
+    def _gamepad_durum_yaz(self):
+        if self.gamepad.bagli:
+            self._ci("Gamepad", GRN, f"· {self.gamepad.ad[:26]}")
+        else:
+            self._ci("Gamepad", BD2, "· yok")
+
+    def _gamepad_tik(self):
+        """Gamepad'i yoklar ve komutlari MEVCUT KAPILARDAN gecirir.
+
+        ⚠ Burada yeni bir komut yolu YOK. Hareket `_aci_hareket`, ates `_ates_kisayolu`
+          (yani `_ates_bas`), merkez `_aci_reset`, E-Stop `_estop_bas` uzerinden gider.
+          Gamepad'e kendi yolu verilseydi guvenlik denetimleri (E-Stop, atisa-yasak alan)
+          atlanirdi — gecmiste ikinci bir ates yolu tam bunu yapmisti (CLAUDE.md §12 B1).
+        """
+        if not self.gamepad.bagli:
+            # Sicak takma: cihaz yokken de periyodik tara, ama her tikta degil (pahali).
+            self._gp_tarama += 1
+            if self._gp_tarama >= self.GP_TARAMA_TIK:
+                self._gp_tarama = 0
+                if self.gamepad.tara():
+                    self._gamepad_durum_yaz()
+                    self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;'
+                                        f'Gamepad bağlandı: {self.gamepad.ad}')
+            return
+
+        d = self.gamepad.oku()
+        if not self.gamepad.bagli:          # okuma sirasinda koptu
+            self._gamepad_durum_yaz()
+            self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;Gamepad bağlantısı koptu')
+            return
+
+        simdi = time.time()
+        dt = min(0.2, simdi - self._gp_son_t)      # takilma sonrasi sicrama olmasin
+        self._gp_son_t = simdi
+
+        # E-STOP her kosulda islenir (digerlerinden ONCE): acil durdurma bir moda ya da
+        # baska bir kosula bagli olamaz. Ayni buton DEVAM icin de kullanilir.
+        if d.estop:
+            self.estop_btn.setChecked(not self.estop_btn.isChecked())
+            self._estop_bas()
+            return                                  # ayni tikta baska komut isleme
+
+        if d.ates:
+            self._ates_kisayolu()                   # -> _ates_bas (tek kapi)
+
+        if d.merkez and self.btn_center.isEnabled():
+            # btn_center E-Stop'ta devre disi kalir; gamepad'in ondan fazla yetkisi yok.
+            self._aci_reset()
+
+        if d.hiz_yukari or d.hiz_asagi:
+            yeni = self.hiz_seviye + (1 if d.hiz_yukari else -1)
+            if yeni in P.HIZ_TABLO:
+                self._hiz_sec(yeni)
+
+        # HAREKET: adim = tavan hiz x gecen sure x cubugun sapmasi. Basili tutma
+        # (`_tekrar_tik`) ile ayni matematik — tek farki analog carpan. Sabit adim
+        # gonderilseydi hedef motorun onune gecer, cubuk birakildiginda gimbal
+        # yetismek icin donmeye devam ederdi.
+        if d.hareket_var:
+            adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt
+            self._aci_hareket(d.pan * adim, d.tilt * adim)
+
+    def _tekrar_baslat(self):
+        if self._basili_yonler:
+            self._son_tekrar_t = time.time()
+            self._tekrar_timer.start()
+
+    def _tekrar_tik(self):
+        """Basili tutulan yon(ler) icin bir adim.
+
+        Adim SECILI ADIM ACISI DEGIL, **motorun tavan hizi x gecen sure** kadardir.
+        Sabit adimla gonderilseydi (or. 50 ms'de 5°  = 100°/s) hedef, motorun gidebilecegi
+        hizin onune gecer; tus birakildiginda gimbal hedefe yetismek icin donmeye devam
+        eder ve kullanici "durmuyor" diye gorurdu. Bu haliyle hedef motorla ayni tempoda
+        ilerler, birakinca en fazla bir tiklik yol kalir."""
+        if not self._basili_yonler:
+            self._tekrar_durdur()
+            return
+        simdi = time.time()
+        dt = min(0.2, simdi - self._son_tekrar_t)      # takilma sonrasi sicrama olmasin
+        self._son_tekrar_t = simdi
+        adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt    # derece/sn x sn
+        kpan = ktilt = 0.0
+        for yon in self._basili_yonler:                # W+D gibi capraz kombinasyonlar
+            _, p, t = self.YON_TABLO[yon]
+            kpan += p
+            ktilt += t
+        if (kpan or ktilt) and not self._aci_hareket(kpan * adim, ktilt * adim):
+            self._tekrar_durdur()                      # E-Stop / yasak alan: tekrari kes
+
+    def _tekrar_durdur(self):
+        self._tekrar_gecikme.stop()
+        self._tekrar_timer.stop()
+        self._basili_yonler.clear()
+
+    def _tuslari_birak(self):
+        """Tum yon tuslarini birakilmis say (tekrari kes + basili stilleri sifirla)."""
+        if not hasattr(self, "_tekrar_timer"):
+            return
+        self._tekrar_durdur()
+        for ad, _, _ in self.YON_TABLO.values():
+            b = getattr(self, ad, None)
+            if b is not None and hasattr(self, "_key_normal_style"):
+                b.setStyleSheet(self._key_normal_style)
+
+    def changeEvent(self, e):
+        # Pencere odagi giderse (Alt+Tab, baska uygulamaya tiklama) tusun BIRAKMA olayi
+        # bize hic gelmeyebilir; o zaman surekli hareket sonsuza dek surer ve gimbal
+        # kullanici farkinda olmadan donmeye devam eder. Odak kaybinda kesiyoruz.
+        if e.type() == QEvent.ActivationChange and not self.isActiveWindow():
+            self._tuslari_birak()
+        super().changeEvent(e)
 
     # NOT (B1): burada eskiden ikinci bir ates yolu vardi (`_fire_bas`). Iki sorunu vardi:
     #   1. `self.kontrol.ates()` zorunlu `ac` argumani olmadan cagriliyordu -> TypeError
@@ -1527,17 +1916,18 @@ class MainWindow(QMainWindow):
             self.atis_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
 
     def _ap_varsayilana_don(self):
-        self.ap_tilt_sl.setValue(60)
+        tavan = int(P.TILT_CALISMA_VARSAYILAN)   # sabit 60 yaziliydi: tavan degisince kalirdi
+        self.ap_tilt_sl.setValue(tavan)
         self.ap_pan_cb.setChecked(False)
         self.ap_pmin_spin.setValue(120)
         self.ap_pmax_spin.setValue(160)
         self.ap_tilt_cb.setChecked(False)
         self.ap_tmin_spin.setValue(45)
-        self.ap_tmax_spin.setValue(60)
+        self.ap_tmax_spin.setValue(tavan)
         self.ap_atis_cb.setChecked(False)
         self.ap_amin_spin.setValue(45)
         self.ap_amax_spin.setValue(75)
-        self._ap_tilt_degisti(60)
+        self._ap_tilt_degisti(tavan)
         self._ap_yasak_degisti()
 
     def _aci_hareket(self, d_pan, d_tilt):
@@ -1545,14 +1935,25 @@ class MainWindow(QMainWindow):
 
         HAREKETIN TEK KAPISI. E-Stop, yasak alan ve tilt limiti burada uygulanir;
         hem manuel (D-pad/WASD) hem otonom (_nisan_geldi) bu kapidan gecer.
+
+        Giris DELTA'dir (tus basimi / piksel hatasi), ESP32'ye giden ise MUTLAK acidir:
+        arayuzdeki aci ile kartin hedefi ayni tek kaynaktan (self.pan_ham/tilt_aci)
+        turedigi icin ikisi yapisal olarak KOPAMAZ. (Delta gonderilen surumde limitte
+        ekran 60 kalirken kartin hedefi buyumeye devam ediyordu — §13.1'deki hata.)
         """
         # B2 — E-Stop: hicbir hareket komutu gecmez, aci etiketleri de DEGISMEZ.
         # (isinstance ile bakilir: QObject'in yerlesik thread() metodu yuzunden
         #  hasattr/getattr(self,"thread") thread olusmadan once de dolu gorunur.)
-        if isinstance(getattr(self, "thread", None), AlgiThread) and self.thread.estop:
+        if isinstance(getattr(self, "thread", None), VideoThread) and self.thread.estop:
+            return False
+        # Kart KENDI durduysa (seri monitorden STOP / donanim butonu) arayuz E-Stop'a
+        # basilmamis olabilir. O halde komut gonderilirse kart yok sayar ama ekrandaki
+        # aci ilerler -> ekran ile hedef koparadi. Hareket kapisi burada da kapanir.
+        if getattr(self, "kontrol", None) and self.kontrol.estop_aktif:
             return False
 
-        yeni_pan = (self.pan_aci + d_pan) % 360.0
+        yeni_pan_ham = self.pan_ham + d_pan
+        yeni_pan = yeni_pan_ham % 360.0
         yeni_tilt = max(0.0, min(self.max_tilt_limit, self.tilt_aci + d_tilt))
 
         # Harekete yasak aci kontrolu
@@ -1567,12 +1968,7 @@ class MainWindow(QMainWindow):
             self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
             return False
 
-        # ESP32'ye HAM delta degil, GERCEKTEN UYGULANAN delta gider. Tilt limitinde
-        # (or. 60°) yukari basildiginda ekrandaki aci sabit kalir; ham delta gonderilseydi
-        # ESP32 hedefi buyumeye devam eder ve ekran gercek konumdan KOPARDI — B2'de
-        # duzeltilen hatanin aynisi. Pan sarmali oldugu icin daima tam uygulanir.
-        uyg_tilt = yeni_tilt - self.tilt_aci
-
+        self.pan_ham = yeni_pan_ham
         self.pan_aci = yeni_pan
         self.tilt_aci = yeni_tilt
         self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
@@ -1588,11 +1984,10 @@ class MainWindow(QMainWindow):
             self.bolge_status.setText("● BÖLGE GÜVENLİ")
             self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
 
-        # ESP32 komutu gonder. mod: 0=Manuel 1=Otonom (protokol.py) — eskiden hep 1
-        # gonderiliyordu; ESP32 tarafi moda gore davranacagi icin dogru mod sart.
-        if (d_pan or uyg_tilt) and getattr(self, "kontrol", None) and self.kontrol.bagli:
-            d = self.kontrol.nisan(1 if self.mod == "Otonom" else 0, d_pan, uyg_tilt)
-            self._esp_goster(d)
+        # ESP32'ye MUTLAK hedef aci gider (pan sarmasiz). Degismeyen ekseni kontrol
+        # katmani zaten gondermez, burada ayrica ayiklamaya gerek yok.
+        if getattr(self, "kontrol", None) and self.kontrol.bagli:
+            self._esp_goster(self.kontrol.aci(self.pan_ham, self.tilt_aci))
         return True
 
     def _nisan_geldi(self, d_yaw, d_pitch):
@@ -1607,6 +2002,7 @@ class MainWindow(QMainWindow):
 
     def _aci_reset(self):
         self.pan_aci = 0.0
+        self.pan_ham = 0.0
         self.tilt_aci = 0.0
         self.pan_val_lbl.setText("0.0°")
         self.tilt_val_lbl.setText("0.0°")
@@ -1787,7 +2183,8 @@ class MainWindow(QMainWindow):
         self.ci = {}
         segmentler = []
         for ad, alt in (("Kamera", "· aranıyor"), ("Lazer", "· bağlı değil"),
-                        ("ESP32", "· bağlı değil"), ("Seri Port", "· bekleniyor")):
+                        ("ESP32", "· bağlı değil"), ("Seri Port", "· bekleniyor"),
+                        ("Gamepad", "· aranıyor")):
             cont, dot, lbl = self._sb_seg(f'{ad}<small style="color:{TXT3}">&nbsp;{alt}</small>',
                                           dot_renk=BD2)
             segmentler.append(cont)
@@ -1804,7 +2201,7 @@ class MainWindow(QMainWindow):
             _model_txt = f'<span style="color:{RED}">Model yok</span>&nbsp;· models/'
         cont, _, self.sb_model = self._sb_seg(_model_txt)
         segmentler.append(cont)
-        cont, _, self.sb_fps = self._sb_seg("FPS —")
+        cont, _, self.sb_fps = self._sb_seg("CAM — | AI —")
         segmentler.append(cont)
 
         for i, seg in enumerate(segmentler):
@@ -1867,9 +2264,9 @@ class MainWindow(QMainWindow):
         self.sb_mod.setText(f'<span style="color:{BLUE}">Sistem:</span>&nbsp;{ad}')
         # B3: otonom nisan dongusu yalniz Otonom modda calisir. Mod degisince
         # kontrolcunun turev gecmisi sifirlanir (yeni moda gecince sicrama olmasin).
-        if isinstance(getattr(self, "thread", None), AlgiThread):
-            self.thread.otonom = (ad == "Otonom")
-            self.thread.nisanci.sifirla()
+        if isinstance(getattr(self, "thread", None), VideoThread):
+            self.inference_thread.otonom = (ad == "Otonom")
+            self.inference_thread.nisanci.sifirla()
         if hasattr(self, "sag_stack"):
             if self.mod == "Manuel":
                 self.sag_stack.setCurrentWidget(self.manuel_panel)
@@ -1886,7 +2283,22 @@ class MainWindow(QMainWindow):
             return None
         return TUS_YON.get(event.key())
 
+    def _ates_kisayolu(self):
+        """[L] tusu — ATES butonuyla BIREBIR ayni sey (atesin tek kapisi `_ates_bas`).
+
+        Buton devre disiysa (E-Stop) kisayol da gecmez: kisayolun butondan daha fazla
+        yetkisi olamaz, yoksa E-Stop klavyeden asilabilir olurdu."""
+        if not hasattr(self, "fire_btn") or not self.fire_btn.isEnabled():
+            return
+        self.fire_btn.setChecked(not self.fire_btn.isChecked())
+        self._ates_bas()
+
     def keyPressEvent(self, event):
+        # [L] = ates ac/kes. HER MODDA calisir: ATES butonu manuel panelde durdugu icin
+        # otonom modda gorunmez, ama lazeri kesme yolu moda bagli OLMAMALIDIR.
+        if event.key() == Qt.Key_L and not event.isAutoRepeat():
+            self._ates_kisayolu()
+            return
         yon = self._tus_yonu(event)
         if yon is None:
             super().keyPressEvent(event)
@@ -1914,8 +2326,9 @@ class MainWindow(QMainWindow):
         # Algi thread'ine aktif asamayi bildir (renk yalniz A3'te calisir). Thread heniz
         # olusmamis olabilir (ilk cagri __init__ sirasinda). DIKKAT: hasattr(self,"thread")
         # KULLANMA — QObject'in yerlesik thread() metodu yuzunden hep True doner; isinstance ile.
-        if isinstance(getattr(self, "thread", None), AlgiThread):
+        if isinstance(getattr(self, "thread", None), VideoThread):
             self.thread.asama = self.ASAMA_IDX[self.asama]
+            self.inference_thread.asama = self.ASAMA_IDX[self.asama]
         # Tespit tablosu basligi: A3'te TARAF (dost/dusman) kolonu var; A1-A2'de yok.
         if hasattr(self, "tablo"):
             if self.asama == "Aşama 3":
@@ -1958,6 +2371,7 @@ class MainWindow(QMainWindow):
         """
         aktif = self.estop_btn.isChecked()
         self.thread.estop = aktif
+        self.inference_thread.estop = aktif
         self.estop_btn.setText("▶ DEVAM ET" if aktif else "⏻ ACİL DURDUR")
         # 1. ATES kapisi (Yetenek 4) — kesme islemi tek yoldan (_ates_kes) gecer.
         if aktif:
@@ -1965,6 +2379,8 @@ class MainWindow(QMainWindow):
         self.fire_btn.setEnabled(not aktif)
         # 2. HAREKET kapisi (Yetenek 3): manuel yon kontrolleri kilitlenir.
         #    (Otonom nisan dongusu de AlgiThread._nisan_al icinde estop'ta durur.)
+        if aktif:
+            self._tuslari_birak()     # basili tutulan tusun tekrari da kesilmeli
         for ad in ("btn_up", "btn_down", "btn_left", "btn_right", "btn_center"):
             b = getattr(self, ad, None)
             if b is not None:
@@ -1980,7 +2396,39 @@ class MainWindow(QMainWindow):
                     f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
         if self.kontrol.bagli:
             d = self.kontrol.estop(aktif)
+            if aktif:
+                # Kart iki ekseni de oldugu yerde dondurdu ve konumunu bildirdi;
+                # ekran o konuma cekilir. DEVAM'da hicbir sey sifirlanmaz — motorlar
+                # tuttugu icin referans korunur (bkz. _estop_konum_uygula).
+                self._estop_konum_uygula()
             self._esp_goster(d)
+
+    def _estop_konum_uygula(self):
+        """Kartin ACIL DURDURMADA bildirdigi gercek konumu ekrana yansitir.
+
+        Kart acil durdurmada IKI EKSENI DE oldugu yerde dondurur (sartname Yetenek 3:
+        "sistem durur") ve durdugu konumu yazar. Motor hedefe varmadan durduysa (or.
+        90'a giderken 45'te E-Stop) ekrandaki "hedef" ile gercek konum ayrisir; bu
+        yuzden ekrani kartin bildirdigi konuma cekeriz.
+
+        Kart konum bildirmezse (eski firmware) ekrana DOKUNULMAZ — yanlis bir sayi
+        gostermektense son bilinen hedefte kalmak yeglenir."""
+        konum = getattr(self.kontrol, "estop_konum", None)
+        if konum is None:
+            return
+        self.kontrol.estop_konum = None
+        pan_ger, tilt_ger = konum
+        # pan_ham SARMASIZ (birikimli) tutulur; kartin bildirdigi de sarmasizdir.
+        self.pan_ham = pan_ger
+        self.pan_aci = pan_ger % 360.0
+        self.tilt_aci = tilt_ger
+        if hasattr(self, "pan_val_lbl"):
+            self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
+            self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
+        # Otonom PD kontrolcusunun turev gecmisi de sifirlanmali: duraklamadan once
+        # birikmis hata, devam edildiginde ani bir sicrama olarak cikmasin.
+        if isinstance(getattr(self, "inference_thread", None), InferenceThread):
+            self.inference_thread.nisanci.sifirla()
 
     def _ates_bas(self):
         """ATESIN TEK KAPISI. Tum guvenlik kontrolleri burada toplanir (B1).
@@ -2003,8 +2451,8 @@ class MainWindow(QMainWindow):
                     f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
             return
         ac = self.fire_btn.isChecked()
-        d = self.kontrol.ates(ac, mod=1 if self.mod == "Otonom" else 0)
-        self.fire_btn.setText("ATEŞİ KES" if ac else "A T E Ş")
+        d = self.kontrol.ates(ac)
+        self.fire_btn.setText(ATES_METIN_ACIK if ac else ATES_METIN_KAPALI)
         renk = RED if ac else GRN
         kaynak = "mock" if self.kontrol.mock_mu else self.kontrol.kaynak
         self.sb_msg.setText(f'<span style="color:{renk}">●</span>&nbsp;'
@@ -2020,32 +2468,126 @@ class MainWindow(QMainWindow):
         if not self.fire_btn.isChecked():
             return
         self.fire_btn.setChecked(False)
-        self.fire_btn.setText("A T E Ş")
+        self.fire_btn.setText(ATES_METIN_KAPALI)
         if self.kontrol.bagli:
-            self._esp_goster(self.kontrol.ates(False, mod=1 if self.mod == "Otonom" else 0))
+            self._esp_goster(self.kontrol.ates(False))
         self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;Ateş kesildi — {sebep}')
 
     def _esp_goster(self, d):
-        """ESP32 durum paketini alt cubuga yansitir."""
+        """Kontrol katmaninin ozetini alt cubuga yansitir.
+
+        DIKKAT — burada yazan aci OLCULEN degil, KOMUT EDILEN hedeftir: karttaki kod
+        konum geri bildirimi yapmiyor (yalniz insan-okur metin yaziyor). Etiket de bunu
+        "hedef" diye soyler; olcum gibi gostermek en yaniltici hata olurdu."""
         if not d:
             return
-        renk = {"Hazır": GRN, "Hareket": BLUE, "ATEŞ": RED,
-                "E-STOP": RED, "HATA": AMB}.get(d["durum_ad"], BD2)
+        renk = {"Hazır": GRN, "ATEŞ": RED, "E-STOP": RED}.get(d["durum_ad"], BD2)
         ek = " · mock" if self.kontrol.mock_mu else ""
         self._ci("ESP32", renk,
-                 f'· {d["durum_ad"]} · yaw {d["yaw"]:.1f}° pitch {d["pitch"]:.1f}°{ek}')
+                 f'· {d["durum_ad"]} · hedef yatay {d["pan"]:.1f}° dikey {d["tilt"]:.1f}°'
+                 f' · {d["hiz_ad"]}{ek}')
+        self._ci("Lazer", RED if d["lazer"] else BD2,
+                 f'· AKTİF %{d["lazer_guc"]}' if d["lazer"] else f'· kapalı · %{d["lazer_guc"]}')
+        self._lazer_bilgi_yaz()          # LAZER kartinin basligi da ates durumunu gostersin
+        # Kart kendi basina durdurulduysa (seri monitorden STOP, ileride donanim butonu)
+        # bunu yalnizca metin cikisindan ogreniriz — kontrol.oku() yakalar. O durumda
+        # arayuz de E-Stop'a gecmeli: ates kesilir, yon tuslari kilitlenir ve buton
+        # "DEVAM ET" olur (yoksa kullanicinin sistemi geri baslatma yolu kalmaz).
+        if d["estop"]:
+            self._ates_kes("ESP32 durduruldu")
+            btn = getattr(self, "estop_btn", None)
+            if btn is not None and not btn.isChecked():
+                btn.setChecked(True)
+                self._estop_bas()
+
+    def _esp_yokla(self):
+        """Karttan gelen metinleri periyodik olarak alir (250 ms) ve ATESI TAZELER.
+
+        Kart komut YOLLAMADAN da yazabilir (acilis banner'i, seri monitorden elle
+        verilen STOP). Okunmazsa hem seri tampon dolar hem de o olaylardan haberimiz
+        olmaz — bu yuzden yoklama gonderme degil, OKUMA yoklamasidir.
+
+        ATES TAZELEMESI burada: lazer acikken karta duzenli "hala aciksin" denir.
+        Bu dongu durursa (arayuz donar, uygulama kapanir, kablo kopar) kart lazeri
+        KENDI keser — "kes" komutunun gitmesini beklemek guvenli degildir, cunku
+        kesmenin gerektigi durumlarin cogunda komut zaten gidemiyordur."""
+        if not self.kontrol.bagli:
+            return
+        if self.fire_btn.isChecked():
+            self.kontrol.ates_tazele()
+        yeni = self.kontrol.oku()
+
+        # FIRMWARE GUNCEL MI? Kart acilista kendi TILT_MAX'ini yazar; bizimkiyle
+        # uyusmuyorsa firmware yuklenmemis demektir ve gimbal ESKI limitte takilir
+        # (07.08: ekran 120 gosteriyordu, kart 90'da kirpiyordu — sebebi gorunmuyordu).
+        if self.kontrol.firmware_uyumsuz:
+            kart_deg, bizim = self.kontrol.firmware_uyumsuz
+            self.kontrol.firmware_uyumsuz = None
+            self.sb_msg.setText(
+                f'<span style="color:{AMB}">●</span>&nbsp;<b>FIRMWARE ESKİ</b> — '
+                f'kartın tilt tavanı {kart_deg:.0f}°, arayüzünki {bizim:.0f}°. '
+                f'Gimbal {kart_deg:.0f}°\'de takılır; esp32/ klasörünü karta yükleyin.')
+
+        # KART KENDILIGINDEN YENIDEN BASLADI MI? (besleme dalgalanmasi / brown-out)
+        # Sessizce gecerse kartin konum sayaci sifirdan baslar ama ekrandaki aci eski
+        # degerde kalir — sonraki her komut kaymis referansa gider ve kimse fark etmez.
+        if self.kontrol.kart_resetlendi:
+            self.kontrol.kart_resetlendi = False
+            self.pan_aci = self.pan_ham = self.tilt_aci = 0.0
+            if hasattr(self, "pan_val_lbl"):
+                self.pan_val_lbl.setText("0.0°")
+                self.tilt_val_lbl.setText("0.0°")
+            self._ates_kes("ESP32 yeniden başladı")
+            self.sb_msg.setText(
+                f'<span style="color:{AMB}">●</span>&nbsp;'
+                f'<b>ESP32 YENİDEN BAŞLADI</b> — besleme kesilmiş olabilir. '
+                f'Açı referansı sıfırlandı, gimbal konumunu doğrulayın.')
+        if yeni:
+            self.sb_msg.setText(f'<span style="color:{TXT3}">ESP32:</span>&nbsp;{yeni[-1]}')
+        self._esp_goster(self.kontrol.durum)
 
     def _kamera_sec(self, i):
         veri = self.kam_sec.itemData(i)
         if veri is None:
             return
+            
+        # Cozunurluk menusu guncelle
+        self.res_sec.blockSignals(True)
+        self.res_sec.clear()
+        if hasattr(self, 'kamera_cozunurlukleri') and veri in self.kamera_cozunurlukleri:
+            res_list = self.kamera_cozunurlukleri[veri]
+            if res_list:
+                for w, h in res_list:
+                    self.res_sec.addItem(f"{w}x{h}", (w, h))
+            else:
+                self.res_sec.addItem("Bilinmiyor", None)
+        else:
+            self.res_sec.addItem("Otomatik", None)
+        self.res_sec.blockSignals(False)
+        
         self.thread.kaynak_istegi = veri
 
+    def _res_sec(self, i):
+        veri = self.res_sec.itemData(i)
+        if veri is None:
+            return
+        w, h = veri
+        algi.ISTENEN_W = w
+        algi.ISTENEN_H = h
+        
+        # Mevcut kamerayi yeni cozunurlukle yeniden baslat
+        idx = self.kam_sec.currentData()
+        if idx is not None:
+            self.thread.kaynak_istegi = idx
+
     def _kameralar_geldi(self, liste):
-        """liste: [{"index": int, "name": str, "is_default": bool}, ...]"""
+        """liste: [{"index": int, "name": str, "is_default": bool, "resolutions": [...]}, ...]"""
+        if not hasattr(self, 'kamera_cozunurlukleri'):
+            self.kamera_cozunurlukleri = {}
         mevcut = {self.kam_sec.itemData(i) for i in range(self.kam_sec.count())}
         for cam in sorted(liste, key=lambda c: c["index"]):
             idx = cam["index"]
+            self.kamera_cozunurlukleri[idx] = cam.get("resolutions", [])
             if idx not in mevcut:
                 # Gercek isim varsa kullan, yoksa generic
                 isim = cam.get("name", f"Kamera {idx}")
@@ -2117,51 +2659,106 @@ class MainWindow(QMainWindow):
 
     # ================= KARE GELDI =================
     def _kare_geldi(self, qimg, data):
-        # A5 — GORUNTU OLCEKLEME:
-        #  * KeepAspectRatio (ByExpanding DEGIL): ByExpanding pixmap'i hedefi TASIRACAK
-        #    kadar buyutur, QLabel de tasan kismi KIRPARDI -> kadrajin kenarindaki
-        #    tespitleri operator hic goremiyordu. Artik tum kadraj gorunur.
-        #  * FastTransformation: tum arayuz zaten bir QGraphicsView proxy'si icinde
-        #    ikinci kez olceklendigi icin burada smooth kullanmak hem gereksiz bulaniklik
-        #    hem de her karede bosa CPU demekti.
-        pix = QPixmap.fromImage(qimg).scaled(
-            self.video.width(), self.video.height(),
-            Qt.KeepAspectRatio, Qt.FastTransformation)
-        self.video.setPixmap(pix)
-        # A4: kare cizildi -> algi thread'i yeni kare gonderebilir (kuyruk birikmesin).
-        self.thread.kare_islendi()
+        try:
+            pix = QPixmap.fromImage(qimg).scaled(
+                self.video.width(), self.video.height(),
+                Qt.KeepAspectRatio, Qt.FastTransformation)
+                
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.Antialiasing)
+            
+            scale_x = pix.width() / qimg.width()
+            scale_y = pix.height() / qimg.height()
+            
+            font = QFont("Consolas", 10, QFont.Bold)
+            painter.setFont(font)
+            pen = painter.pen()
+            pen.setWidth(2)
+            
+            for bx in data.get("balonlar", []):
+                x1, y1, x2, y2 = bx
+                rx1, ry1, rx2, ry2 = x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
+                pen.setColor(QColor(60, 200, 235))
+                painter.setPen(pen)
+                painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
+                painter.drawText(QPointF(rx1, max(12.0, ry1 - 4)), "BALON")
+                
+            active_idx = data.get("active_idx", -1)
+            estop = data.get("estop", False)
+            for i, d in enumerate(data.get("dets", [])):
+                tip = d["tip"]
+                if tip == "Belirsiz":
+                    color = QColor(18, 88, 168)
+                else:
+                    c = d["conf"]
+                    if c >= 75:
+                        color = QColor(40, 200, 40)
+                    elif c >= 50:
+                        color = QColor(60, 200, 235)
+                    else:
+                        color = QColor(191, 32, 32)
+                        
+                pen.setColor(color)
+                painter.setPen(pen)
+                
+                x1, y1, x2, y2 = d["box"]
+                rx1, ry1, rx2, ry2 = x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
+                
+                painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
+                
+                tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(tip)
+                ad_cv = "?" if d["cls"] == "belirsiz" else algi.goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
+                txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
+                
+                fm = painter.fontMetrics()
+                tw = fm.horizontalAdvance(txt)
+                th = fm.height()
+                
+                ly = max(ry1, th + 10.0)
+                
+                painter.fillRect(QRectF(rx1, ly - th - 4, tw + 8, th + 4), color)
+                
+                painter.setPen(QColor(255, 255, 255))
+                painter.drawText(QPointF(rx1 + 4, ly - 4), txt)
+                
+                if i == active_idx and not estop:
+                    cx, cy = (rx1 + rx2) / 2, (ry1 + ry2) / 2
+                    pen.setColor(color)
+                    painter.setPen(pen)
+                    painter.drawEllipse(QPointF(cx, cy), 16, 16)
+                    painter.drawLine(QPointF(cx - 22, cy), QPointF(cx + 22, cy))
+                    painter.drawLine(QPointF(cx, cy - 22), QPointF(cx, cy + 22))
+                    
+            painter.end()
+            
+            self.video.setPixmap(pix)
+        except Exception as e:
+            import traceback
+            print("DRAWING ERROR:", e)
+            traceback.print_exc()
+        finally:
+            self.thread.kare_islendi()
 
         # CANLI gostergesi: kare geliyorsa aktif
         if not self.live_dot.isVisible():
             self.live_dot.setVisible(True)
         self._ci("Kamera", GRN, f"· {qimg.width()}×{qimg.height()}")
 
-        # A3'te dost/dusman rozeti/kolonu var; A1-A2'de yok (hepsi hedef).
+        # A3'te dost/dusman ayrimi var; A1-A2'de yok (hepsi hedef).
         a3 = data.get("a3", False)
-        self.h_badge.setVisible(a3)
 
+        # Aktif hedef bilgisi UST SERITTE (AKTIF HEDEF karti kaldirildi — ayni bilgiyi
+        # ikinci kez gostermenin anlami yoktu). E-Stop mesaji da buraya dusuyor; eskiden
+        # yalnizca kartin alt satirinda gorunuyordu.
         a = data["active"]
         if a:
-            self.h_ad.setText(a["ad"])
-            if a3:
-                self.h_badge.setText(a["tip"])           # Düşman (A3 aktif hep düşman)
-                self._badge_stil(self.h_badge, a["tip"])
-            self.h_conf.setText(f"%{a['conf']} güven")
-            self.fire_status.setText("Hedef kilitli · Atışa hazır")
-            self.fire_status.setStyleSheet(f"color:{GRN};font-size:13px;font-weight:500;")
             self.eng_name.setText("Hedef kilitli")
-            self.eng_sub.setText(f"{a['ad']} · %{a['conf']} güven")
+            taraf = f" · {a['tip']}" if a3 else ""
+            self.eng_sub.setText(f"{a['ad']}{taraf} · %{a['conf']} güven")
         else:
-            self.h_ad.setText("—")
-            if a3:
-                self.h_badge.setText("—")
-                self._badge_stil(self.h_badge, None)
-            self.h_conf.setText("")
             estop = "DURDUR" in data["mesaj"]
-            self.fire_status.setText(data["mesaj"] if estop else "Hedef aranıyor…")
-            self.fire_status.setStyleSheet(f"color:{RED if estop else TXT3};font-size:13px;font-weight:500;")
             self.eng_name.setText("Hedef bekleniyor")
-            self.eng_sub.setText("—")
+            self.eng_sub.setText(data["mesaj"] if estop else "—")
 
         # tablo (A3: SINIF/TARAF/DURUM · A1-A2: SINIF/DURUM/-)
         hedefler = data["hedefler"]
@@ -2189,7 +2786,11 @@ class MainWindow(QMainWindow):
         self.tablo.setRowHeight(0, 36)
 
         self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;{data["mesaj"]}')
-        self.sb_fps.setText(f"FPS&nbsp;<span style='color:{BLUE}'>{data['fps']:.1f}</span>")
+        self.sb_fps.setText(
+            f"CAM&nbsp;<span style='color:{BLUE}'>{data['kamera_fps']:.1f}</span>"
+            f"&nbsp;|&nbsp;"
+            f"AI&nbsp;<span style='color:{BLUE}'>{data['fps']:.1f}</span>"
+        )
 
     def _fit(self):
         """Icerigi pencereye orantili sigdir (en-boy oranini koru)."""
@@ -2207,6 +2808,11 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.thread.durdur()
         self.thread.wait(2000)
+        if hasattr(self, "esp_timer"):
+            self.esp_timer.stop()      # kapanan port yoklanmasin
+        if hasattr(self, "gp_timer"):
+            self.gp_timer.stop()
+            self.gamepad.kapat()
         if self.kontrol.bagli:
             self.kontrol.estop(True)   # kapanista guvenli duruma al
             self.kontrol.kapat()

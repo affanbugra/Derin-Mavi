@@ -13,6 +13,12 @@ PySide6>=6.6.0
 # donanım gelince ŞART — bu yüzden zorunlu bağımlılık, "bende çalışıyordu" olmasın.
 pyserial>=3.5
 
+# USB gamepad ile manuel kontrol (app/gamepad.py). Şartname Yetenek 1 kullanıcı komut
+# arayüzlerini "UI/joystick/klavye" diye sayar — joystick videoda gösterilecek.
+# SDL sayesinde hem XInput hem DirectInput padleri okur. Kurulu değilse uygulama yine
+# açılır, yalnızca gamepad özelliği kapalı kalır.
+pygame>=2.5
+
 # --- Opsiyonel: CPU'da hızlı çıkarım ---
 # Bu proje GPU'suz laptopta koşuyor ve tek gerçek darboğaz CPU inference'ı.
 # OpenVINO Intel işlemcide tipik 2-3× hızlandırır. Kurup modeli bir kez çevirin:
