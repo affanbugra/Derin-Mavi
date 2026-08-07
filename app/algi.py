@@ -95,6 +95,10 @@ VARSAYILAN_AYAR = {
     "kararlilik": 30,       # ByteTrack track_buffer: kayip kutu kac kare yasar
     "cozunurluk": 640,      # model.track(imgsz=)
     "iou": 0.70,            # NMS IoU esigi
+    # Cakisan kutu temizligi: iki kutunun kucugunun bu kadari otekinin icindeyse AYNI
+    # nesnedir, biri elenir. NMS'in yapamadigi is (o sinif ici calisir) — gorevde ayni
+    # alanda iki hedef bulunmaz. 0.99 = pratikte kapali.
+    "ortusme": 0.60,
     "maks_tespit": 300,     # kare basina en fazla kutu (max_det)
     "ayna": 0,              # goruntuyu yatay cevir. 0 = ham YOLO ile birebir ayni
     # --- nisan.py (Otonom takip geometrisi) ---
@@ -102,6 +106,9 @@ VARSAYILAN_AYAR = {
     "kp": 0.50,             # takip gucu: hatanin ne kadari tek adimda kapatilsin
     "kd": 0.06,             # ongoru suresi (sn) — gecikme telafisi
     "olu_bolge": 0.02,      # merkeze bu kadar yakinsa komut yok (dwell icin sart)
+    "onay_esigi": 0.70,     # kesin tanima icin gereken min. guven
+    "onay_tekrari": 3,      # kesin tanima icin gereken ardisik yuksek-guven kare sayisi
+    "kamera_fps": 30,       # kameradan istenen saniyelik kare hizi
 }
 AYAR = dict(VARSAYILAN_AYAR)
 
@@ -109,9 +116,11 @@ AYAR = dict(VARSAYILAN_AYAR)
 AYAR_SINIR = {
     "hassasiyet": (0.05, 0.95), "gosterim": (0.05, 0.95),
     "kararlilik": (5, 300), "cozunurluk": (320, 1280),
-    "iou": (0.10, 0.95), "maks_tespit": (1, 1000),
+    "iou": (0.10, 0.95), "ortusme": (0.30, 0.99), "maks_tespit": (1, 1000),
     "ayna": (0, 1), "fov": (20.0, 140.0),
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
+    "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
+    "kamera_fps": (5, 120),
 }
 
 _ayar_kilit = threading.Lock()   # AYAR: GUI thread yazar, algi thread okur
@@ -172,9 +181,11 @@ def ayar_guncelle(**kw):
 
 # BGR renkler (kutu cizimleri)
 RED = (32, 32, 191)      # dusman (yalniz A3)
-BLUE = (168, 88, 18)     # dost (yalniz A3)
+BLUE = (168, 88, 18)     # dost (yalniz A3) / belirsiz
 HEDEF = (0, 170, 255)    # A1/A2: taraf ayrimi yok, hepsi hedef
-YELLOW = (60, 200, 235)  # balon (nisan noktasi)
+YELLOW = (60, 200, 235)  # balon (nisan noktasi) / orta guven
+ORANGE = (0, 165, 255)   # belirsiz / onay bekliyor
+GREEN = (40, 200, 40)    # yuksek guven
 
 CAM_SOURCE = os.environ.get("DERINMAVI_CAM", "").strip()
 
@@ -215,7 +226,7 @@ def _cap_ayarla(cap):
     for prop, deger in ((cv2.CAP_PROP_BUFFERSIZE, 1),
                         (cv2.CAP_PROP_FRAME_WIDTH, ISTENEN_W),
                         (cv2.CAP_PROP_FRAME_HEIGHT, ISTENEN_H),
-                        (cv2.CAP_PROP_FPS, ISTENEN_FPS)):
+                        (cv2.CAP_PROP_FPS, int(AYAR.get("kamera_fps", ISTENEN_FPS)))):
         try:
             cap.set(prop, deger)
         except Exception:
@@ -386,7 +397,7 @@ def _guzel_kamera_adi(raw: str) -> str:
 def kameralari_listele_qt():
     """QMediaDevices ile sistemdeki TUM kameralari gercek isimleriyle listeler.
 
-    Doner: [{"index": int, "name": str, "is_default": bool}, ...]
+    Doner: [{"index": int, "name": str, "is_default": bool, "resolutions": [(w, h), ...]}, ...]
     Her kamera icin OpenCV index'i eslestirilir (Windows'ta QMediaDevices sirasi
     genellikle OpenCV MSMF backend sirasi ile aynidir).
     """
@@ -397,10 +408,16 @@ def kameralari_listele_qt():
         cams = QMediaDevices.videoInputs()
         sonuc = []
         for i, cam in enumerate(cams):
+            res_set = set()
+            for fmt in cam.videoFormats():
+                r = fmt.resolution()
+                res_set.add((r.width(), r.height()))
+            res_list = sorted(list(res_set), key=lambda x: x[0]*x[1], reverse=True)
             sonuc.append({
                 "index": i,
                 "name": _guzel_kamera_adi(cam.description()),
                 "is_default": cam.isDefault(),
+                "resolutions": res_list
             })
         return sonuc
     except Exception:
@@ -487,15 +504,27 @@ def open_camera():
 # surdurur. Kendi coasting/EMA katmanimiz YOK (hayalet + cift kutu yaratiyordu);
 # dogrudan ByteTrack'in o karedeki kutusu cizilir.
 #
-# ID'li kutuya gosterim esiginde kucuk bir tolerans taninir: onaylanmis nesne bir
+# ID'li kutuya gosterim esiginde kucuk bir tolerans taninir: takibe girmis nesne bir
 # kare zayiflayinca titremesin. Ama esik yine UYGULANIR — eski kod "ID varsa guven
 # ne olursa olsun goster" diyordu ve olu tespitler track_buffer boyunca hayalet
 # kutu olarak ekranda kaliyordu.
 ID_TOLERANS = 0.80   # ID'li kutu icin esik bu oranla yumusatilir (0.25 -> 0.20)
 
+# ONAYLANMIS hedef pratikte hic elenmez. Amac operatorun kuralidir: "bir hedef bir kez
+# %70 uzerinde dogrulandiysa artik onu TAKIP ET." Onaylanmis bir kutunun guveni bir kac
+# kare dususte diye kaybolursa takip/dwell kopar; onay zaten yalnizca uzun sureli
+# zayiflikta (ONAY_BOZULMA) dusurulur, tek karelik dususle degil.
+ONAYLI_ESIK = 0.02
+
+# Onayli bir track bu kadar kare UST USTE onay esiginin altinda kalirsa onay DUSER.
+# Olmasaydi bir kez yanlis onaylanan sinif ID yasadigi surece duzelmezdi.
+ONAY_BOZULMA = 15
+
 # Taraf hafizasi: yalniz A3 renk karari icin, kutu konumuna DOKUNMAZ. Renk bir an
 # okunamazsa son bilinen taraf korunur -> dost/dusman etiketi yanip sonmez.
 _taraf_hafiza = {}   # takip id -> "Düşman" | "Dost"
+_takip_durumlari = {} # takip id -> aday/onayli sinif bilgisi
+_kayip_sayaclari = {}  # takip id -> kac karedir gorulmedi
 _budama_sayaci = 0
 
 RENK_ESIK = 0.02      # bu oranin altinda renk "okunamadi" sayilir
@@ -503,8 +532,10 @@ BUDAMA_PERIYOT = 300  # kac karede bir olu ID'ler temizlenir
 
 
 def takip_sifirla():
-    """Taraf hafizasini temizler (kamera degisince cagirilir)."""
+    """Taraf hafizasini ve takip durumlarini temizler (kamera degisince cagirilir)."""
     _taraf_hafiza.clear()
+    _takip_durumlari.clear()
+    _kayip_sayaclari.clear()
 
 
 def _hafiza_buda(canli_idler):
@@ -528,6 +559,126 @@ def _taraf_belirle(frame, box, tid):
     if tid is not None:
         _taraf_hafiza[tid] = taraf
     return taraf
+
+
+def _karar_ver(tid, sinif_adi, conf, onay_esigi, onay_tekrari):
+    """Tek bir takip ID'si icin kesin-tanima karari. Doner: onayli sinif veya None.
+
+    ⚠ SIFIRLAMA DEGIL, HISTEREZIS. Eski kural "onay_tekrari kadar ARDISIK yuksek-guven
+      kare" idi: esigin altinda kalan tek bir kare sayaci sifirliyordu. Gercek videoda
+      guven kare kare dalgalanir (%75, %68, %72, %71...), dolayisiyla onay ya hic
+      gerceklesmiyor ya cok geciyordu — kutu "?" olarak kaliyordu. Artik zayif kare
+      sayaci yalnizca BIR AZALTIR; guclu kareler cogunluktaysa onay gelir.
+
+    Sinif yarisi da ayni mantikla cozulur (cogunluk oylamasi): baska bir sinif yuksek
+    guvenle gelirse mevcut adayin puani duser, ancak puan tukendiginde aday degisir.
+    Boylece tek karelik bir yanlis sinif tahmini adayi devirmez.
+
+    ⚠ SINIF TEKILLIGI KALDIRILDI. Eskiden bir sinifi tek bir track "sahiplenirdi"
+      (_kilitli_siniflar); ayni siniftan ikinci hedef ASLA onaylanamaz, sonsuza dek
+      "belirsiz" kalirdi. Oysa sartname coklu hedef gerektiriyor: Asama 2'de 3 koldan
+      ayni anda Fuze + Mini/Micro IHA geliyor, Asama 3'te dusman F16 ile dost F16 ayni
+      karede olabiliyor. Ayirt etme isi zaten takip ID'sinin (ve A3'te rengin) isidir.
+    """
+    durum = _takip_durumlari.setdefault(
+        tid, {"aday_sinif": None, "aday_sayac": 0, "onayli_sinif": None, "zayif": 0}
+    )
+    yuksek = conf >= onay_esigi
+
+    # --- ONAYLI: sinif SABIT kalir; yalnizca uzun sureli zayiflik onayi dusurur ---
+    if durum["onayli_sinif"] is not None:
+        durum["zayif"] = 0 if yuksek else durum["zayif"] + 1
+        if durum["zayif"] >= ONAY_BOZULMA:
+            durum.update({"onayli_sinif": None, "aday_sinif": None,
+                          "aday_sayac": 0, "zayif": 0})
+            return None
+        return durum["onayli_sinif"]
+
+    # --- HENUZ ONAYSIZ: cogunluk oylamasi ---
+    if not yuksek:
+        durum["aday_sayac"] = max(0, durum["aday_sayac"] - 1)     # sifirlama YOK
+    elif durum["aday_sinif"] == sinif_adi:
+        durum["aday_sayac"] += 1
+    else:
+        durum["aday_sayac"] -= 1                                  # rakip sinif puan dusurur
+        if durum["aday_sayac"] <= 0:
+            durum["aday_sinif"] = sinif_adi
+            durum["aday_sayac"] = 1
+
+    if durum["aday_sayac"] >= onay_tekrari:
+        durum["onayli_sinif"] = durum["aday_sinif"]
+        durum["zayif"] = 0
+        return durum["onayli_sinif"]
+    return None
+
+
+def _onayli_mi(tid):
+    """Bu takip ID'si kesin tanindi mi? (cizim esigini secmek icin)"""
+    return (tid is not None
+            and _takip_durumlari.get(tid, {}).get("onayli_sinif") is not None)
+
+
+def _ortusme(a, b):
+    """Iki kutunun ortusme orani: kesisim / KUCUK kutunun alani (IoS).
+
+    Neden IoU degil: IoU kesisimi BIRLESIME boler, dolayisiyla ic ice gecmis kutularda
+    (kucuk kutu buyugun icinde) dusuk cikar — oysa bunlar en tipik cift-kutu halidir.
+    Kucuk alana bolmek "bu kutunun ne kadari otekinin icinde" sorusunu sorar."""
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    kx = max(0, min(ax2, bx2) - max(ax1, bx1))
+    ky = max(0, min(ay2, by2) - max(ay1, by1))
+    kesisim = kx * ky
+    if kesisim <= 0:
+        return 0.0
+    kucuk = min(max(1, (ax2 - ax1) * (ay2 - ay1)), max(1, (bx2 - bx1) * (by2 - by1)))
+    return kesisim / kucuk
+
+
+def _cift_kutulari_ele(dets, esik):
+    """Ayni nesneye atilmis IKINCI kutuyu eler.
+
+    GOREV GERCEGI (takim bilgisi): hedefler raya asili gelir, birbirinden ayridir —
+    ayni alanda iki hedef ASLA bulunmaz. O halde yuksek ortusme her zaman modelin
+    ayni nesneye iki kutu atmasidir.
+
+    Bunu NMS yapamaz: Ultralytics NMS'i SINIF ICI calisir (agnostic degil). Model ayni
+    maketi hem 'fuze' hem 'helikopter' sanarsa kutular %90 ortusse bile ikisi de hayatta
+    kalir — "iou" ayarini kismak bu duruma hic dokunmaz.
+
+    Hangisi kalir: once KESIN TANINMIS olan (onaylanmis tip, "belirsiz" degil), esitlikte
+    guveni yuksek olan. Yalnizca guvene bakilsaydi, onaylanmis bir hedef o karede sansli
+    cikan gecici bir kutu yuzunden elenebilirdi.
+
+    ⚠ BALON bu temizlige HIC girmez: `dets`e degil ayri `balonlar` listesine yazilir.
+      Balon maketin ALTINDA oldugu icin govdeyle ortusur; buraya dahil edilseydi nisan
+      noktasi elenirdi (bkz. CLAUDE.md §7)."""
+    if len(dets) < 2:
+        return dets
+    sira = sorted(range(len(dets)),
+                  key=lambda i: (dets[i]["cls"] != "belirsiz", dets[i]["conf"]),
+                  reverse=True)
+    tutulan = []
+    for i in sira:
+        if all(_ortusme(dets[i]["box"], dets[j]["box"]) < esik for j in tutulan):
+            tutulan.append(i)
+    return [dets[i] for i in sorted(tutulan)]   # kutu sirasi korunur
+
+
+def _kayiplari_temizle(gorulen_id_seti, kayip_esigi):
+    """Gorulmeyen ID'lerin kayip sayacini artirir ve esigi asinca hafizadan siler.
+
+    Esik ByteTrack'in track_buffer'indan ("kararlilik" ayari) turer. Sabit 60 karedeydi:
+    tracker ID'yi 30 karede dusurup nesneye YENI ID verdigi icin bizim hafizamiz olu bir
+    ID'yi tutmaya devam ediyor, geri gelen nesne ise sifirdan onay bekliyordu."""
+    for tid in list(_takip_durumlari.keys()):
+        if tid in gorulen_id_seti:
+            _kayip_sayaclari[tid] = 0
+            continue
+        _kayip_sayaclari[tid] = _kayip_sayaclari.get(tid, 0) + 1
+        if _kayip_sayaclari[tid] >= kayip_esigi:
+            _takip_durumlari.pop(tid, None)
+            _kayip_sayaclari.pop(tid, None)
 
 
 # ---------------- Tespit + karar ----------------
@@ -557,12 +708,41 @@ def analiz_et(model, frame, estop=False, asama=None):
 
     # conf=BESLEME_CONF kasitli dusuk (bkz. dosya basi): filtrelemeyi tracker
     # (hassasiyet) ve cizim (gosterim) yapar, NMS degil.
-    results = model.track(frame, persist=True,
-                          conf=BESLEME_CONF,
-                          iou=float(a["iou"]),
-                          max_det=int(a["maks_tespit"]),
-                          imgsz=int(a["cozunurluk"]),
-                          tracker=_TRACKER_YAML, verbose=False)
+    #
+    # TensorRT / ONNX sabit-boyutlu modeller: imgsz ayardan degil modelin kendi
+    # boyutundan okunur. _fixed_imgsz ilk AssertionError'dan parse edilip saklanir.
+    fixed_sz = getattr(model, "_fixed_imgsz", None)
+    track_kwargs = {
+        "persist": True,
+        "conf": BESLEME_CONF,
+        "iou": float(a["iou"]),
+        "max_det": int(a["maks_tespit"]),
+        "tracker": _TRACKER_YAML,
+        "verbose": False,
+        "imgsz": fixed_sz if fixed_sz is not None else int(a["cozunurluk"]),
+    }
+
+    try:
+        results = model.track(frame, **track_kwargs)
+    except AssertionError as e:
+        msg = str(e)
+        if "max model size" in msg:
+            # Hata metninden modelin gercek boyutunu parse et: "(1, 3, 640, 640)"
+            import re
+            m = re.search(r"max model size[^\d]*(\d+),\s*(\d+)\)", msg)
+            native_h = int(m.group(1)) if m else 640
+            native_w = int(m.group(2)) if m else 640
+            native_sz = max(native_h, native_w)
+            model._fixed_imgsz = native_sz
+            print(f"\n[UYARI] Model sabit boyutlu ({native_sz}px). "
+                  f"Arayuzdeki cozunurluk yoksayiliyor.\n")
+            # Predictor'i sifirla ki eski imgsz onbellekte kalmasin
+            if getattr(model, "predictor", None) is not None:
+                model.predictor = None
+            track_kwargs["imgsz"] = native_sz
+            results = model.track(frame, **track_kwargs)
+        else:
+            raise
     r = results[0]
     balonlar = []
     dets = []
@@ -577,20 +757,50 @@ def analiz_et(model, frame, estop=False, asama=None):
             if tid is not None:
                 canli_idler.add(tid)
 
-            esik = gosterim * ID_TOLERANS if tid is not None else gosterim
+            if cls == BALON:                 # nisan noktasi, hedef listesine girmez
+                if conf >= gosterim:
+                    balonlar.append((x1, y1, x2, y2))
+                continue
+
+            # KARAR ONCE, CIZIM ESIGI SONRA. Sira onemli: esik altinda kalan kare de
+            # onay durumunu beslemelidir, yoksa onayli bir track zayifladiginda
+            # `zayif` sayaci hic artmaz ve yanlis bir onay sonsuza dek yasardi.
+            if tid is not None:
+                kesin_cls = _karar_ver(tid, cls, conf, float(a["onay_esigi"]),
+                                       int(a["onay_tekrari"]))
+                if kesin_cls is None:
+                    cls = "belirsiz"
+                    ham_ad = "?"
+                else:
+                    cls = kesin_cls
+                    ham_ad = kesin_cls
+
+            # ONAYLANMIS hedef pratikte elenmez ("bir kez dogrulandiysa TAKIP ET"),
+            # takibe girmis ama onaysiz kutuya kucuk tolerans, ID'siz kutuya tam esik.
+            if _onayli_mi(tid):
+                esik = ONAYLI_ESIK
+            elif tid is not None:
+                esik = gosterim * ID_TOLERANS
+            else:
+                esik = gosterim
             if conf < esik:
                 continue
 
-            if cls == BALON:                 # nisan noktasi, hedef listesine girmez
-                balonlar.append((x1, y1, x2, y2))
-                continue
-
-            taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
-            dets.append({"cls": cls, "ham": ham_ad, "ad": goster_ad(cls, ham_ad),
+            if cls == "belirsiz":
+                taraf = "Belirsiz"
+            else:
+                taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
+            
+            dets.append({"cls": cls, "ham": ham_ad, "ad": "?" if cls == "belirsiz" else goster_ad(cls, ham_ad),
                          "tip": taraf, "conf": int(round(conf * 100)),
                          "box": (x1, y1, x2, y2), "id": tid})
 
+    # Ayni nesneye atilmis cift kutulari ele (NMS sinif ici calistigi icin farkli
+    # sinif etiketli ciftleri temizleyemez — bkz. _cift_kutulari_ele).
+    dets = _cift_kutulari_ele(dets, float(a["ortusme"]))
+
     _hafiza_buda(canli_idler)
+    _kayiplari_temizle(canli_idler, int(a["kararlilik"]))
 
     # Kilit: A3'te yalniz Düşman (dosta ates yok), A1/A2'de her tespit hedeftir.
     active_idx = -1
@@ -613,12 +823,23 @@ def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.4, YELLOW, 1, cv2.LINE_AA)
     for i, d in enumerate(dets):
         tip = d["tip"]
-        color = RED if tip == "Düşman" else (BLUE if tip == "Dost" else HEDEF)
+        if tip == "Belirsiz":
+            color = BLUE
+        else:
+            c = d["conf"]
+            if c >= 75:
+                color = GREEN
+            elif c >= 50:
+                color = YELLOW
+            else:
+                color = RED
+        
         x1, y1, x2, y2 = d["box"]
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2, cv2.LINE_AA)
+        
         # Etiket: A3'te "Dusman/Dost - Tip - %.."; A1-A2'de yalniz "Tip - %.."
         tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(tip)
-        ad_cv = goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
+        ad_cv = "?" if d["cls"] == "belirsiz" else goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
         txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
         f, fs, ft = cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1
         (tw, th), _ = cv2.getTextSize(txt, f, fs, ft)
@@ -665,4 +886,104 @@ if __name__ == "__main__":
     assert set(_taraf_hafiza) == {1, 2, 3}, _taraf_hafiza
     takip_sifirla()
 
-    print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, hafiza budama")
+    # ---- KESIN TANIMA (_karar_ver) ----
+    ESIK, TEKRAR = 0.70, 3
+
+    def besle(tid, kareler):
+        """kareler: [(sinif, conf), ...] -> son karedeki karar."""
+        son = None
+        for sinif, conf in kareler:
+            son = _karar_ver(tid, sinif, conf, ESIK, TEKRAR)
+        return son
+
+    # 3 guclu kare -> onay
+    assert besle(1, [("f16", 0.9)] * 3) == "f16"
+    takip_sifirla()
+
+    # DALGALI GUVEN: aradaki zayif kare onayi ENGELLEMEMELI (eski kod sifirlardi).
+    # (+1 +1 -1 +1 +1 = 3) -> onay
+    assert besle(1, [("f16", 0.9), ("f16", 0.8), ("f16", 0.5),
+                     ("f16", 0.85), ("f16", 0.9)]) == "f16"
+    takip_sifirla()
+
+    # Surekli zayif kalan hedef onaylanmamali.
+    assert besle(1, [("f16", 0.5)] * 20) is None
+    takip_sifirla()
+
+    # Tek karelik yanlis sinif tahmini adayi DEVIRMEMELI — yalnizca onayi geciktirir.
+    # (+1 +1 -1(fuze) +1 = 2 -> heniz onay yok, ama aday hala f16)
+    assert besle(1, [("f16", 0.9), ("f16", 0.9), ("fuze", 0.9), ("f16", 0.9)]) is None
+    assert _takip_durumlari[1]["aday_sinif"] == "f16", "rakip sinif adayi devirdi"
+    assert _karar_ver(1, "f16", 0.9, ESIK, TEKRAR) == "f16"   # bir kare daha -> onay
+    takip_sifirla()
+
+    # ISRARLI yanlis sinif adayi devirebilmeli (model gercekten fikir degistirdiyse).
+    assert besle(1, [("f16", 0.9), ("f16", 0.9)]) is None
+    assert besle(1, [("fuze", 0.9)] * 5) == "fuze", "israrli dogru sinif adayi deviremedi"
+    takip_sifirla()
+
+    # AYNI SINIFTAN IKI HEDEF: ikisi de onaylanmali (sartname: Asama 2'de 3 hedef,
+    # Asama 3'te dusman F16 + dost F16 ayni karede olabilir).
+    assert besle(1, [("f16", 0.9)] * 3) == "f16"
+    assert besle(2, [("f16", 0.9)] * 3) == "f16", "ayni siniftan ikinci hedef onaylanmadi"
+    takip_sifirla()
+
+    # Onaydan sonra sinif SABIT: zayif kareler kutuyu kaybettirmez...
+    besle(1, [("f16", 0.9)] * 3)
+    assert besle(1, [("f16", 0.3)] * (ONAY_BOZULMA - 1)) == "f16"
+    assert _onayli_mi(1)
+    # ...ama UZUN sureli zayiflik onayi dusurur (yanlis onay sonsuza dek yasamasin).
+    assert besle(1, [("f16", 0.3)] * 2) is None
+    assert not _onayli_mi(1)
+    takip_sifirla()
+
+    # Onayli track baska sinif gorse bile tipini degistirmez (etiket titremesin).
+    besle(1, [("f16", 0.9)] * 3)
+    assert besle(1, [("fuze", 0.95)]) == "f16"
+    takip_sifirla()
+
+    # ---- CAKISAN KUTU TEMIZLIGI (_ortusme / _cift_kutulari_ele) ----
+    # Ortusme orani kucuk kutuya gore olculur: ic ice kutu IoU ile yakalanmaz.
+    assert _ortusme((0, 0, 100, 100), (0, 0, 100, 100)) == 1.0        # birebir ayni
+    assert _ortusme((0, 0, 100, 100), (200, 200, 300, 300)) == 0.0    # hic degmiyor
+    assert _ortusme((0, 0, 100, 100), (25, 25, 75, 75)) == 1.0        # kucuk TAMAMEN icinde
+    assert abs(_ortusme((0, 0, 100, 100), (50, 0, 150, 100)) - 0.5) < 1e-6   # yarim
+
+    def kutu(cls, conf, box, tid=1):
+        return {"cls": cls, "ham": cls, "ad": cls, "tip": "Hedef",
+                "conf": conf, "box": box, "id": tid}
+
+    # Ayni nesneye iki FARKLI SINIF etiketi -> biri elenmeli (NMS'in yapamadigi is).
+    d = _cift_kutulari_ele([kutu("fuze", 60, (10, 10, 110, 110)),
+                            kutu("helikopter", 85, (12, 12, 112, 112))], 0.60)
+    assert len(d) == 1 and d[0]["cls"] == "helikopter", d      # guveni yuksek olan kalir
+
+    # KESIN TANINMIS hedef, o karede daha guvenli cikan "belirsiz" kutuya yenilmez.
+    d = _cift_kutulari_ele([kutu("belirsiz", 95, (10, 10, 110, 110)),
+                            kutu("f16", 55, (12, 12, 112, 112))], 0.60)
+    assert len(d) == 1 and d[0]["cls"] == "f16", d
+
+    # AYRI hedefler (Asama 2 surusu) korunmali — az ortusme eleme sebebi degil.
+    ayri = [kutu("fuze", 80, (0, 0, 100, 100), 1),
+            kutu("drone", 80, (90, 0, 190, 100), 2),
+            kutu("fuze", 80, (300, 0, 400, 100), 3)]
+    assert len(_cift_kutulari_ele(ayri, 0.60)) == 3, "ayri hedefler elendi"
+
+    # Esik 0.99'da temizlik pratikte KAPALI olmali (operator kapatabilmeli).
+    ikiz = [kutu("fuze", 60, (10, 10, 110, 110)), kutu("helikopter", 85, (12, 12, 112, 112))]
+    assert len(_cift_kutulari_ele(ikiz, 0.99)) == 2
+
+    # Kutu sirasi korunmali (active_idx bu listeye gore secilir).
+    sirali = _cift_kutulari_ele([kutu("f16", 90, (0, 0, 50, 50), 1),
+                                 kutu("drone", 70, (300, 300, 350, 350), 2)], 0.60)
+    assert [x["cls"] for x in sirali] == ["f16", "drone"], sirali
+
+    # Kayip ID hafizadan silinmeli; esik "kararlilik" ayarindan gelir.
+    besle(7, [("f16", 0.9)] * 3)
+    for _ in range(5):
+        _kayiplari_temizle(set(), 5)
+    assert 7 not in _takip_durumlari, "kayip ID hafizada kaldi"
+    takip_sifirla()
+
+    print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, hafiza budama, "
+          "kesin tanima (histerezis/coklu hedef/onay bozulma), cakisan kutu temizligi")

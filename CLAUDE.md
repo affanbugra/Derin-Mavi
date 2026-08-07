@@ -214,9 +214,17 @@ zorunluluğunu kaldırır. Tek kamera + bilinen boyut bu bandı doğrulamaya yet
 - **İşlemci:** Laptop (yarışmaya laptopla gidilecek). KTR: HP Victus, i5-12500H, RTX 3060.
 - **Kamera:** KTR'de OAK-D-Pro (stereo). *(Açık karar — bkz. §8; bugün "tek kamera" dendi.)*
 - **Aktüatör:** Her eksende 1× NEMA23 kapalı çevrim step (yaw 360°, pitch min 60°), STEP/DIR.
-- **Kontrolcü:** ESP32, UART **115200 baud**, PySerial. Paket: `0xAA | mod | X | Y | ateş | XOR`.
-  Mod 0=Manuel, 1=Otonom. Açı 0.1° çözünürlük. ESP32 geri: konum + durum (hazır/hareket/ateş/estop/hata).
+  ESP32'ye bağlı **iki motor**: pan = YATAY eksen (STEP 6/DIR 7, ENABLE 16, **15→83 diş
+  redüksiyon**), tilt = DİKEY eksen (STEP 4/DIR 5, ENABLE 17). **Acil stop butonu = GPIO 15**
+  (NO, basılı=LOW); **lazer = GPIO 18 (PWM)**. Firmware AccelStepper, sürücüler **6400 step/tur**.
+- **Kontrolcü:** ESP32, UART **115200 baud**, PySerial. Komutlar **ASCII satır**:
+  `P<derece>` `T<derece>` `S<der/sn>` `A<der/sn²>` `G<%>` `L1/L0` `STOP` `START` — açı **MUTLAK**.
+  Kart yapısal durum paketi yollamaz, insan-okur metin yazar. **Hız düzeyi 3 kademe** → §5.1.
+- **İş bölümü:** laptop yalnızca *mutlak hedef açı + hız düzeyi + komut* söyler; mikroadım,
+  dişli oranı, rampa (ivmelenme) ve homing ESP32'de kalır. Laptop step saymaz.
 - **İmha:** LaserTree 80W-AA-PRO lazer (24V, PWM tetik). Odak merceği 5–15 m için kalibre.
+  **[KESİN] Tam güçle çalışmıyoruz — varsayılan %40** (takım kararı 06.08); güç `G<yüzde>`
+  komutuyla ayarlanır, `L1/L0` ateşi açıp keser. Ayrıntı ve dwell etkisi → §5.3.
 - **Güç:** Mean Well LRS-350-24 (24V). Buck → 5V (kamera+ESP32). E-Stop + şalter + sigorta.
 - **Kontrol algoritması:** PD kontrol (piksel hatası → yaw/pitch); homing için limit switch.
 - **Manuel kontrol:** USB gamepad (Aşama 1).
@@ -224,6 +232,270 @@ zorunluluğunu kaldırır. Tek kamera + bilinen boyut bu bandı doğrulamaya yet
 
 **Güvenlik (şartname zorunlu):** harekete-yasak alan + atışa-yasak alan tanımı; sadece hedef
 tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile bilinen başlangıç.
+
+### 5.1 ESP32 iletişim katmanı ve MOTOR HIZ DÜZEYİ (05.08.2026)
+
+**[KESİN] Protokol, ESP32'de GERÇEKTEN ÇALIŞAN koda göre belirlendi.** Ekipten gelen firmware
+(AccelStepper) ASCII satır komutları konuşuyordu; kısa süre binary/delta bir protokol yazılmıştı
+ama karşılığı yoktu → **atıldı.** Bugün tek kaynak `app/protokol.py` + `esp32/derin_mavi_esp32/derin_mavi_esp32.ino`.
+
+| Konu | Karar |
+|---|---|
+| Komut biçimi | ASCII satır, `\n` ile biter: `P<derece>` `T<derece>` `S<der/sn>` `A<der/sn²>` `L1`/`L0` `STOP` `START`. |
+| Açı semantiği | **MUTLAK** (`moveTo`), delta DEĞİL. Kaybolan komut kalıcı sapma yaratmaz; ateş komutu süregelen hareketi bozmaz. Ekrandaki açı ile kartın hedefi tek kaynaktan türer → **kopma yapısal olarak imkânsız** (§13.1'deki hata sınıfı ortadan kalktı). |
+| Azimut sarması | Ekranda 0–360, **karta sürekli (birikimli) açı gider**: 350°→10° geçişinde `P370`. Yoksa motor kısa yoldan değil 340° geri döner. |
+| **Mekanik [KESİN]** | Sürücü çözünürlüğü **6400 step/tur** (1/32 mikroadım). **Yatay eksende 15→83 diş = 5.533:1 redüksiyon** → **98.37 step/derece.** Dikey eksen: redüksiyon **[VARSAYIM] 1:1** → 17.78 step/derece (⚠ ölçülüp doğrulanmalı; yanlışsa tilt açıları yanlış olur). |
+| Hız birimi neden derece/sn | İki eksenin dişli oranı farklı → aynı step/sn iki eksende bambaşka açı hızı demek olurdu. Laptop her yerde **derece** konuşur (P/T de derece); step'e çevirmek kartın işi. Dişli/mikroadım değişirse yalnız firmware sabiti değişir. |
+| Hız düzeyleri | **3 kademe (derece/sn, derece/sn²):** Yavaş `S15/A40` · Normal `S40/A100` · Hızlı `S75/A200`. |
+| Tavanı ne belirledi | **Darboğaz pan ekseni:** 98.37 step/derece → 75°/s bile ~7380 step/sn. AccelStepper adımları yazılımla ürettiği için ESP32'de güvenli üst sınır ≈ **8000 step/sn** (`MAKS_STEP_SN`); tablo bunun altında kalacak şekilde seçildi ve test bunu doğruluyor. |
+| İvme neden birlikte | Step motor yüksek tavan hıza düşük ivmeyle çıkamaz; düşük hızda yüksek ivme adım kaçırır. Kademe = (hız, ivme) çifti. |
+| Geri bildirim | Kart **yapısal durum paketi yollamıyor**, insan-okur metin yazıyor. Bu yüzden arayüzdeki açı **"hedef"** diye yazılır — ölçüm gibi göstermek en yanıltıcı hata olurdu (mesafe özelliğinde bir kez yaşandı). |
+| Arayüz | Sağ kolonda **MOTOR HIZI** kartı; sağ panel stack'inin DIŞINDA → hem Manuel hem Otonom modda görünür. Adım butonları (1°/5°/10°) `Hassas/Orta/Geniş` oldu: adım "ne kadar", hız "ne kadar çabuk". |
+| **Basılı tutma** (05.08) | Tek dokunuş = seçili adım (1/5/10°). Tuş 300 ms'den uzun basılı kalırsa 50 ms'de bir **sürekli hareket**. Tik başına açı = **kademenin derece/sn'si × geçen süre** — sabit adım gönderilseydi (50 ms'de 5° = 100°/s) hedef motorun önüne geçer, tuş bırakılınca gimbal yetişmek için dönmeye devam ederdi. Qt'nin kendi auto-repeat'i kullanılmaz: hızını işletim sistemi belirlerdi ve iki tuş aynı anda basılıyken çapraz hareket çalışmazdı. **Odak kaybında** (Alt+Tab) tekrar kesilir — tuş bırakma olayı gelmeyebilir ve gimbal sonsuza dek dönerdi. |
+
+**Firmware'e eklenenler** (`esp32/derin_mavi_esp32/derin_mavi_esp32.ino`, ekipten gelen kodun üstüne):
+1. **Lazer (`L1`/`L0`)** — pin **15**; imha unsuru koda hiç girmemişti.
+2. **`STOP` artık lazeri de keser** — E-Stop'un ilk işi ateşi kesmektir; motor kilitlemek yetmez.
+3. **`S` komutu (tavan hız)** — eskiden yalnız ivme (`A`) değişebiliyordu, hız sabitti;
+   3 kademeli hız düzeyi bu komut olmadan mümkün değil.
+4. **Tilt yazılımsal limiti (0–90°)** — seri monitörden elle `T500` yazan biri mekaniği kırmasın.
+   Arayüz de kırpar; **tek tarafa güvenilmez.**
+   **07.08 düzeltmesi:** tavan **60° → 90°**. Ayrıca bir tutarsızlık giderildi: arayüzdeki
+   "Maksimum Yükseliş" kaydırıcısı zaten 90'a kadar gidiyordu ama `protokol.TILT_MAX` 60'ta
+   kırpıyordu — kaydırıcı 90'a çekilse bile gimbal **60'ta takılı kalıyor**, operatör sebebini
+   göremiyordu. Kaydırıcının tavanı, yasak-alan kutuları ve "Varsayılan" düğmesi artık
+   `protokol.TILT_MAX`'tan türer (tek kaynak). Gerçek kartta doğrulandı: `T85`/`T90` geçiyor,
+   `T120` → 90'a, `T-10` → 0'a kırpılıyor.
+5. **DONANIMSAL ACİL STOP BUTONU (05.08 akşam):** **[KESİN] GPIO 15**, NO (normalde açık),
+   GND'ye çeker → dahili pull-up ile **basılı = LOW**. Giriş her döngüde okunur (30 ms sıçrama
+   filtresi). Basılınca `acilDurdur()` çalışır: **önce lazer, sonra hareket, sonra sürücü
+   ENABLE hatları (pin 16/17) kesilir.** Sıra kasıtlı — ateş her şeyden önce durur.
+   - **Buton bırakılınca sistem KENDİLİĞİNDEN BAŞLAMAZ.** Operatör arayüzden DEVAM ET demeli;
+     acil durdurmadan çıkış her zaman bilinçli bir eylem olmalıdır.
+   - **Buton basılıyken `START` REDDEDİLİR.** Yazılımdan geçilebilen bir E-Stop, E-Stop değildir.
+     Kart reddederken metninde "SISTEM DURDURULDU" geçirir → laptop tarafı da E-Stop'ta kalır.
+   - Açılışta buton zaten basılıysa kart hemen durur (reset sonrası kaçak hareket olmaz).
+6. **[KESİN — 07.08'DE DEĞİŞTİ] E-Stop'ta motorlar TUTAR; ENABLE ASLA kesilmez.**
+
+   **Sahada ne oldu:** acil durdurmadan çıkınca gimbal **aniden fırlıyordu.** Sebep
+   yazılım değildi — kapalı çevrim (closed-loop) sürücünün kendi servo döngüsüydü:
+   ENABLE kesilince rotor serbest kalıyor, mil kayıyor (dikey eksen yer çekimiyle
+   düşüyor), sürücünün **encoder'ı bu kaymayı izlemeye devam ediyor**; ENABLE geri
+   verildiğinde biriken pozisyon hatasını **kendi maksimum hızıyla** kapatıyor. Bu
+   hareketi ESP32 üretmiyor (`distanceToGo()` sıfır), dolayısıyla hız kademesi de
+   sınırlamıyor. Fırlamanın olması, `ENA_AKTIF_LOW = true` varsayımının **doğru**
+   olduğunu ve ENABLE hattının sürücüye gerçekten bağlı olduğunu da kanıtladı.
+
+   **Yeni davranış (takım kararı):**
+   | | |
+   |---|---|
+   | ENABLE | `setup()`'ta bir kez enerjilenir, **bir daha dokunulmaz.** `setDrivers(false)` diye bir yol yok; fonksiyon `enableAc()` olarak sadeleşti. |
+   | Lazer | İlk iş olarak kesilir (sıra değişmedi). |
+   | Pan | **Olduğu yerde kilitlenir** (`moveTo(currentPosition())`), acil durdurma boyunca hiç hareket etmez. |
+   | Tilt | **0° park konumuna iner** — lazerli namlu yukarıda asılı kalmasın diye bilinçli bir harekettir. Bu yüzden E-Stop'ta `tiltMotor.run()` çağrılmaya devam eder; `panMotor.run()` çağrılmaz. |
+   | Komutlar | `systemActive = false` → P/T/L/S/A hepsi reddedilir. Mümkün olan **tek hareket** tilt'in park etmesidir. |
+   | **Sıfır kabulü** | **KALDIRILDI.** Motorlar tuttuğu için mil kaymaz, referans geçerli kalır. Sıfırlama ENABLE'ın kesildiği eski tasarımın zorunlu telafisiydi; artık her acil durdurmada mutlak açıları kaydırmak demek olurdu. **Bedeli de bitti: E-Stop artık açı referansını bozmuyor.** |
+
+   Laptop tarafı da aynı şeyi söyler: `kontrol.estop(True)` yalnız `tilt_hedef`'i sıfırlar
+   (pan korunur), arayüzde `_sifir_kabul` → **`_estop_park`** oldu.
+
+   ✅ **Gerçek kartta doğrulandı:** `P60`+`T40` → `STOP` → *"Pan kilitli, tilt 0 derece park
+   konumuna iniyor"* → `P200`/`T50` **reddedildi** → `START` → *"Referans korundu
+   (P60.00 / T0.00)"*. Kapı testleri: `test_estopta_enable_kesilmez`,
+   `test_estopta_pan_kilitli_tilt_park_eder`, `test_devam_edince_referans_korunur`
+   (eski davranışa dönülünce kırmızıya düştüğü doğrulandı).
+
+   ⚠ **[VARSAYIM] Şartname riski:** Yetenek 3 *"hareket ederken E-Stop → sistem durur"*
+   diyor; tilt'in park konumuna inmesi bir **harekettir** ve videoda "durmadı" gibi
+   yorumlanabilir. Çekimde bunu sözle açıklamak (güvenli park duruşu) ya da park özelliğini
+   video için kapatmak değerlendirilmeli.
+
+   *Aşağıdaki eski madde tarihsel kayıttır, artık uygulanmaz:*
+   ~~**E-Stop'ta motorlar TUTMAZ, BIRAKIR + HER İKİ GEÇİŞTE SIFIR KABULÜ**~~ (takım kararı):
+   ENABLE kesilince tutma torku gider, dikey eksen yer çekimiyle düşer. Kart mevcut konumu
+   **hem durdurma anında (`acilDurdur`) hem de `START`'ta** sıfır kabul eder
+   (`setCurrentPosition(0)`), tilt zaten yalnız yukarı gidebildiği için (taban 0°) bu güvenli
+   taraftır: düşmüş namlu "en alt = 0°" referansıyla çalışmaya başlar. **Laptop tarafı da aynı
+   anda sıfırlanır** (`kontrol.estop()` + arayüzde `_sifir_kabul()`, iki geçişte de); iki taraf
+   aynı sıfırı görmezse ekrandaki açı kartın hedefinden kopar. Otonom PD kontrolcüsünün türev
+   geçmişi de burada sıfırlanır (duraklama öncesi birikmiş hata, devam edince sıçrama olmasın).
+
+   **Düzeltme 06.08 — neden iki kez sıfırlanıyor:** `acilDurdur()` eskiden
+   `moveTo(currentPosition())` yapıyordu; bu motoru durdurur ama **adım sayacı eski değerinde
+   kalırdı.** ENABLE kesilip mil kaydığında (dikey eksen düşer) sayaç ile gerçek konum arasındaki
+   fark DEVAM'a kadar açık kalıyor, arada gelen her komut o kaymış referansa göre hesaplanıyordu.
+   `setCurrentPosition(0)` üç işi birden yapar: `_targetPos = _currentPos = 0` (→ `distanceToGo()`
+   sıfır, **sürücüye tek pulse gitmez**) ve `_speed = _stepInterval = 0` (birikmiş rampa silinir).
+   START'taki sıfırlama yine de duruyor: E-Stop ile DEVAM arasında motorlar serbesttir, mil o
+   süre boyunca kaymaya devam edebilir — geçerli sıfır, **sistemin yeniden enerjilendiği andaki**
+   konumdur. Kapı testi: `test_estopta_referans_hemen_sifirlanir` (eski davranışa dönülünce
+   kırmızıya düştüğü doğrulandı).
+
+   ⚠ Bunun bedeli: **her E-Stop açı referansını kaydırır.** Gerçek (limit switch'li) homing
+   gelene kadar E-Stop sonrası mutlak açılar fiziksel gerçekle birebir örtüşmez.
+
+   ⚠ **Kapalı çevrim sürücüde bu yetmeyebilir [VARSAYIM].** NEMA23 kapalı çevrim sürücüler
+   kendi encoder'larını izler; ENABLE geri verildiğinde bazıları biriken konum hatasını
+   **kendiliğinden telafi eder** — yani ESP32 hiç pulse göndermese bile motor "kaçırdığı" açıyı
+   geri alır. Böyle bir sıçrama görülürse sebep firmware değil sürücü ayarıdır (konum hatası
+   temizleme / alarm reset ayarı) — sürücü kılavuzundan kapatılmalı.
+
+**⚠ Donanım uyarıları (ekip doğrulamalı):**
+- **Buton NO seçilmiş — bunun bir zaafı var:** kablo koparsa hat pull-up ile HIGH kalır ve
+  buton "basılmamış" görünür, yani **arıza E-Stop'u sessizce devre dışı bırakır.** NC
+  (normalde kapalı) buton kopmada da durdurur. Yarışma öncesi NC'ye geçilmesi önerilir
+  (firmware'de tek sabit: `ESTOP_AKTIF_LOW = false`).
+- **[KESİN] Lazer tetiği GPIO 18 — 25 DEĞİL.** (Düzeltme 06.08: `SOC_GPIO_VALID_GPIO_MASK`
+  ile doğrulandı, **ESP32-S3'te GPIO 22/23/24/25 fiziksel olarak yoktur**; klasik ESP32'de
+  vardılar. 25'e yazmak sessizce hiçbir şey yapıyordu, derleme de uyarmıyordu.) Diğer pin
+  güvenliği: kart S3 olduğu için önceki "GPIO 15 strapping" ve "GPIO 16/17 PSRAM" uyarıları
+  **geçersiz kaldı** — kullandığımız pinlerin tamamı S3'te serbest ve strapping dışı (§5.2).
+- **ENABLE polaritesi kesin değil.** Ölçülen tek şey: hatlara hiçbir şey bağlı değilken
+  motorlar çalışıyor — bu iki yaygın sürücü ailesinde de böyledir, polariteyi belirlemez.
+  Firmware'de yaygın olan (LOW = enerjili) yazılı; E-Stop'ta motorlar serbest kalmıyorsa
+  `ENA_AKTIF_LOW = false`. **Yanlış polarite hareketi durdurmayı engellemez** —
+  `systemActive=false` olunca `run()` hiç çağrılmaz; ENABLE ikinci güvenlik katmanıdır.
+- **[VARSAYIM → düzeltilecek] Dikey eksende de redüksiyon VAR ama oranı ölçülmedi.** Şimdilik
+  1:1 (ekip bildirecek). O gelene kadar tilt açıları gerçek açı değildir: "60°" komutu
+  gerçekte 60/oran kadar döndürür. Değişecek iki yer: `protokol.TILT_DISLI` ve firmware
+  `TILT_GEAR_RATIO`.
+
+**Python tarafındaki sağlamlaştırma:**
+- Kart metinleri 250 ms'de bir **okunur** (gönderim değil, okuma yoklaması): okunmazsa hem seri
+  tampon dolar hem de kartın kendi başına durmasından haberimiz olmaz. `"SISTEM DURDURULDU"`
+  satırı görülünce arayüz **ateşi bırakır** (seri monitörden STOP, ileride donanımsal E-Stop).
+- Değişmeyen eksene komut gönderilmez; hatta gereksiz trafik dolaşmaz.
+- Alt çubuktaki **Lazer** göstergesi canlandı (şimdiye kadar hiç güncellenmiyordu).
+
+### 5.2 [KESİN] Kart ESP32-**S3** — kurulum ve uçtan uca doğrulama (05.08.2026)
+
+Kart esptool ile tespit edildi: **ESP32-S3** (QFN56 rev v0.2, 8 MB PSRAM, MAC 30:30:f9:13:92:24),
+laptopa **CH343** USB-seri çipi üzerinden **COM7**'den bağlı. Klasik ESP32 değil — farkı önemli:
+
+| Konu | Sonuç |
+|---|---|
+| Arduino kartı | **ESP32S3 Dev Module** (`esp32:esp32:esp32s3`). `esp32:esp32:esp32` ile yüklenmez. |
+| Strapping pinleri | S3'te **GPIO 0, 3, 45, 46**. Kullandığımız pinlerin hiçbiri bunlarda değil → **GPIO 15 strapping uyarısı S3'te GEÇERSİZ** (o klasik ESP32 içindi). Buton basılıyken reset boot'u etkilemez; lazer pini açılışta kaçak tetiklenmez. |
+| **OLMAYAN pinler** ⚠ | **S3'te GPIO 22/23/24/25 YOKTUR** (`soc_caps.h`: `SOC_GPIO_VALID_GPIO_MASK` bu dördünü maskeden çıkarır). Klasik ESP32'de vardılar. Bu numaralara yazmak **sessizce hiçbir şey yapar; derleme hata vermez.** Lazer bu yüzden 25→**18**'e alındı (06.08). |
+| Ayrılmış pinler | S3'te GPIO **26–32** dahili SPI flash, oktal PSRAM'de **33–37** de PSRAM; **43/44** = UART0 (CH343 → laptop), **19/20** = USB D-/D+. Kullandığımız 4/5/6/7/15/16/17/18 tamamen bu bölgelerin dışında ✓ |
+| USB CDC On Boot | **KAPALI kalmalı** (varsayılan). Kart harici CH343 (UART0) üzerinden konuşuyor; açılırsa `Serial` USB'ye gider ve laptop hiçbir şey duymaz. |
+
+**Ortam:** Arduino IDE 2.x + esp32 core **3.3.11** + AccelStepper **1.64.0**. Firmware
+**uyarısız derleniyor** (`--warnings all`): 324 KB flash (%24), 22 KB RAM (%6). Adımlar README'de.
+Sketch, Arduino kuralı gereği kendi adıyla aynı klasörde:
+`esp32/derin_mavi_esp32/derin_mavi_esp32.ino`.
+
+**Firmware'e eklenen:** `Serial.setTimeout(20)` — varsayılan 1 sn'lik `readStringUntil`
+bloklaması, parçalı gelen bir komutta `loop()`'u durdurup `AccelStepper.run()` çağrılmadığı
+için adım kaçırtırdı.
+
+**✅ GERÇEK DONANIMDA DOĞRULANDI (yüklendi + `DERINMAVI_ESP=COM7` ile konuşuldu):**
+açılış banner'ı okundu · `S15/A40` hız kademesi kabul edildi ve yankılandı · `STOP` →
+*"SISTEM DURDURULDU"* → kontrol katmanı satırı tanıyıp `estop_aktif=True` yaptı · `START` →
+*"Mevcut konum SIFIR kabul edildi (P0.00 / T0.00)"* → hedefler sıfırlandı. Yani protokol,
+komut üretimi, satır okuma ve E-Stop tanıma zinciri **mock'ta değil, kartta** çalışıyor.
+⏳ Henüz denenmeyen: **motor hareketi (P/T komutları)** ve lazer tetiği.
+
+⏳ **Bekleyen:** gerçek portta uçtan uca deneme (`DERINMAVI_ESP=COM<n>`), **dikey eksenin dişli
+oranı** (şu an 1:1), **sürücü ENABLE polaritesinin doğrulanması** (`ENA_AKTIF_LOW`), hız
+kademelerinin gerçek mekanikte doğrulanması (adım kaçırma sınırı ölçülüp `HIZ_TABLO`
+düzeltilecek), limit switch **homing** (kartta yok — `home()` şimdilik yalnızca "0°'a dön" demek;
+homing gelince E-Stop sonrası açı kayması da biter), kartın konum geri bildirimi (gelirse
+ekrandaki açı "hedef" değil "ölçüm" olur), NO → **NC butona geçiş** (kablo kopmasına karşı).
+
+### 5.3 LAZER GÜCÜ — PWM ve %40 kararı (06.08.2026)
+
+Takım kararı: **lazer tam güçle çalıştırılmayacak, varsayılan %40.** Eskiden lazer pini
+`digitalWrite` ile açılıp kapanıyordu (sadece 0/tam güç); artık **PWM** sürülüyor.
+
+| Konu | Karar |
+|---|---|
+| Sinyal | **GPIO 18**, LEDC PWM · 1 kHz · 8 bit (`ledcAttach/ledcWrite`). Duty oranı = güç oranı. ⚠ Pin 25'ten taşındı: S3'te 22–25 yok (§5.2). `ledcAttach`'ın dönüşü artık kontrol ediliyor, kurulamazsa açılış banner'ı bağırıyor. |
+| Komut ayrımı | **`G<yüzde>` = "ne kadar"** (kalıcı ayar), **`L1/L0` = "ne zaman"**. Hız tarafındaki `S/A` ile `P/T` ayrımının aynısı. |
+| Neden `L<yüzde>` değil | `L1` bugün "aç" demek; L'ye yüzde yüklenseydi mevcut her çağrı sessizce **%1 güce** düşerdi — kod çalışır görünür, lazer yanmazdı. En sinsi kırılma türü. |
+| %100'de duty | 255 değil **256** yazılır: 8 bit'te 255 hâlâ kısa bir LOW darbesi bırakır, 256 pini sürekli HIGH yapar. |
+| E-Stop | `setLaser(false)` → **duty 0** (pin sürekli LOW). Güç ayarı kalıcıdır, ateş kesilir — E-Stop sırası değişmedi: önce lazer, sonra hareket, sonra ENABLE. |
+| Açılış | Kart açılışta duty 0; laptop bağlanınca hız düzeyiyle birlikte `G40` gönderir (kart kendi varsayılanında kalmasın). |
+| **ATEŞ butonu** (06.08) | **AKTİF HEDEF kartı kaldırıldı** — gösterdiği her şey zaten üst şeritte vardı (`eng_name`/`eng_sub`); boşalan yer manuel yön kontrollerine verildi (D-pad tuşları 68×54 → 86×68 px). ATEŞ butonu **manuel panelin altına** taşındı ve büyütüldü. Klavyeden **`L`** de ateşi açıp kesiyor: `_ates_kisayolu` → `_ates_bas` (tek kapı korunuyor). `L` **her modda** çalışır — buton Otonom'da görünmez ama lazeri kesme yolu moda bağlı olmamalı. Kısayolun butondan **fazla yetkisi yok**: E-Stop'ta buton kilitliyse `L` de geçmez (yoksa E-Stop klavyeden aşılabilirdi). Kapı testi: `test_l_kisayolu_ates_kapisindan_gecer`. |
+| **Arayüz** (06.08) | Sağ kolonda **LAZER kartı**: güç kaydırıcısı (%0–100) + hızlı kademeler (%20/%40/%70/%100) + başlıkta anlık durum (`● ATEŞ · %40` / `○ Kapalı · %40`). MOTOR HIZI gibi **stack'in dışında** → hem Manuel hem Otonom modda görünür. Güç değişiminin tek kapısı `_lazer_guc_degisti`. Güç **kalıcı olarak kaydedilmez**: her açılış güvenli varsayılana (%40) döner — "geçen sefer %100'de bırakmışız" diye başlamak istemeyiz. |
+
+**ATEŞİN ÜÇ KATMANI (06.08 — "bir anda lazer çalışırsa" endişesine karşı).** Lazer çok
+güçlü; tek kapı yetmez, birbirinden bağımsız katman gerekir:
+
+1. **Boot koruması.** `setup()`'ın **ilk iki satırı** lazer pinini LOW'a çeker (`Serial.begin`'den
+   bile önce). Ama reset anında ROM bootloader boyunca pin **float** kalır ve buna yazılım
+   müdahale edemez → **tek gerçek çözüm donanımsal: 10 kΩ pull-down (GPIO 18 ↔ GND).**
+   Yükleme yaparken lazer beslemesi kapalı tutulur.
+2. **Tek kapı, arayüzde.** Ateşin tek yolu `_ates_bas` (ATEŞ butonu). Kesme yolu da tek:
+   `_ates_kes` — E-Stop, atışa-yasak alan, kartın kendi durması hepsi oradan geçer. Kart
+   tarafında `L` komutu `systemActive` bloğunun içinde: **E-Stop'ta ateş komutu işlenmez.**
+3. **⭐ ÖLÜ ADAM ANAHTARI (yeni).** Lazer açık kalmak için karta **250 ms'de bir `L1`
+   tazelemesi** gitmelidir (`_esp_yokla`). **1 sn** tazeleme gelmezse kart lazeri **kendi
+   keser.** Sebep: "kes" komutunun gitmesine bel bağlanamaz — kesmenin gerektiği durumların
+   çoğunda (seri kablo koptu, laptop çöktü, arayüz dondu, USB çıktı) komut zaten gidemiyordur.
+   "Açık kal" demeyi sürdürmek, "kapan" demeyi beklemekten güvenlidir.
+   Sabitler tek kaynakta: `protokol.ATES_TAZELE_MS` / `ATES_ZAMAN_ASIMI_MS` (firmware ile aynı);
+   `protokol.py` testi `tazele × 2 ≤ zaman_aşımı` değişmezini korur — aksi halde kaçan birkaç
+   tazeleme ateşi ortasında lazeri söndürür ve dwell bozulur.
+
+   İki kapı testi bunu koruyor: `test_ates_tazelemesi_kesilirse_lazer_soner` ve
+   `test_ates_kapaliyken_tazeleme_gitmez` (kapalı lazeri kazara açan bir `L1` dolaşmasın).
+   Tazeleme kodu kaldırılınca testin **gerçekten kırmızıya düştüğü doğrulandı.**
+
+**✅ KARTTA DOĞRULANDI (06.08, yüklendi + COM7'den konuşuldu):** açılış banner'ı
+*"Lazer: GPIO 18 PWM 1000 Hz, guc %40"* yazdı ve **`ledcAttach` hata satırı ÇIKMADI** —
+yani PWM kanalı gerçekten kuruldu, GPIO 18 bu kartta geçerli. `G40` → `LAZER ACIK (%40)`,
+`G100` → `LAZER ACIK (%100)`, `L0` → `LAZER KAPALI`. Ölü adam anahtarı da çalıştı: tazeleme
+sürerken lazer açık kaldı, kesilince kart kendi kapattı.
+⏳ **Henüz bilinmiyor: lazerin fiziksel olarak tetiklenip tetiklenmediği** — GPIO 18'de
+gerilim ölçülemedi (multimetre yok), lazer beslemesi kapalıydı. Sıradaki test: kademeli
+güç (G10 → G40 → G100) ile gerçek tetikleme.
+
+**⚠ Doğrulanmamış üç nokta (donanımda denenmedi):**
+1. **PWM frekansı [VARSAYIM] 1 kHz.** CNC lazer sürücülerinin tipik değeri (GRBL varsayılanı
+   da bu). Modül tepki vermezse **önce bunu** değiştirin: 200 Hz / 5 kHz / 20 kHz. Yanlış
+   frekansta sürücü sinyali hiç görmeyebilir veya titreşim yapar.
+2. **Mantık seviyesi.** ESP32 çıkışı **3.3 V**; LaserTree'nin TTL girişi çoğunlukla **5 V**
+   bekler. Bazı kartlar 3.3 V'u HIGH sayar, bazıları saymaz — saymıyorsa level shifter veya
+   küçük bir N-MOSFET gerekir. Bu **kodla çözülmez.**
+3. **Boot anında GPIO 18 kısa süre yüksek empedansta (float) kalır.** GPIO 18 S3'te strapping
+   değil, ama lazer sürücüsünün PWM girişi dahili pull-down'lı değilse **reset/yükleme anında
+   kaçak tetiklenebilir.** Önlem: sinyal hattına **10 kΩ pull-down** (GPIO 18 ↔ GND). Yükleme
+   yaparken lazer beslemesi kapalı tutulmalı.
+
+**⚠ PUANA ETKİSİ (körü körüne uymuyoruz — kayıt için):** %40 duty ≈ %40 ortalama optik güç,
+yani balonun patlaması **~2.5 kat uzun sürer.** Bu doğrudan **dwell süresi** demek ve dwell
+Aşama 2–3'ün asıl zorluğu (§7). Süre puana bağlı: Aşama 1'de bonus (`BSP = 20 × kalan_sn/300`),
+Aşama 2–3'te tur süreleri. **Yapılacak ölçüm:** balonun 5/10/15 m'de %40 ve %100'de patlama
+süresi. %40 patlatamıyor ya da dwell'i tur süresini riske atacak kadar uzatıyorsa değer
+yükseltilir — tek satır (`protokol.LAZER_GUC_VARSAYILAN`), kod değişmez.
+
+### 5.4 USB GAMEPAD (07.08.2026) — manuel kontrolün üçüncü girdisi
+
+Şartname **Yetenek 1** kullanıcı komut arayüzlerini *"UI/joystick/klavye"* diye sayar →
+gamepad videoda gösterilecek, doğrudan puan. `app/gamepad.py` + arayüzde 50 ms'lik yoklama.
+
+| Konu | Karar |
+|---|---|
+| Kütüphane | **pygame** (SDL). Hem XInput hem DirectInput padleri okur. `requirements.txt`'te. |
+| **Tek kapı kuralı** | Gamepad **kendi komut yolunu AÇMAZ**: hareket `_aci_hareket`, ateş `_ates_kisayolu`→`_ates_bas`, merkez `_aci_reset`, E-Stop `_estop_bas`. Geçmişte ikinci bir ateş yolu E-Stop denetimini atlamıştı (§12 B1) — aynı hata sınıfı geri gelmesin. |
+| **Buton haritası** | **SDL GameController API** tercih edilir: SDL'in cihaz veritabanı her padi standart düzene eşler, *A tuşu hangi padde olursa olsun A'dır*. SDL cihazı tanımazsa ham Joystick'e düşülür (XInput numaraları varsayılır). |
+| Neden bu kadar önemli | Ham numaralar padden pade **değişir**: Xbox/XInput'ta `7 = Start`, PlayStation DualSense'te `7 = R2`. Sabit numara yazılsaydı **ACİL DURDUR başka bir pad takıldığında yanlış tuşa düşerdi.** |
+| Düzen | Sol çubuk + D-pad = gimbal · **A** = ateş (aç/kes) · **Y** = merkeze al · **LB/RB** = motor hız kademesi · **Start** = ACİL DURDUR / DEVAM |
+| Hareket matematiği | Adım = `tavan hız (°/s) × geçen süre × çubuk sapması` — basılı tutmayla (§5.1) aynı mantık, tek farkı analog çarpan. Sabit adım gönderilseydi hedef motorun önüne geçer, çubuk bırakılınca gimbal dönmeye devam ederdi. |
+| Ölü bölge | %15, ve **kalan aralık yeniden 0..1'e yayılır**. Düz kesme yapılsaydı çubuk eşiği geçtiği anda hız 0'dan 0.15'e sıçrardı. Ölü bölge olmasaydı gimbal hiç durmaz, sürüklenirdi. |
+| Kenar tetikleme | Ateş/E-Stop butonları **basıldığı an** okunur. Seviye okunsaydı düğme basılı tutuldukça her 50 ms'de tekrar tetiklenir, lazer yanıp sönerdi. |
+| Sıcak takma | Cihaz yokken ~2 sn'de bir taranır; uygulama açıkken pad takılabilir (yarışma günü kablo çıkar/takılır). Kopma da yakalanır, arayüz kilitlenmez. |
+| Yokluğu | pygame kurulu değilse **veya** pad takılı değilse özellik sessizce kapalı, uygulama normal açılır (ilke 7). Alt çubukta "Gamepad · yok". |
+
+**Teşhis:** `python app/gamepad.py` — hangi yolun kullanıldığını (standart/ham), çubuk
+değerlerini ve basılan düğmeleri canlı gösterir. Ham yolda yanlış tuşa düşerse `BTN_*`
+numaraları oradaki çıktıya bakılarak düzeltilir.
+
+⚠ **Bu makinede test notu:** ilk denemede görülen *"Controller (Gamepad F310)"* gerçek bir
+cihaz değil, **ViGEmBus** (`Nefarius Virtual Gamepad Emulation Bus`) üzerinden emüle edilen
+sanal bir XInput padiydi. Takımın fiziksel cihazı Bluetooth **DualSense**. Gamepad bağlıyken
+uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
 
 ---
 
@@ -243,6 +515,7 @@ tarafına bakabilme; donanımsal E-Stop + yazılımsal E-Stop; homing ile biline
   GEREKTİRMEZ; ileride PyInstaller ile tek `.exe` → her laptopta kurulumsuz. Çalıştır: kökteki `Baslat.bat`.
 - **Kontrol iskeleti:** `protokol.py` (UART) + `mock_esp32.py` + `kontrol.py`
   (`DERINMAVI_ESP=mock|COM<n>|off`). ATEŞ/E-Stop zinciri arayüze bağlı, donanımsız test edilebilir.
+  05.08'de **2 step motor + lazer + 3 kademe hız düzeyi** için düzenlendi (bkz. §5.1).
 - **Model:** `models/` klasörü (repoda boş). Ekip kendi `best.pt`'sini buraya atar → otomatik yüklenir.
   Eski Flask arayüzü (`arayuz_app.py`) emekli edildi, yedeğe taşındı.
 - Ortam: Python 3.10+ (3.14 test), torch **CPU**, PySide6 6.11 (abi3),
@@ -438,9 +711,9 @@ model değil, **bizim kodumuzdaki 5 katmandı.** Kök sebepler ve alınan kararl
   ediyordu** ve arayüzdeki açı etiketleri gerçek konumdan kopuyordu (Yetenek 3 ihlali).
   Artık hareketin de tek kapısı var (`_aci_hareket`), E-Stop'ta en başta kapanıyor.
 - **B4** `ates()` `dx=dy=0` gönderdiği için mock ESP32'de **süregelen hareketi iptal
-  ediyordu** (takip + ateş aynı anda çalışmıyordu). Delta artık **mevcut hedefe** eklenir,
-  konuma değil. ⚠ **ESP32 C kodunu yazan arkadaş `protokol.py` başındaki DELTA SEMANTİĞİ
-  notunu okumalı** — kural: `yeni_hedef = mevcut_hedef + delta`.
+  ediyordu** (takip + ateş aynı anda çalışmıyordu). *(Bu hata sınıfı 05.08.2026'da kökten
+  kalktı: protokol artık **mutlak açı** kullanıyor, ateş komutu hareket hedefine hiç
+  dokunmuyor — bkz. §5.1. Aşağıdaki delta notları tarihsel kayıttır, uygulanmaz.)*
 
 **Tasarım ilkesi (bundan sonra korunacak):** ayarların varsayılanları **Ultralytics'in kendi
 varsayılanlarıdır.** Hiçbir kaydırıcıya dokunmayan biri, ham `yolo track source=0` ile aynı
@@ -457,6 +730,61 @@ donanım yatırımı. CPU tarafında OpenVINO (`yolo export ... format=openvino`
 gövde merkezine düşüyor (nişan zinciri hazır, balon gelince otomatik devreye girer).
 Arayüz artık bu gerçeği alt çubukta açıkça yazıyor. Gerçek maket fotoğraflarıyla eğitilecek
 yeni modelde **5 sınıfın tamamı** bulunmalı.
+
+### 12.1 KESİN TANIMA kararlılığı (07.08.2026) — "%70'i geçen hedefi takip et"
+
+Şikâyet: *"YOLO çok kararlı davranmıyor; bir modeli %70 üzerinde doğruladığı zaman onu takip
+etmesi gerekiyor."* Onay mekanizması (`_karar_ver`) **zaten vardı** — sorun kırılgan olmasıydı.
+Beş kök sebep bulundu ve giderildi:
+
+| # | Kök sebep | Çözüm |
+|---|---|---|
+| 1 | **Tek zayıf kare sayacı SIFIRLIYORDU** → kural pratikte "3 ARDIŞIK kare ≥%70" demekti. Gerçek videoda güven dalgalanır (%75, %68, %72…), onay ya hiç gelmiyor ya çok geç geliyordu; kutu `?` kalıyordu. | **Histerezis:** zayıf kare sayacı sıfırlamaz, **bir azaltır**. Ölçüldü: aynı 20 karelik gerçekçi dizide onay **14. kare → 7. kare**. |
+| 2 | **Sınıf tekilliği** (`_kilitli_siniflar`): bir sınıfı tek track "sahiplenirdi", aynı tipten ikinci hedef **sonsuza dek belirsiz** kalırdı. Oysa Aşama 2'de 3 koldan aynı anda Füze+İHA gelir, Aşama 3'te düşman F16 ile dost F16 aynı karede olabilir. | Kural **tamamen kaldırıldı**. Ayırt etme zaten takip ID'sinin (ve A3'te rengin) işi. |
+| 3 | Onaylanmış hedefe **hâlâ gösterim eşiği** uygulanıyordu → bir kez doğrulanan hedef güveni düşünce kutu tamamen kayboluyordu. | Onaylı track için `ONAYLI_ESIK = 0.02` — pratikte elenmez. Operatörün kuralı bu: *bir kez %70'i geçtiyse TAKİP ET.* |
+| 4 | `kayip_esigi` sabit **60** kare, ama ByteTrack `track_buffer`=30'da ID'yi düşürüp nesneye **yeni ID** veriyordu → onay sıfırdan başlıyordu. | Eşik artık `kararlilik` ayarından türer, ikisi senkron. |
+| 5 | `onay_esigi`/`onay_tekrari` **panelde yoktu** — kodda gömülüydü, sahada ayarlanamıyordu. | İkisi de ⚙ panelinde ("Kesin tanıma eşiği", "Onay için kare sayısı"). |
+
+**Sınıf yarışı çoğunluk oylamasıyla çözülür:** rakip bir sınıf yüksek güvenle gelirse mevcut
+adayın puanı düşer, ancak puan tükendiğinde aday değişir. Tek karelik yanlış tahmin adayı
+**deviremez** (sadece onayı geciktirir); ısrarlı bir sınıf **devirebilir** — model gerçekten
+fikir değiştirdiyse ona uyulmalı.
+
+**Onay bozulma:** onaylı track `ONAY_BOZULMA = 15` kare üst üste eşiğin altında kalırsa onay
+düşer. Olmasaydı bir kez yanlış onaylanan sınıf, ID yaşadığı sürece düzelmezdi.
+
+**Sıra değişti:** karar **önce**, çizim eşiği **sonra**. Eşik altında kalan kare de onay
+durumunu beslemeli — yoksa onaylı bir track zayıfladığında `zayif` sayacı hiç artmaz ve
+yanlış onay sonsuza dek yaşardı.
+
+`_karar_ver`'in **hiç testi yoktu**; `algi.py`'ye 9 birim testi eklendi (histerezis, çoklu
+hedef, aday devirme, onay bozulma, kayıp ID temizliği).
+
+### 12.2 ÇAKIŞAN KUTU temizliği (07.08.2026) — "aynı alanda iki şey var sanıyor"
+
+Şikâyet: *"Kutular bazen üst üste biniyor, aynı alanda 2 şey varmış gibi algılıyor ama
+görevlerde asla böyle bir şey olmayacak."*
+
+**Kök sebep: Ultralytics NMS'i SINIF İÇİ çalışır** (`agnostic_nms=False`). Model aynı maketi
+hem `fuze` hem `helikopter` sanarsa kutular %90 örtüşse bile **farklı sınıf oldukları için
+NMS onları birleştirmez.** Paneldeki `iou` ayarı bu duruma hiç dokunmaz — o yalnızca aynı
+sınıftan kutuları eler.
+
+**Çözüm:** `_cift_kutulari_ele()` — tespit sonrası bir temizlik katmanı. Takımın verdiği görev
+gerçeğini doğrudan kullanır: *hedefler raya asılı, birbirinden ayrı gelir; aynı alanda iki
+hedef asla bulunmaz* → yüksek örtüşme her zaman modelin aynı nesneye iki kutu atmasıdır.
+
+| Karar | Gerekçe |
+|---|---|
+| **IoU değil IoS** (kesişim / **küçük** kutunun alanı) | IoU kesişimi birleşime böler, iç içe kutularda düşük çıkar — oysa "küçük kutu büyüğün içinde" en tipik çift-kutu hâlidir. |
+| Öncelik: **kesin tanınmış** > güven | Yalnızca güvene bakılsaydı, onaylanmış bir hedef o karede şanslı çıkan geçici bir kutu yüzünden elenebilirdi. |
+| **Balon hariç** | Balon `dets`e değil ayrı `balonlar` listesine yazılır, temizliğe hiç girmez. Maketin **altında** olduğu için gövdeyle örtüşür — dahil edilseydi nişan noktası elenirdi (§7). |
+| Varsayılan **%60**, panelde ayarlanır ("Çakışan kutu temizliği") | %99 pratikte kapalı demek. Düşürmek agresifleştirir ama Aşama 2 sürüsünde yan yana gelen iki gerçek hedeften biri elenebilir. |
+| `agnostic_nms=True` **kullanılmadı** | Model seviyesinde çalışır, balonu da kapsardı ve nişan noktasını sessizce yok edebilirdi. Kendi katmanımız kontrollü ve test edilebilir. |
+
+Uçtan uca doğrulandı (sahte model, `analiz_et` zinciri): 2 çakışan hedef → 1'e indi (güveni
+yüksek olan kaldı), ayrı hedef korundu, **balon gövdeyle örtüşmesine rağmen korundu.**
+`algi.py`'ye 8 birim testi eklendi.
 
 ---
 
@@ -508,11 +836,11 @@ hatanın **kardeşi**, (b) bir şartname boşluğu ve (c) kuralın uygulanmadı�
 **Gerçek hatalar (düzeltildi):**
 1. **Ekran açısı ↔ cihaz hedefi kopması (B2'nin kardeşi).** `_aci_hareket` açıyı tilt
    limitine kırpıyor ama ESP32'ye **ham delta** gönderiyordu: 55°'de +8 istenince ekran
-   60 derken cihazın hedefi 63 oluyordu. Artık **gerçekten uygulanan delta** gider;
-   uygulanacak bir şey yoksa boş paket de gönderilmez.
+   60 derken cihazın hedefi 63 oluyordu. *(05.08.2026: mutlak açıya geçilince bu hata
+   sınıfı yapısal olarak imkânsız hâle geldi — ekran ve komut tek kaynaktan türüyor.)*
 2. **Eksen tanımı çelişkisi.** Arayüz tilt'i `0..60`, mock ESP32 pitch'i `-30..+30` idi —
-   aynı ekseni iki farklı tanımlıyorlardı. Tek tanım `protokol.py`'ye yazıldı:
-   **0° = ufuk, + = yukarı, tavan 60°, negatif pitch YOK.** ESP32 C kodu bunu kullanmalı.
+   aynı ekseni iki farklı tanımlıyorlardı. Tek tanım: **0° = ufuk, + = yukarı, tavan 60°,
+   negatif tilt YOK.** Bugün bu limit hem `protokol.py`'de hem firmware'de uygulanıyor.
 3. **Atışa yasak alan ateş sırasında denetlenmiyordu.** `_ates_bas` yalnız butona basılan
    anı kontrol ediyordu; lazer açıkken bölgeye girmek serbestti. Ateşi kesmenin tek yolu
    artık `_ates_kes()`; hem yasak bölgeye girişte hem E-Stop'ta oradan geçilir.
@@ -552,7 +880,28 @@ Takım ID: 948118 · Başvuru ID: 5007261.
 
 ---
 
-*Son güncelleme: 2026-07-30 · Faz: Video hazırlığı · Durum: SADELEŞTİRME DENETLENDİ (bkz. §13.1) —
+*Son güncelleme: 2026-08-05 · Faz: Video hazırlığı · Durum: ESP32 İLETİŞİMİ GERÇEK FIRMWARE'E
+GÖRE KURULDU (bkz. §5.1) — ekipten gelen AccelStepper kodu esas alındı: Python tarafı ASCII satır
+komutlarına ve **mutlak açıya** taşındı (aynı gün yazılan binary/delta protokol karşılığı olmadığı
+için atıldı). **3 kademe motor hız düzeyi** (S/A komutları: 150/100 · 400/200 · 800/400) eklendi;
+arayüzde her iki modda görünen MOTOR HIZI kartı var. Azimut ekranda sarmalı, karta sürekli açı
+gidiyor (350°→10° = `P370`). Firmware `esp32/derin_mavi_esp32/derin_mavi_esp32.ino` olarak repoya girdi ve dört
+eksiği tamamlandı: lazer (L1/L0), STOP'ta lazer kesme, S (tavan hız) komutu, tilt yazılımsal limiti.
+Aynı gün akşam **donanımsal acil stop butonu (GPIO 15, NO)**, **lazer (o gün GPIO 25 sanıldı;
+06.08'de GPIO 18'e düzeltildi — S3'te 22-25 yok, bkz. §5.2/§5.3)** ve gerçek
+mekanik değerleri geldi: sürücüler
+**6400 step/tur**, yatay eksende **15→83 diş (5.53:1)** redüksiyon → hız komutu step/sn yerine
+**derece/sn** oldu (iki eksenin oranı farklı; çevirimi kart yapıyor) ve kademeler pan ekseninin
+step/sn tavanına göre yeniden seçildi (15/40/75 °/s). Butona basılınca kart **önce lazeri,
+sonra hareketi, sonra sürücü ENABLE hatlarını (pin 16/17)** kesiyor; motorlar tutmuyor,
+serbest kalıyor. Buton basılıyken `START` reddediliyor, bırakılınca sistem kendiliğinden
+başlamıyor; DEVAM'da **mevcut konum sıfır kabul ediliyor** (hem kartta hem arayüzde). `kapi_testleri.py` mutlak açı
+semantiğine göre yenilendi (+ sarmasız azimut, hız düzeyi, kartın kendi durması, donanım butonu);
+kırık `AlgiThread` referansı `VideoThread` olarak düzeltildi.
+Bir sonraki iş: gerçek portta uçtan uca deneme (ESTOP_PIN/ENA polaritesi/dikey dişli oranı
+doğrulanacak) + homing + dwell mantığı + Aşama-1 zarf sırası + gerçek veriyle 5 sınıflı model.*
+
+*Önceki güncelleme: 2026-07-30 · Durum: SADELEŞTİRME DENETLENDİ (bkz. §13.1) —
 ekran açısı ↔ cihaz hedefi kopması (tilt limitinde ham delta), eksen tanımı çelişkisi (mock pitch
 −30..30 vs arayüz 0..60) ve ateş sırasında atışa-yasak alan denetimi giderildi; kalan tekrarlar tek
 kalıba indirildi; ayar varsayılanları tek kaynağa (`algi.VARSAYILAN_AYAR`) bağlandı; güvenlik
