@@ -4,8 +4,8 @@ TEKNOFEST Çelikkubbe Hava Savunma Sistemleri yarışması için geliştirilen *
 kontrol arayüzü**. Native masaüstü uygulaması (PySide6); kamera akışı üzerinde YOLO tabanlı
 hedef tespiti, renkten dost/düşman ayrımı ve gimbal/lazer kontrol iskeleti içerir.
 
-> Bu repo **modelsiz ve verisiz** gelir. Kamera + OpenCV çalışır durumdadır; görüntü işleme
-> için kendi eğittiğin YOLO ağırlığını `models/` klasörüne eklemen yeterlidir (aşağıya bak).
+> **Model repoda geliyor** (`models/best.pt`) — klonla, kur, çalıştır; ayrıca bir şey indirmen
+> gerekmez. Veri seti ve türetilmiş model biçimleri (`.onnx`, `.engine`) repoya girmez.
 
 ---
 
@@ -19,7 +19,7 @@ hedef tespiti, renkten dost/düşman ayrımı ve gimbal/lazer kontrol iskeleti i
 - **Çalışma modları** — Manuel (Aşama 1) / Otonom (Aşama 2-3), aşamaya duyarlı görev paneli.
 - **Kontrol iskeleti** — UART protokolü + mock ESP32 (donanımsız uçtan uca test).
   ATEŞ ve **Acil Durdur (E-Stop)** zinciri arayüze bağlı.
-- **Modelsiz çalışma** — model yoksa kamera yine akar, alt çubukta "Model yok" uyarısı görünür.
+- **Modelsiz de çalışır** — model silinse bile kamera yine akar, alt çubukta "Model yok" uyarısı görünür.
 
 ---
 
@@ -54,15 +54,24 @@ python app/arayuz_qt.py
 
 ---
 
-## Modelini ekleme (görüntü işlemeyi aktif etme)
+## Model
 
-Uygulama **`models/`** klasörüne konan YOLO ağırlığını otomatik bulur:
+Ortak ağırlık **`models/best.pt`** repoda gelir — bir şey yapmana gerek yok, uygulama açılınca
+otomatik yüklenir. Tanıdığı sınıflar: `DRONE`, `F16`, `FUZE`, `HELIKOPTER`
+(**`balon` henüz yok** — nişan noktası şimdilik gövde merkezine düşüyor).
 
-1. Kendi modelini eğit (detaylı yol haritası: [CLAUDE.md](CLAUDE.md)).
-2. `best.pt` dosyasını `models/` klasörüne kopyala → `models/best.pt`
-3. Uygulamayı başlat. Model otomatik yüklenir, tespit başlar. **Kod değişmez.**
+**Hızlandırmak istersen** (opsiyonel — asıl darboğaz inference'tır) kendi makinende bir kez
+çevir, çıktıyı `models/` içine bırak, uygulama otomatik tercih eder:
 
-Detay ve öncelik sırası: [models/README.md](models/README.md).
+```bash
+yolo export model=models/best.pt format=engine     # NVIDIA GPU varsa
+yolo export model=models/best.pt format=openvino   # GPU yoksa, Intel CPU'da 2-3x
+```
+
+⚠ Ürettiğin `.engine`/`.onnx` dosyalarını **commit etme** — `.engine` senin GPU'na ve
+TensorRT sürümüne bağlıdır, başka makinede açılmaz. `.gitignore` zaten engelliyor.
+
+Öncelik sırası ve ayrıntı: [models/README.md](models/README.md).
 
 ---
 
@@ -100,7 +109,7 @@ Derin Mavi/
 ├── esp32/                  # Kart tarafı firmware (Arduino IDE / AccelStepper)
 │   └── derin_mavi_esp32/   #   Arduino kuralı: klasör adı = .ino adı
 │       └── derin_mavi_esp32.ino
-└── models/                 # Eğitilmiş model buraya (repoda boş gelir)
+└── models/                 # Ortak model — best.pt repoda gelir (.onnx/.engine girmez)
 ```
 
 ---

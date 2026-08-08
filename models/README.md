@@ -1,27 +1,54 @@
-# models/ — Eğitilmiş model buraya
+# models/ — Görüntü işleme modeli
 
-Bu klasör repo ile **boş** gelir. Görüntü işleme modeli (YOLO ağırlığı) burada durur.
+Takımın ortak YOLO ağırlığı **`models/best.pt`** olarak repoda durur. Klonlayınca gelir,
+hiçbir şey indirmen gerekmez — uygulamayı başlat, model otomatik bulunur.
 
-## Modelini nasıl eklersin?
+## Repoda ne var, ne yok
 
-1. Kendi modelini eğit (Colab / lokal — bkz. [ROADMAP.md](../ROADMAP.md)).
-2. Eğitim çıktısındaki **`best.pt`** dosyasını bu klasöre kopyala:
-   ```
-   models/best.pt
-   ```
-3. Uygulamayı başlat. Model **otomatik** bulunur — hiçbir kod değişikliği gerekmez.
+| Dosya | Repoda? | Neden |
+|---|---|---|
+| `best.pt` | ✅ **var** | Ortak ağırlık. 18 MB, taşınabilir; her makinede aynı. |
+| `best.onnx` / `best_openvino_model/` | ❌ yok | `best.pt`'den üretilir, repoda tutmak tekrar olur. |
+| `best.engine` | ❌ yok | **TensorRT çıktısı GPU modeline, TensorRT sürümüne ve sürücüye bağlıdır — başka makinede açılmaz bile.** Herkes kendisi üretmeli. |
+
+## Hızlandırma — kendi biçimini üret
+
+Model `.pt` hâlinde de çalışır; aşağıdakiler yalnızca **hız** içindir (asıl darboğaz CPU/GPU
+inference'ı). Bir kez çevir, `models/` içine bırak, uygulama otomatik tercih eder:
+
+```bash
+# NVIDIA GPU varsa (en hızlısı):
+yolo export model=models/best.pt format=engine
+
+# GPU yoksa, Intel CPU'da tipik 2-3x:
+yolo export model=models/best.pt format=openvino
+```
+
+⚠ Ürettiğin `.engine` / `.onnx` dosyalarını **commit etme** — `.gitignore` zaten engelliyor.
 
 ## Uygulama modeli nasıl bulur? (öncelik sırası)
 
-1. `DERINMAVI_MODEL=<dosya yolu>` env değişkeni varsa → o dosya.
-2. `DERINMAVI_MODEL=onnx` → `models/best.onnx`.
-3. Aksi halde `models/` içinde sırayla: `best.pt` → `best.onnx` → ilk `*.pt` → ilk `*.onnx`.
+1. `DERINMAVI_MODEL` env değişkeni: bir **dosya yolu** ya da kısayol
+   (`engine` / `trt`, `openvino`, `onnx`, `pt` / `torch`).
+2. Aksi halde `models/` içinde sırayla:
+   **`best.engine` → `best_openvino_model/` → `best.onnx` → `best.pt`**
+3. Bunlar yoksa aynı sırayla ilk eşleşen `*.engine` / `*_openvino_model` / `*.onnx` / `*.pt`.
 
-Hiçbir model yoksa uygulama yine açılır: **kamera + OpenCV çalışır**, sadece tespit
-yapılmaz ve alt çubukta "Model yok" uyarısı görünür.
+Yalnızca `models/` **kökü** taranır — alt klasördeki model **bulunmaz**.
 
-## Not
+Hiç model yoksa uygulama yine açılır: kamera + OpenCV çalışır, sadece tespit yapılmaz ve
+alt çubukta "Model yok" uyarısı görünür.
 
-- Model dosyaları (`*.pt`, `*.onnx`) `.gitignore` ile repoya **girmez** — herkes kendi
-  modelini lokalde tutar. Bu dosya (`README.md`) ve `.gitkeep` klasörün var olması için kalır.
-- ONNX kullanacaksan `best.onnx` dosyası `best.pt` ile **aynı eğitimden** olmalı.
+## ⚠ Şu anki modelin bildiği sınıflar
+
+```
+DRONE · F16 · FUZE · HELIKOPTER
+```
+
+**`balon` sınıfı YOK.** Nişan noktası balon olmalı (maketlerin altında, bkz. CLAUDE.md §7);
+balon tespit edilemediği için nişan şimdilik gövde merkezine düşüyor. Nişan zinciri hazır —
+balonlu model gelince kod değişmeden devreye girer.
+
+Yeni model eğitildiğinde **5 sınıfın tamamı** (`f16, helikopter, drone, fuze, balon`)
+bulunmalı. Yeni `best.pt`'yi bu klasöre koyup commit'lemen yeterli; alt çubuk modelin
+gerçekten kaç sınıf tanıdığını yazar.
