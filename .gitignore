@@ -7,10 +7,16 @@ venv/
 env/
 .Python
 
-# ===== Model ağırlıkları (herkes kendi modelini lokalde tutar) =====
+# ===== Model ağırlıkları =====
+# TEK İSTİSNA models/best.pt: takımın ortak modeli, herkes AYNI ağırlıkla çalışsın diye
+# repoda durur (18 MB, GitHub sınırlarının çok altında). Türetilmiş biçimler
+# (.onnx / .engine) GİRMEZ — .engine TensorRT çıktısıdır, GPU modeline + TensorRT
+# sürümüne + sürücüye bağlıdır, başka makinede AÇILMAZ. Herkes best.pt'den kendisi üretir:
+#     yolo export model=models/best.pt format=engine   (veya format=openvino)
 *.pt
 *.onnx
 *.engine
+!models/best.pt
 # models/ klasörü YAPISI repoda kalır (README.md + .gitkeep hariç tutulur):
 !models/README.md
 !models/.gitkeep
@@ -36,8 +42,11 @@ Modeller_Kil6t/
 !sartname/*.pdf
 !sartname/*.txt
 
-# ===== Kullaniciya ozel ayarlar (herkesin kendi tercihi; repoya girmez) =====
-app/ayarlar.json
+# ===== Arayüz ayarları =====
+# app/ayarlar.json artık REPODA (takım kararı 08.08): herkes aynı kalibrasyonla
+# başlasın diye. Makineye özel hiçbir şey içermez (yol/kamera indeksi yok, yalnız
+# eşik ve PD katsayıları). Kendi denemeni yaparken dosyayı değiştirmen normaldir —
+# ortak değere dönmek için: git checkout app/ayarlar.json
 
 # ===== IDE / OS =====
 .vscode/

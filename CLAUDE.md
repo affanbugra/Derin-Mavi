@@ -501,13 +501,19 @@ uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
 
 ## 6. Mevcut yazılım ve KRİTİK BOŞLUKLAR (yapılacaklar)
 
-> **GÜNCEL DURUM (24.07.2026 — GitHub temizliği):** Proje GitHub'a **public repo** olarak
-> hazırlandı. Repo **modelsiz/verisiz** gelir; kamera + OpenCV çalışır. Model/veri seti current
-> yaklaşımdan (düşük doğruluk) VAZGEÇİLDİ → gerçek veri gelince eğitilecek. Ağır/gizli her şey
+> **GÜNCEL DURUM (24.07.2026 — GitHub temizliği · 08.08 model kararıyla güncellendi):** Proje
+> GitHub'a **public repo** olarak hazırlandı. Ağır/gizli her şey
 > `d:\Masaüstü\Derin Mavi - YEDEK\`'e taşındı: `sentetik_veri/` (dataset+model+eğitim scriptleri),
 > `Analiz/` (Şartname/KTR/parkur PDF — GİZLİ), `Modeller_Kil6t/` (3mf), `Arayuz_legacy/` (Flask).
 > **Model artık `models/` klasörüne konur** → `arayuz_qt.py` `_model_bul()` otomatik bulur, kod
 > değişmez. Model yoksa uygulama açılır, alt çubukta "Model yok" uyarısı çıkar.
+>
+> **[08.08 DEĞİŞTİ] Repo artık modelsiz GELMİYOR:** `models/best.pt` versiyon kontrolüne
+> alındı (18 MB) — ekip klonlayınca aynı ağırlıkla çalışsın diye. Türetilmiş biçimler
+> (`.onnx`, `.engine`) hâlâ **girmez**; `.engine` TensorRT çıktısıdır, GPU modeline +
+> TensorRT sürümüne + sürücüye bağlıdır, başka makinede **açılmaz**. Veri seti girmemeye
+> devam ediyor. ⚠ Repo **public** → modeli buraya koymak onu herkese açar; bu bilinçli
+> bir takım kararıdır.
 
 **Var olan (temiz repo):**
 - **ARAYÜZ (native, ANA):** `app/arayuz_qt.py` → PySide6 masaüstü kontrol istasyonu.
@@ -516,8 +522,10 @@ uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
 - **Kontrol iskeleti:** `protokol.py` (UART) + `mock_esp32.py` + `kontrol.py`
   (`DERINMAVI_ESP=mock|COM<n>|off`). ATEŞ/E-Stop zinciri arayüze bağlı, donanımsız test edilebilir.
   05.08'de **2 step motor + lazer + 3 kademe hız düzeyi** için düzenlendi (bkz. §5.1).
-- **Model:** `models/` klasörü (repoda boş). Ekip kendi `best.pt`'sini buraya atar → otomatik yüklenir.
-  Eski Flask arayüzü (`arayuz_app.py`) emekli edildi, yedeğe taşındı.
+- **Model:** `models/best.pt` **repoda** (4 sınıf: DRONE/F16/FUZE/HELIKOPTER — balon yok, §12).
+  Klonlayan herkeste hazır gelir. Hızlandırma isteyen `.engine`/openvino'yu kendi makinesinde
+  üretir (`yolo export …`) — o çıktılar repoya girmez. Eski Flask arayüzü (`arayuz_app.py`)
+  emekli edildi, yedeğe taşındı.
 - Ortam: Python 3.10+ (3.14 test), torch **CPU**, PySide6 6.11 (abi3),
   OpenCV Türkçe-yol düzeltmesi (imdecode). Kamera donanım-bağımsız (`DERINMAVI_CAM` env / otomatik tarama).
 - **⚠️ TEKNİK TUZAK:** torch/ultralytics `arayuz_qt.py`'de **ANA THREAD'de** import edilir
@@ -725,11 +733,18 @@ desteklemiyor, çözünürlük düşürmek FPS'i ARTIRMIYOR — ölçüldü) · 
 donanım yatırımı. CPU tarafında OpenVINO (`yolo export ... format=openvino`) 2-3× ek pay verir;
 `models/best_openvino_model/` varsa uygulama **otomatik** tercih eder.
 
-**⚠ MODEL GERÇEĞİ:** `models/best.pt` şu an **yalnızca 2 sınıf** tanıyor: `fuze`, `helikopter`.
-**F-16, İHA ve BALON modelde YOK → tespit edilemiyor.** Balon olmadığı için nişan noktası
-gövde merkezine düşüyor (nişan zinciri hazır, balon gelince otomatik devreye girer).
-Arayüz artık bu gerçeği alt çubukta açıkça yazıyor. Gerçek maket fotoğraflarıyla eğitilecek
-yeni modelde **5 sınıfın tamamı** bulunmalı.
+**⚠ MODEL GERÇEĞİ (08.08 güncel):** `models/best.pt` **4 sınıf** tanıyor:
+`DRONE`, `F16`, `FUZE`, `HELIKOPTER`. *(29.07'de yalnız 2 sınıf vardı — F16 ve İHA o gün
+eklendi.)* **BALON hâlâ modelde YOK → tespit edilemiyor.** Balon olmadığı için nişan noktası
+gövde merkezine düşüyor (nişan zinciri hazır, balon gelince kod değişmeden devreye girer).
+Arayüz bu gerçeği alt çubukta açıkça yazıyor. Balon **nişan noktasıdır** (maketlerin altında,
+§7) — eksikliği doğrudan isabet hassasiyetini düşürür, sıradaki eğitimin **1 numaralı işi**
+`balon` sınıfını eklemek: 5 sınıfın tamamı (`f16, helikopter, drone, fuze, balon`).
+
+**Model artık repoda:** `models/best.pt` versiyon kontrolünde (takım kararı 08.08) — herkes
+aynı ağırlıkla çalışsın diye. Türetilmiş biçimler (`.onnx`, `.engine`) **girmez**; `.engine`
+TensorRT çıktısıdır ve GPU modeline + TensorRT sürümüne + sürücüye bağlıdır, başka makinede
+açılmaz. Herkes kendi makinesinde üretir (`yolo export model=models/best.pt format=engine`).
 
 ### 12.1 KESİN TANIMA kararlılığı (07.08.2026) — "%70'i geçen hedefi takip et"
 
