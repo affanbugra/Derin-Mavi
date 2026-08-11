@@ -29,3 +29,9 @@ pygame>=2.5
 #
 # ONNX alternatifi (DERINMAVI_MODEL=onnx):
 # onnxruntime>=1.16.0
+
+# --- Opsiyonel: SAHI (Slicing Aided Hyper Inference) ---
+# Kareyi küçük dilimlere bölüp uzak/küçük hedefleri daha iyi tespit eder.
+# Kurulu değilse uygulama normal açılır, yalnızca SAHI özelliği kapalı kalır.
+# FPS ~3-4× düşer; uzak hedef tespiti için açılıp yakın hedefte kapatılmalı.
+sahi>=0.11.15

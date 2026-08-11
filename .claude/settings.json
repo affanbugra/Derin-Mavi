@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import py_compile; py_compile.compile\\('app/arayuz_qt.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(taskkill //PID 18640 //F)"
+    ]
+  }
+}

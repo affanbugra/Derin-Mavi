@@ -12,7 +12,10 @@ cd /d "%~dp0"
 
 REM Sanal ortam VARSA onu kullan, YOKSA sistem Python'u. Yol sabitlenmez:
 REM ".venv" herkeste bulunmaz, sabit yazılırsa dosya sadece bir makinede çalışır.
-if exist ".venv\Scripts\python.exe" (
+if exist "venv\Scripts\python.exe" (
+    set "PY=%~dp0venv\Scripts\python.exe"
+    echo Sanal ortam bulundu: venv
+) else if exist ".venv\Scripts\python.exe" (
     set "PY=%~dp0.venv\Scripts\python.exe"
     echo Sanal ortam bulundu: .venv
 ) else (

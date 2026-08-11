@@ -8,7 +8,7 @@ Otonom modda (Asama 2-3) hedefi TAKIP etme katmani. Zincir:
       -> PDNisanci.adim() : piksel hatasi -> derece -> PD -> (d_yaw, d_pitch)
       -> kontrol.nisan()  : ESP32'ye delta aci komutu
 
-Ayarlar (fov, kp, kd, olu_bolge, ayna) algi.AYAR'dan CANLI okunur — tek ayar kaynagi.
+Ayarlar (fov, kp, kd, olu_bolge, lazer_ofset_x/y) algi.AYAR'dan CANLI okunur — tek ayar kaynagi.
 """
 import time
 
@@ -111,6 +111,16 @@ class PDNisanci:
         return (float(algi.AYAR.get("olu_bolge", OLU_BOLGE_ORAN))
                 if self._olu is None else self._olu)
 
+    @property
+    def ofset_x(self):
+        """Kamera-lazer boresight ofseti (kare genisliginin orani). Kalibrasyon
+        aci.VARSAYILAN_AYAR["lazer_ofset_x"] = 0.0 (canli okunur, ayar panelinden)."""
+        return float(algi.AYAR.get("lazer_ofset_x", 0.0))
+
+    @property
+    def ofset_y(self):
+        return float(algi.AYAR.get("lazer_ofset_y", 0.0))
+
     def adim(self, hedef_xy, kare_boyut, simdi=None):
         """Bir kontrol adimi.
 
@@ -127,8 +137,11 @@ class PDNisanci:
 
         simdi = time.time() if simdi is None else simdi
         hx, hy = hedef_xy
-        px = hx - w * 0.5              # +x = hedef sagda
-        py = hy - h * 0.5              # +y = hedef asagida
+        # Denge noktasi kare MERKEZI degil, kalibre edilmis lazer referansidir:
+        # kamera ekseni hedefte iken lazer ofset_x/y kadar kaymis vuruyorsa, gimbal
+        # o kaymayi ONCEDEN telafi edecek sekilde durmali (bkz. algi.py boresight notu).
+        px = hx - w * 0.5 - self.ofset_x * w   # +x = hedef sagda
+        py = hy - h * 0.5 - self.ofset_y * h   # +y = hedef asagida
 
         if abs(px) <= w * self.olu_bolge and abs(py) <= h * self.olu_bolge:
             self._son_hata = None      # yerlestik; sonraki kacista turev sifirdan
@@ -136,13 +149,15 @@ class PDNisanci:
             return None, None
 
         dpp = derece_per_piksel(w)
-        ex = px * dpp                  # yaw hatasi (derece)
+        ex = px * dpp                  # yaw hatasi (derece): +x = hedef sagda -> +ex
         ey = py * dpp                  # pitch hatasi (derece)
 
-        # Goruntu aynalanmissa pikseldeki "saga kacis" gercekte soladir; telafi
-        # edilmezse gimbal hedeften KACAR (pozitif geri besleme).
-        if int(algi.AYAR.get("ayna", 0)):
-            ex = -ex
+        # D-pad "Sag" tusu pan'i +1 yonunde hareket ettirir (donanimda dogrulandi,
+        # YON_TABLO["right"]=+1.0) -> hedef sagdayken +ex, negatif ETME. Eskiden burada
+        # "goruntu aynalanmissa ex=-ex" koşulu vardi (yazilimsal flip acikken gerekliydi);
+        # flip ozelligi kaldirildigindan (cv2.flip kalici KAPALI, arayuz_qt.py) hicbir
+        # negatiflemeye gerek yok. Koşulsuz negatifleme BURADA BIR SURE durdu ve yaw
+        # yonunu tersine cevirip gimbali hedeften kacirdi — CLAUDE.md'ye not dusuldu.
 
         # protokol.py'de +dy = YUKARI; hedef altta ise (py>0) gimbal asagi donmeli.
         ey = -ey
@@ -199,14 +214,14 @@ if __name__ == "__main__":
     dy2, dp2 = n.adim((280, 120), kare, simdi=1.0)
     assert dy2 < 0 and dp2 > 0, (dy2, dp2)
 
-    # 4. AYNA acikken yaw isareti TERS cevrilmeli (yoksa gimbal hedeften kacar).
+    # 4. Boresight ofseti (kamera-lazer kalibrasyonu): merkezdeki hedef, ofset sifirsa
+    #    komut YOK ama pozitif X ofsetiyle "hedef solda kalmis" gibi davranmali (denge
+    #    noktasi saga kaymis) -> yaw NEGATIF (sola don, lazeri hedefe getirmek icin).
+    algi.ayar_guncelle(lazer_ofset_x=0.05)
     n.sifirla()
-    dy_normal, _ = n.adim((1000, 360), kare, simdi=1.0)
-    algi.ayar_guncelle(ayna=1)
-    n.sifirla()
-    dy_ayna, _ = n.adim((1000, 360), kare, simdi=1.0)
-    assert dy_normal > 0 and dy_ayna < 0, (dy_normal, dy_ayna)
-    algi.ayar_guncelle(ayna=0)
+    dy_ofset, _ = n.adim((640, 360), kare, simdi=1.0)
+    assert dy_ofset is not None and dy_ofset < 0, dy_ofset
+    algi.ayar_guncelle(lazer_ofset_x=0.0)
 
     # 5. Maks adim kirpmasi: kadrajin en kenarindaki hedef bile siniri asmamali.
     n.sifirla()
@@ -249,5 +264,5 @@ if __name__ == "__main__":
     kararli_hal = [abs(v) for v in iz[25:]]
     assert max(kararli_hal) < 60, f"hareketli hedef takibi zayif: {max(kararli_hal):.0f} px"
 
-    print("nisan testleri OK — balon nisani, isaretler, ayna telafisi, kirpma, "
+    print("nisan testleri OK — balon nisani, isaretler, boresight ofseti, kirpma, "
           "yakinsama, salinimsizlik, hareketli hedef")

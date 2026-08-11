@@ -571,6 +571,10 @@ uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
 
 - **Balistik düşüş YOK** → mesafeye göre nişan düzeltmesi gerekmez. Sadece **kamera-lazer
   boresight/paralaks** kalibrasyonu (kameranın merkezi ≠ lazerin vurduğu nokta, ofset kalibre edilir).
+  **[x] 11.08.2026'da implement edildi** — `algi.AYAR["lazer_ofset_x/y"]` + ⚙ panelinde
+  kaydırıcılar, bkz. §12.3. (Aynı incelemede otonom yaw işaretinin TERS olduğu, çok daha
+  büyük bir hata da bulunup düzeltildi — "lazer çok farklı noktalarda" şikayetinin asıl
+  sebebi kalibrasyonsuzluktan çok bu tersti.)
 - **Dwell time (bekleme süresi):** Balonu patlatmak için lazer balon üzerinde **bir süre
   tutulmalı.** Hareketli hedefte (Aşama 2-3) problem "vur-geç" değil **"noktayı üstünde tut".**
   → Aşama 2-3'ün gerçek zorluğu takip kararlılığı ve merkezleme hassasiyetidir.
@@ -801,6 +805,47 @@ Uçtan uca doğrulandı (sahte model, `analiz_et` zinciri): 2 çakışan hedef �
 yüksek olan kaldı), ayrı hedef korundu, **balon gövdeyle örtüşmesine rağmen korundu.**
 `algi.py`'ye 8 birim testi eklendi.
 
+### 12.3 ⚠ OTONOM YAW İŞARETİ TERSTİ (11.08.2026) — "lazer crosshair'e göre çok farklı noktalarda"
+
+Gerçek donanımda gözlem: otonom nişan kilitliyken ateş edilen lazer, ekrandaki nişangahın
+gösterdiği yerden **sabit ama yanlış** bir noktaya gidiyordu. Kök sebep **kalibrasyon değil,
+kontrol yönü tersliğiydi** — ve commit edilmemiş, disk üzerinde duran bir bozukluktu:
+
+1. `algi.py`'de `"ayna"` (yazılımsal görüntü aynalama) ayarı, SAHI eklenirken **yanlışlıkla
+   silinmiş** (VARSAYILAN_AYAR ve AYAR_SINIR'dan tamamen kalkmış).
+2. `nisan.py`'de yaw hatasını "ayna açıkken TERS çevir" mantığı vardı
+   (`if algi.AYAR.get("ayna", 0): ex = -ex`) — ama madde 1 yüzünden bu koşul artık HİÇ
+   tetiklenemezdi (anahtar kalıcı olarak yok → her zaman varsayılan 0 döner).
+3. Biri bunu fark edip düzeltmeye çalışırken satırı **koşulsuz `ex = -ex`** yapmış — oysa
+   görüntü aynalama özelliği zaten kalıcı KAPALI (`arayuz_qt.py`'de `cv2.flip` çağrısı
+   "KULLANICI İSTEĞİ ÜZERİNE İPTAL EDİLDİ" yorumuyla devre dışı). Sonuç: yaw düzeltmesi
+   **her zaman ters işaretli** gönderiliyordu — hedef sağdayken gimbal sola dönüyordu.
+
+**Neden "sabit ama yanlış" görünüyordu (rastgele değil):** D-pad "Sağ" tuşu pan'i +1
+yönünde hareket ettirir (donanımda doğrulanmış, `YON_TABLO["right"]`). Otonom döngü hedef
+sağdayken negatif (sola) komut üretince sistem kararlı biçimde ters yöne kayıyor, `nisan.py`
+kendi regresyon testi bile bunu yakalıyordu (`python app/nisan.py` → "Hedef SAGDA -> yaw
+POZİTİF" assertion'ı `dy=-8.0` ile patlıyordu — test **zaten** vardı, sadece kimse çalıştırmamış).
+
+**Düzeltme:** `ex = -ex` satırı tamamen kaldırıldı (aynalama özelliği yok, negatiflemeye
+gerek yok); `"ayna"` referansları (`nisan.py` docstring + eski test 4) temizlendi. `kp/kd/
+olu_bolge` gibi diğer eksenler etkilenmedi — yalnızca yaw (pan) işareti düzeldi.
+
+**Aynı fırsatta gerçek boresight/paralaks kalibrasyonu da eklendi** (§7'de yıllardır
+"gerekir" diye yazılıydı, hiç implement edilmemişti): `algi.VARSAYILAN_AYAR`'a
+`lazer_ofset_x`/`lazer_ofset_y` (kare boyutunun oranı, varsayılan 0.0), ⚙ panelinde
+"NİŞAN" grubunda iki kaydırıcı (±%15). `nisan.py`'nin PD dengesi artık kare merkezine değil
+`(merkez + ofset)`'e kilitleniyor; ekrandaki yeşil nişangah da aynı noktaya çiziliyor
+(`arayuz_qt.py`, "Lazer Referans Nişangahı"). **Kalibrasyon prosedürü:** manuel modda lazeri
+bir hedefe tam isabet ettir, nişangah hedeften ne kadar kaymış görünüyorsa o kadar ayarla —
+nişangah hedefe oturana dek. Ofset varsayılan 0 olduğu için kalibre edilmeden davranış
+öncekiyle (yaw düzeltmesi hariç) aynı.
+
+⚠ **Ders:** bu iki hata da commit edilmemiş, sessiz değişikliklerdi ve ikisi de kendi
+regresyon testleriyle yakalanabilirdi (`python app/nisan.py`). Değişiklik sonrası test
+çalıştırmak §13.1'deki "kural uygulanmadı" dersinin bir tekrarı — **bir dosyada test varsa
+her değişiklikten sonra çalıştırılmalı**, aksi halde tam bu tür bir bozukluk sessizce kalır.
+
 ---
 
 ## 13. Kod sadeleştirme (30.07.2026) — ne silindi, neden
@@ -895,7 +940,43 @@ Takım ID: 948118 · Başvuru ID: 5007261.
 
 ---
 
-*Son güncelleme: 2026-08-05 · Faz: Video hazırlığı · Durum: ESP32 İLETİŞİMİ GERÇEK FIRMWARE'E
+*Son güncelleme: 2026-08-11 (2) · Faz: Video hazırlığı · Durum: HEDEFLER KARTI + ELLE HEDEF
+KİLİDİ eklendi — sağ kolonda eskiden yalnız Otonom modda görünen "TESPİT EDİLEN HEDEFLER"
+tablosu kaldırıldı; yerine numaralı, tıklanabilir bir isim listesi (`_hedefler_karti`) geldi.
+Bu kart artık stack DIŞINDA, MOTOR HIZI'nın hemen üstünde — hem Manuel hem Otonom modda sabit
+görünür (Manuel panel artık stack değil, yalnız görünürlüğü değişen bir widget). Listeden bir
+isme tıklamak `algi.hedef_sec(track_id)` ile o hedefi kilitler — **otomatik kilitle AYNI
+mekanizma** (`_kilitli_track_id`), tetikleyici operatördür; kilitli hedefe tekrar tıklamak
+kilidi bırakır (`algi.kilitli_hedef()` ile toggle). Bu, §9'da bekleyen "Aşama-1 zarf sırası
+bağlanmadı" işinin önkoşullarından biri olan elle hedef seçimini sağlıyor — zarf sırasının
+kendisi henüz bağlı değil. Ayrıca video üzerindeki tespit kutusu etiketlerinin rengi artık
+**SABİT yeşil** (`arayuz_qt.py:_kare_geldi`) — eskiden güven yüzdesine göre yeşil/camgöbeği/
+kırmızı arasında değişiyordu, takım kararıyla bu ayrım kaldırıldı (kilitli hedef listesindeki
+satır rengi ayrı kalır, ondan etkilenmez). `python app/algi.py` ve `python app/kapi_testleri.py`
+ile doğrulandı, uygulama gerçek kamerayla açılıp yeni kartın konumu görsel olarak kontrol edildi.
+**Ek düzeltme (aynı gün):** HEDEFLER kartı sağ kolona ekstra dikey yer kaplayınca MANUEL
+NİŞAN & YÖN KONTROLÜ paneli (D-pad + adım/ATEŞ butonları) sıkışıp bazı düğmeler ekranda
+görünmez hale geliyordu — bu düğmeler CSS'te **sabit** piksel yükseklikli olduğu için
+(D-pad 68px, ATEŞ 52px, adım/kademe butonları 30px) daralan alana kendiliğinden uyum
+sağlamıyor, sığmayınca pencerenin toplam yüksekliği ekranı aşıyordu. Çözüm: sadece
+**yükseklikler** küçültüldü (D-pad 52px, ATEŞ 44px, kademe butonları 26px — genişlik/okunabilirlik
+aynı kaldı), panel/D-pad boşlukları da hafif sıkılaştırıldı. `_seviye_butonlari` ortak şablon
+olduğu için bu değişiklik MOTOR HIZI ve LAZER kademe butonlarını da (tutarlı biçimde) etkiler.
+
+---
+
+*Önceki güncelleme: 2026-08-11 · Faz: Video hazırlığı · Durum: OTONOM YAW İŞARETİ TERSİ DÜZELTİLDİ
+(bkz. §12.3) — commit edilmemiş, disk üzerinde duran bir bozukluk (`nisan.py`'de koşulsuz
+`ex = -ex`) otonom nişanın hedefin HER ZAMAN ters yönüne komut göndermesine sebep oluyordu;
+"lazer crosshair'e göre çok farklı noktalarda ateş ediliyor" şikayetinin asıl kaynağı buydu,
+kalibrasyonsuzluk değil. Aynı incelemede gerçek kamera-lazer boresight/paralaks kalibrasyonu
+da eklendi (`lazer_ofset_x/y`, ⚙ panel). `python app/nisan.py` bu hatayı zaten yakalıyordu —
+ders: her değişiklikten sonra modüllerin kendi testleri çalıştırılmalı. Bir sonraki iş: gerçek
+donanımda otonom nişanı yeniden dene (yaw düzeltmesiyle), boresight ofsetini fiilen kalibre et.*
+
+---
+
+*Önceki güncelleme: 2026-08-05 · Faz: Video hazırlığı · Durum: ESP32 İLETİŞİMİ GERÇEK FIRMWARE'E
 GÖRE KURULDU (bkz. §5.1) — ekipten gelen AccelStepper kodu esas alındı: Python tarafı ASCII satır
 komutlarına ve **mutlak açıya** taşındı (aynı gün yazılan binary/delta protokol karşılığı olmadığı
 için atıldı). **3 kademe motor hız düzeyi** (S/A komutları: 150/100 · 400/200 · 800/400) eklendi;
