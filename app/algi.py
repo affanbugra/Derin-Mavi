@@ -87,7 +87,7 @@ def eksik_siniflar(model):
 # fikri dusuk skorlu kutulari da alip ikinci asamada eslestirmektir, modele yuksek
 # conf verilirse o kutular NMS'te olur. Filtreleme tracker (hassasiyet) + cizim
 # (gosterim) katmanlarinda yapilir.
-BESLEME_CONF = 0.10
+BESLEME_CONF = 0.05
 
 VARSAYILAN_AYAR = {
     "hassasiyet": 0.25,     # ByteTrack new_track_thresh + track_high_thresh
@@ -100,12 +100,18 @@ VARSAYILAN_AYAR = {
     # alanda iki hedef bulunmaz. 0.99 = pratikte kapali.
     "ortusme": 0.60,
     "maks_tespit": 300,     # kare basina en fazla kutu (max_det)
-    "ayna": 0,              # goruntuyu yatay cevir. 0 = ham YOLO ile birebir ayni
     # --- nisan.py (Otonom takip geometrisi) ---
     "fov": 60.0,            # kameranin yatay gorus acisi (derece)
     "kp": 0.50,             # takip gucu: hatanin ne kadari tek adimda kapatilsin
     "kd": 0.06,             # ongoru suresi (sn) — gecikme telafisi
     "olu_bolge": 0.02,      # merkeze bu kadar yakinsa komut yok (dwell icin sart)
+    # Kamera-lazer boresight/paralaks kalibrasyonu (CLAUDE.md §7): lazer kameranin
+    # optik ekseninden fiziksel olarak ayri montajli, ikisi ayni noktayi gostermez.
+    # Kalibrasyon: lazeri manuel modda bir hedefe TAM ISABET ettir, ekranda hedefin
+    # (eskiden merkezde cizilen) nisangahtan ne kadar kaydigina bak, o kadar ayarla.
+    # Kare genisligi/yuksekliginin orani (%) — cozunurlukten bagimsiz kalsin diye.
+    "lazer_ofset_x": 0.0,   # + : lazer, kamera eksenine gore SAGA vuruyor
+    "lazer_ofset_y": 0.0,   # + : lazer, kamera eksenine gore ASAGI vuruyor
     "onay_esigi": 0.70,     # kesin tanima icin gereken min. guven
     "onay_tekrari": 3,      # kesin tanima icin gereken ardisik yuksek-guven kare sayisi
     "kamera_fps": 30,       # kameradan istenen saniyelik kare hizi
@@ -117,8 +123,9 @@ AYAR_SINIR = {
     "hassasiyet": (0.05, 0.95), "gosterim": (0.05, 0.95),
     "kararlilik": (5, 300), "cozunurluk": (320, 1280),
     "iou": (0.10, 0.95), "ortusme": (0.30, 0.99), "maks_tespit": (1, 1000),
-    "ayna": (0, 1), "fov": (20.0, 140.0),
+    "fov": (20.0, 140.0),
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
+    "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
     "kamera_fps": (5, 120),
 }
@@ -138,7 +145,7 @@ def _tracker_yaml_yaz(a):
         f.write(
             "tracker_type: bytetrack\n"
             f"track_high_thresh: {hass:.3f}\n"
-            "track_low_thresh: 0.1\n"
+            "track_low_thresh: 0.05\n"
             f"new_track_thresh: {hass:.3f}\n"
             f"track_buffer: {int(a['kararlilik'])}\n"
             "match_thresh: 0.8\n"
@@ -525,6 +532,7 @@ ONAY_BOZULMA = 15
 _taraf_hafiza = {}   # takip id -> "Düşman" | "Dost"
 _takip_durumlari = {} # takip id -> aday/onayli sinif bilgisi
 _kayip_sayaclari = {}  # takip id -> kac karedir gorulmedi
+_kilitli_track_id = None  # Kalici takip icin kilitlenen hedefin ID'si
 _budama_sayaci = 0
 
 RENK_ESIK = 0.02      # bu oranin altinda renk "okunamadi" sayilir
@@ -533,9 +541,27 @@ BUDAMA_PERIYOT = 300  # kac karede bir olu ID'ler temizlenir
 
 def takip_sifirla():
     """Taraf hafizasini ve takip durumlarini temizler (kamera degisince cagirilir)."""
+    global _kilitli_track_id
     _taraf_hafiza.clear()
     _takip_durumlari.clear()
     _kayip_sayaclari.clear()
+    _kilitli_track_id = None
+
+
+def hedef_sec(track_id):
+    """Arayuzdeki HEDEFLER listesinden ELLE hedef kilitleme.
+
+    Ayni degiskeni (_kilitli_track_id) kullanir — otomatik kilitle AYNI mekanizma,
+    tetikleyici (operator) farkli. track_id=None kilidi birakir, bir sonraki karede
+    otomatik secim (en yuksek guvenli aday) devreye girer."""
+    global _kilitli_track_id
+    _kilitli_track_id = track_id
+
+
+def kilitli_hedef():
+    """Su an kilitli olan takip ID'sini doner (yok ise None). Arayuzun ayni hedefe
+    tekrar tiklayinca kilidi birakmasi (toggle) icin kullanilir."""
+    return _kilitli_track_id
 
 
 def _hafiza_buda(canli_idler):
@@ -693,9 +719,18 @@ def analiz_et(model, frame, estop=False, asama=None):
     balonlar    : [(x1,y1,x2,y2), ...] — nisan noktalari
     active_idx  : kilitli hedefin index'i; estop veya hedef yoksa -1
     """
+    global _kilitli_track_id
     a = ayar_al()
     gosterim = float(a["gosterim"])
 
+    # ByteTrack (model.track): Kalman-filtreli hareket tahmini var — kare-kare basit
+    # IoU eslestirmenin (SAHI icin gelistirilmisti, bu branch SAHI kullanmiyor)
+    # ONEMLI bir eksigi buydu: otonom modda gimbal kendi PD duzeltmesiyle donunce
+    # kamera goruntusu de kayar, sonraki karede AYNI hedefin kutusu yeterince
+    # ortusmeyip FARKLI bir ID alabiliyordu — kilit baska bir seye SIÇRAMASA bile
+    # nisan hedefi (aim point) kararsizlasiyor, otonom modda "rastgele hareket, hedefi
+    # takip etmiyor" sikayetine yol aciyordu (manuel modda otomatik kilit/nisan devre
+    # disi oldugu icin gorunmuyordu). ByteTrack donen kamerada da ID'yi kaybetmez.
     global _tracker_yeniden_kur
     if _tracker_yeniden_kur:
         _tracker_yaml_yaz(a)
@@ -743,6 +778,7 @@ def analiz_et(model, frame, estop=False, asama=None):
             results = model.track(frame, **track_kwargs)
         else:
             raise
+
     r = results[0]
     balonlar = []
     dets = []
@@ -777,7 +813,10 @@ def analiz_et(model, frame, estop=False, asama=None):
 
             # ONAYLANMIS hedef pratikte elenmez ("bir kez dogrulandiysa TAKIP ET"),
             # takibe girmis ama onaysiz kutuya kucuk tolerans, ID'siz kutuya tam esik.
-            if _onayli_mi(tid):
+            # Kilitli hedef her zaman gecer (esik 0) — kalici takibe engel olunmaz.
+            if tid is not None and tid == _kilitli_track_id:
+                esik = 0.0
+            elif _onayli_mi(tid):
                 esik = ONAYLI_ESIK
             elif tid is not None:
                 esik = gosterim * ID_TOLERANS
@@ -790,10 +829,23 @@ def analiz_et(model, frame, estop=False, asama=None):
                 taraf = "Belirsiz"
             else:
                 taraf = _taraf_belirle(frame, (x1, y1, x2, y2), tid) if asama == 3 else "Hedef"
-            
-            dets.append({"cls": cls, "ham": ham_ad, "ad": "?" if cls == "belirsiz" else goster_ad(cls, ham_ad),
+
+            det_obj = {"cls": cls, "ham": ham_ad, "ad": "?" if cls == "belirsiz" else goster_ad(cls, ham_ad),
                          "tip": taraf, "conf": int(round(conf * 100)),
-                         "box": (x1, y1, x2, y2), "id": tid})
+                         "box": (x1, y1, x2, y2), "id": tid}
+            dets.append(det_obj)
+            if tid is not None and tid in _takip_durumlari:
+                _takip_durumlari[tid]["son_det"] = dict(det_obj)
+
+    # Hayalet Hedef: Kilitli nesne bu karede tespit edilemediyse ama tracker
+    # hafizasinda yasiyorsa, kutunun "titreyerek" kaybolmasini engellemek icin
+    # son konumunu listeye ekle (kutu istikrari).
+    if _kilitli_track_id is not None and _kilitli_track_id in _takip_durumlari:
+        durum = _takip_durumlari[_kilitli_track_id]
+        if "son_det" in durum and not any(d.get("id") == _kilitli_track_id for d in dets):
+            hayalet = dict(durum["son_det"])
+            hayalet["conf"] = 1  # Cizimde KIRMIZI (dusuk guven) gorunmesi icin
+            dets.append(hayalet)
 
     # Ayni nesneye atilmis cift kutulari ele (NMS sinif ici calistigi icin farkli
     # sinif etiketli ciftleri temizleyemez — bkz. _cift_kutulari_ele).
@@ -803,19 +855,61 @@ def analiz_et(model, frame, estop=False, asama=None):
     _kayiplari_temizle(canli_idler, int(a["kararlilik"]))
 
     # Kilit: A3'te yalniz Düşman (dosta ates yok), A1/A2'de her tespit hedeftir.
+    if estop:
+        _kilitli_track_id = None
+
     active_idx = -1
     if not estop and dets:
-        if asama == 3:
-            aday = [i for i, d in enumerate(dets) if d["tip"] == "Düşman"]
+        locked_idx = -1
+        if _kilitli_track_id is not None:
+            locked_idx = next((i for i, d in enumerate(dets) if d["id"] == _kilitli_track_id), -1)
+
+        if locked_idx != -1:
+            # Kilitli nesne dets icinde bulunduysa (sekli, sinifi ne olursa olsun) devam
+            active_idx = locked_idx
         else:
-            aday = list(range(len(dets)))
-        if aday:
-            active_idx = max(aday, key=lambda i: dets[i]["conf"])
+            # Kilitli hedef dets icinde yok.
+            if _kilitli_track_id is None:
+                # HIC KILIT YOK: Ilk defa kilitlenmek uzere hedef ara
+                if asama == 3:
+                    aday = [i for i, d in enumerate(dets) if d["tip"] == "Düşman"]
+                else:
+                    aday = list(range(len(dets)))
+
+                if aday:
+                    en_iyi = max(aday, key=lambda i: dets[i]["conf"])
+                    active_idx = en_iyi
+                    # ILK KILIT 80 dogruluk gerektirir
+                    if dets[en_iyi]["id"] is not None and dets[en_iyi]["conf"] >= 80:
+                        _kilitli_track_id = dets[en_iyi]["id"]
+            else:
+                # KILIT VARDI AMA KAYBOLDU: Asla baska bir nesneye (ornegin kola) atlama.
+                # Tek istisna: Tracker objeyi kaybedip ayni yerde yeni bir ID ile bulmussa.
+                if _kilitli_track_id in _takip_durumlari and "son_det" in _takip_durumlari[_kilitli_track_id]:
+                    son_kutu = _takip_durumlari[_kilitli_track_id]["son_det"]["box"]
+                    # Ayni konumda (ortusme > 0.3) baska bir kutu var mi?
+                    ayni_yerdekiler = [i for i, d in enumerate(dets) if _ortusme(d["box"], son_kutu) > 0.3]
+                    if ayni_yerdekiler:
+                        # Ayni nesne yeni ID almis! Kilidi buna devret (guven onemli degil)
+                        en_iyi = max(ayni_yerdekiler, key=lambda i: dets[i]["conf"])
+                        _kilitli_track_id = dets[en_iyi]["id"]
+                        active_idx = en_iyi
+
+                # Ayni yerde degilse, veya hafiza tamamen silindiyse HICBIR SEY YAPMA.
+                # Kilit baska bir seye SIÇRAMAZ.
     return dets, balonlar, active_idx
 
 
 def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
     """BGR kareye kutu + etiket + nisan cizer."""
+
+    # --- Sabit Merkez Nisangahi (Lazer referansi) ---
+    h, w = frame.shape[:2]
+    mcx, mcy = w // 2, h // 2
+    cv2.line(frame, (mcx - 20, mcy), (mcx + 20, mcy), (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.line(frame, (mcx, mcy - 20), (mcx, mcy + 20), (0, 255, 0), 2, cv2.LINE_AA)
+    cv2.circle(frame, (mcx, mcy), 3, (0, 255, 0), -1, cv2.LINE_AA)
+
     for bx in balonlar:
         x1, y1, x2, y2 = bx
         cv2.rectangle(frame, (x1, y1), (x2, y2), YELLOW, 1, cv2.LINE_AA)

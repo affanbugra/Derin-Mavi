@@ -19,13 +19,12 @@ pyserial>=3.5
 # açılır, yalnızca gamepad özelliği kapalı kalır.
 pygame>=2.5
 
-# --- Opsiyonel: CPU'da hızlı çıkarım ---
+# --- CPU'da hızlı çıkarım (13.08: kuruldu, ölçüldü — Intel CPU'da ~4× hızlandı) ---
 # Bu proje GPU'suz laptopta koşuyor ve tek gerçek darboğaz CPU inference'ı.
-# OpenVINO Intel işlemcide tipik 2-3× hızlandırır. Kurup modeli bir kez çevirin:
-#     pip install openvino
-#     yolo export model=models/best.pt format=openvino
+# Modeli bir kez çevirin:
+#     yolo export model=models/best.pt format=openvino imgsz=640
 # Çıktı models/best_openvino_model/ olarak kalır; uygulama onu OTOMATİK tercih eder.
-# openvino>=2024.0
+openvino>=2023.3
 #
 # ONNX alternatifi (DERINMAVI_MODEL=onnx):
 # onnxruntime>=1.16.0

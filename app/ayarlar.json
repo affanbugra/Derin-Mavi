@@ -2,15 +2,17 @@
   "hassasiyet": 0.7,
   "gosterim": 0.5,
   "kararlilik": 120,
-  "cozunurluk": 1280,
+  "cozunurluk": 640,
   "iou": 0.9,
+  "ortusme": 0.6,
   "maks_tespit": 300,
-  "ayna": 0,
   "fov": 60.3,
-  "kp": 0.5,
-  "kd": 0.1,
+  "kp": 0.51,
+  "kd": 0.0,
   "olu_bolge": 0.02,
+  "lazer_ofset_x": 0.0,
+  "lazer_ofset_y": 0.0,
   "onay_esigi": 0.7,
   "onay_tekrari": 3,
-  "kamera_fps": 120
+  "kamera_fps": 60
 }

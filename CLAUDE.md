@@ -565,6 +565,83 @@ uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
 10. ✅ **ALGI/ARAYÜZ SAĞLAMLAŞTIRMASI** (29.07) — "ham YOLO daha iyi tanıyor" şikâyetinin
    kök sebepleri bulundu ve giderildi. Ayrıntı için bkz. §12.
 
+11. ✅ **`hedeftakip` branch'i `otonom_v4`'e taşındı — SAHI HARİÇ** (13.08) — `hedeftakip`
+   branch'inde geliştirilen arayüz/algı iyileştirmeleri (takım kararıyla SAHI dilimli tespit
+   **hariç tutularak**) bu branch'e uygulandı. Getirilenler:
+   - ~~**ByteTrack → kendi IoU tracker'ımız.**~~ **[13.08 AKŞAM GERİ ALINDI — bkz. §7.2.]**
+     Bu maddede `model.track()` yerine `model.predict()` + basit kare-kare IoU eşleştirmesi
+     (`_iou_id_esle`) getirilmişti; otonom modda gimbal kendi hareketiyle görüntüyü
+     kaydırınca hedef ID'si kararsızlaşıp "rastgele hareket" hatasına yol açtığı bulununca
+     **ByteTrack'e geri dönüldü**, `_iou_id_esle` ve yardımcıları tamamen silindi.
+     `_tracker_yaml_yaz`/`_TRACKER_YAML` yeniden CANLI yolda kullanılıyor (ölü kod değil).
+   - **Kalıcı hedef kilidi (`algi.hedef_sec`/`kilitli_hedef`).** HEDEFLER kartındaki bir isme
+     tıklamak o track ID'yi elle kilitler; otomatik kilitle AYNI mekanizma
+     (`_kilitli_track_id`), tetikleyici operatör. Aynı hedefe tekrar tıklamak kilidi bırakır.
+     İlk otomatik kilit **≥%80 güven** ister; kilit bir kez kurulunca gösterim eşiği o
+     hedef için 0'a düşer (kaybolmaz). Hedef geçici olarak tespit edilemezse **hayalet
+     hedef** (son bilinen kutu, düşük güvenle) kilidi bir sonraki karede geri gelene kadar
+     ekranda tutar — titremeyi önler.
+   - **TESPİT EDİLEN HEDEFLER tablosu → HEDEFLER kartı.** `QTableWidget` yerine numaralı,
+     tıklanabilir buton listesi (`_hedefler_karti`/`_hedef_liste_guncelle`); sıra daima
+     Füze→Helikopter→F16→İHA (`HEDEF_ONCELIK`), tespit sırasından bağımsız. Sağ kolon artık
+     `QStackedWidget` değil — Manuel panel yalnızca Manuel modda görünür/gizlenir, HEDEFLER/
+     Motor Hızı/Lazer kartları her iki modda sabit.
+   - **Lazer boresight/paralaks kalibrasyonu.** Yeni ayarlar `lazer_ofset_x/y` (⚙ panel,
+     Nişan sekmesi): kamera ekseni ile lazerin gerçekte vurduğu nokta arasındaki kayma,
+     kare boyutunun yüzdesi olarak kalibre edilir. `nisan.PDNisanci` artık kare merkezine
+     değil bu kalibre noktaya kilitleniyor. Qt canlı görünümde kırmızı bir referans nişangahı
+     (kalibre noktada) + `algi.draw_overlay`'de (cv2 tarafı) yeşil sabit merkez nişangahı
+     eklendi.
+   - **"Aynala" (flip) ayarı tamamen kaldırıldı.** `cv2.flip` kalıcı olarak kapatıldı (takım
+     kararı), `nisan.py`'deki yaw-işareti telafisi de onunla birlikte gitti — flip artık
+     hiçbir yerde yok, `algi.AYAR`'da `ayna` anahtarı bulunmuyor.
+   - **Tespit kutusu rengi artık SABİT yeşil** (Qt canlı görünümde) — eskiden güven yüzdesine
+     göre yeşil/camgöbeği/kırmızı arası kayardı, takım kararıyla sadeleştirildi.
+   - Küçük düzenlemeler: `BESLEME_CONF` 0.10→0.05, ByteTrack yaml'daki `track_low_thresh`
+     0.1→0.05, manuel panel/D-pad/açı göstergesi daha kompakt (HEDEFLER kartına yer açmak
+     için), D-pad tuş metinleri tek glife indirildi (▲/◀/▶/▼/MERKEZ).
+   - **BİLİNÇLİ OLARAK GETİRİLMEYEN:** SAHI (Slicing Aided Hyper Inference) dilimli tespit —
+     `sahi` kütüphanesi, `sahi`/`sahi_dilim`/`sahi_ortusme` ayarları, `_analiz_sahi`,
+     `sahi_durumu()`, alt çubuktaki SAHI durum göstergesi, `requirements.txt`'teki
+     `sahi>=0.11.15` satırı. Takım kararı: bu özellik şimdilik bu branch'e girmesin.
+     `hedeftakip`'te duruyor, ileride istenirse oradan tekrar bakılır.
+   - **Getirilmedi (kasıtlı, kapsam dışı):** `hedeftakip`'teki `models/best_openvino_model/`
+     (türetilmiş model çıktısı — CLAUDE.md ilke: türetilmiş biçimler repoya girmez, herkes
+     kendi makinesinde üretir), `app/ayarlar.json` (bu branch'in kendi kalibre edilmiş çalışma
+     zamanı değerleri — `hedeftakip`'in farklı ayar setiyle ezilmedi), `Baslat.bat`'taki
+     `venv`/`​.venv` sıralama değişikliği, `CLAUDE.md`'nin `hedeftakip` versiyonu (o branch'in
+     kendi günlüğü SAHI'yi merkeze koyuyor — bu madde onun yerine kendi doğru özetimizdir).
+   - Doğrulama: `python app/algi.py`, `python app/nisan.py`, `python app/kapi_testleri.py`
+     hepsi geçti; `arayuz_qt.py` hatasız import edildi. `algi.py`/`nisan.py` artık
+     `hedeftakip`'in ilgili dosyalarıyla **birebir aynı** (satır satır diff temiz).
+
+12. ✅ **HEDEFLER kartı dikey büyümüyor + AI 3 FPS sorunu çözüldü** (13.08) —
+   - **HEDEFLER kartı artık YATAY.** Eskiden her yeni tanınan hedef `QVBoxLayout`'a yeni
+     satır olarak ekleniyordu → kart dikey büyüyüp alttaki Motor Hızı/Lazer kartlarını
+     aşağı itiyordu. `QHBoxLayout` + sabit yükseklikte (`34px`) yatay kaydırmalı
+     `QScrollArea`'ya çevrildi: isimler yan yana dizilir, kart boyu sabit kalır, sığmayan
+     kısım yatay kaydırılır (dikey kaydırma yok, `addStretch` ile butonlar sola yaslanır).
+   - **3 FPS'in kök sebebi bulundu — ÇİFT problem:**
+     1. `app/ayarlar.json`'da `cozunurluk: 1280` kayıtlıydı; model (`models/best.pt`,
+        checkpoint meta verisinden doğrulandı: **YOLO11s**, `imgsz=640`'ta eğitilmiş)
+        1280'de çalıştırılıyordu — hem 4× fazla piksel işi hem eğitim çözünürlüğünden
+        sapma (isabeti de artırmıyor). **640'a düşürüldü** (`algi.VARSAYILAN_AYAR` zaten
+        640'tı, yalnızca kaydedilmiş yerel dosya sapmıştı).
+     2. Çözünürlük düzeltmesiyle bile CPU'da (bu makinede ayrık GPU yok, torch CPU-only
+        derleme) YOLO11s ham PyTorch ile **ölçüldü: ~3.7 FPS**. **OpenVINO export**
+        kuruldu ve üretildi (`models/best_openvino_model/`, 640px) → **ölçüldü: ~15 FPS**
+        (aynı makinede, aynı 640, ~4× hızlanma). `app/algi.py`'deki `_model_bul()` zaten
+        `best.engine` > `*_openvino_model` > `*.onnx` > `*.pt` önceliğiyle arıyordu —
+        klasör var olduğu için kod değişmeden otomatik devreye girdi.
+   - `requirements.txt`'e `openvino>=2023.3` eklendi (export komutu yorum olarak yanında).
+     `.gitignore`'a `*_openvino_model/` eklendi — TensorRT (`.engine`) gibi bu da **türetilmiş
+     çıktı**, repoya girmez, herkes kendi makinesinde `yolo export model=models/best.pt
+     format=openvino imgsz=640` ile üretir (tek komut, birkaç saniye sürüyor).
+   - ⚠ **Yeni klonlayan/başka makineye geçen biri OpenVINO klasörünü görmeyecek** — ilk
+     açılışta uygulama otomatik `best.pt`'ye (PyTorch, yavaş) düşer, uyarı vermez. Export
+     komutu zaten [README.md](README.md)'de yazılı (§Model); ekip üyeleri kendi
+     makinelerinde **bir kez** çalıştırmalı — 5 saniye sürüyor, FPS'i ~4× artırıyor.
+
 ---
 
 ## 7. LAZER'e özgü içgörüler (mermiden TAMAMEN farklı — akılda tut)
@@ -577,6 +654,111 @@ uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
 - **Nişan noktası = BALON**, maket gövdesi değil. Model balonu tespit etmeli ya da
   maket-balon geometrik ofsetinden balon merkezi hesaplanmalı.
 - Lazer güvenliği: test/çekimde lazer gözlüğü zorunlu.
+
+### 7.1 Otonom takip — "aşırı/saçma hareket" (13.08.2026)
+
+Şikâyet: OpenVINO ile FPS ~4→~15'e çıkınca (bkz. §6 madde 12) otonom modda namlu hedefi
+ortalarken **aşırı ve tutarsız** hareket etmeye başladı. İki kök sebep bulundu, ikisi de
+**FPS artışının doğrudan sonucu**:
+
+1. **Sabit `d_yaw` tavanı (eski `MAKS_ADIM_DER=8°`) bir HIZ SINIRI DEĞİL, çağrı başına
+   sabit bir açıydı.** FPS arttıkça bu tavanın izin verdiği GERÇEK açısal hız da katlanarak
+   arttı: 4 FPS'te 8°×4=32°/sn, 15 FPS'te 8°×15=120°/sn — motorun en hızlı kademesinin
+   (Hızlı: 75°/sn) bile üstünde bir sınır. **Çözüm:** `MainWindow._nisan_geldi`
+   (`arayuz_qt.py`) artık PD'nin ürettiği komutu **seçili motor hızına göre** (`P.HIZ_TABLO`)
+   kırpıyor — tıpkı basılı-tutma D-pad hareketinde (`_tekrar_tik`) zaten yapılan
+   `adım = tavan_hız × geçen_süre` hesabıyla AYNI mantık. ESP32 konum geri bildirimi
+   göndermediği için (`pan_ham`/`tilt_aci` yazılımın İNANCIdır, ölçüm değil) bu kırpma
+   olmadan yazılımın hedef açısı motorun gerçekte gidebileceğinden hızlı ilerleyebiliyordu.
+2. **Türev yumuşatması (`TUREV_YUMUSATMA`) sabit-örneklem alfaydı, zaman-sabiti değil.**
+   FPS yükselince (dt küçülünce) aynı sabit alfa gerçek-zamanda DAHA AZ gürültü filtreliyordu
+   → tespit kutusunun kare-kare piksel titremesi türev terimine daha güçlü bindi. **Çözüm:**
+   `nisan.py`'de `TUREV_ZAMAN_SABITI` (saniye) tabanlı üstel yumuşatmaya geçildi
+   (`alfa = 1 - exp(-dt/tau)`) — filtrenin gerçek-zamandaki gücü FPS'ten bağımsız sabit kalır.
+
+⚠ **Bu iki düzeltme gerçek donanımda TEST EDİLMEDİ** (bu makinede kamera/gimbal yok).
+Simülasyonla (temiz sinyal + sentetik piksel gürültüsü) doğrulandı ama motor ataleti/ivme
+profili, UART gecikmesi, gerçek tespit gürültüsü büyüklüğü modellenmedi.
+
+### 7.2 Otonom takip — ASIL kök sebep: ByteTrack yerine naif IoU tracker (13.08.2026)
+
+§7.1'deki PD/hız kırpma düzeltmelerinden sonra kullanıcı **düşük Kp (0.27) ve Kd=0 ile bile**
+otonom modda "rastgele hareket, tanımladığı hedefi takip etmiyor" bildirdi — bu, PD
+kazancının değil **hedef kimliğinin (tracking ID) kendisinin** kararsız olduğunu gösterdi.
+Ayırt edici ipucu kullanıcıdan geldi: **manuel modda araç düzgün çalışıyor, sorun yalnızca
+otonoma geçince başlıyor.**
+
+**Kök sebep bulundu:** §6 madde 11'de (`hedeftakip`'ten SAHI hariç taşıma) `model.track()`
+(ByteTrack, Kalman-filtreli hareket tahmini) yerine basit kare-kare IoU eşleştirmeli kendi
+tracker'ımız (`_iou_id_esle`) getirilmişti. Bu değişim **hedeftakip'te SAHI'nin dilimli
+tespitiyle ByteTrack çalışamadığı için zorunluydu** — ama bu branch SAHI kullanmıyor,
+yani o zorunluluk hiç geçerli değildi; gereksiz yere taşınmış bir regresyon oldu.
+
+**Neden özellikle otonom modda ortaya çıktı:** ByteTrack'in aksine naif IoU eşleştirmenin
+hareket tahmini YOKTU — yalnızca art arda iki karenin ham kutu konumlarını karşılaştırıyordu
+(eşik IoU≥0.30). Otonom modda gimbal PD düzeltmesiyle kendi kendine dönünce KAMERA GÖRÜNTÜSÜ
+de kayar; bir sonraki karede aynı fiziksel hedefin kutusu yeterince örtüşmeyip **farklı bir
+ID alabiliyordu**. Bu, `_kilitli_track_id`in dets içinde bulunamamasına, `_karar_ver`'in o
+"yeni" ID için onay durumunu sıfırdan başlatmasına ve nişan noktasının (aim point) kare kare
+kararsızlaşmasına yol açıyordu — tam olarak "rastgele hareket" tarifi. Manuel modda otomatik
+kilit/nişan hiç devrede olmadığı için (insan D-pad ile sürüyor) bu hiç görünmüyordu — kendi
+kendini besleyen bir geri besleme kırılmasıydı: yalnızca gimbal OTONOM olarak hareket ederken
+tetikleniyordu.
+
+**Çözüm:** `algi.analiz_et` **ByteTrack'e (`model.track`, `persist=True`) geri döndürüldü**;
+`_iou_id_esle`/`_iou_hesapla`/`_iou_sonraki_id`/`_iou_onceki_kutular` tamamen silindi (SAHI
+olmadan hiçbir amaca hizmet etmiyorlardı). Kilit/hayalet-hedef/onay mantığının TAMAMI
+korundu — yalnızca "ID nereden geliyor" değişti (`b.id` / ByteTrack, eskisi gibi). OpenVINO
+export edilmiş modelle `model.track()`'in sorunsuz çalıştığı ayrıca doğrulandı (§6 madde 12'de
+kurulan hızlandırma ile uyumlu). Tüm testler (`algi.py`, `nisan.py`, `kapi_testleri.py`) ve
+gerçek OpenVINO modeliyle çok karelik bir duman testi (`analiz_et` art arda 10 kare, hata YOK)
+geçti.
+
+⚠ **Bu da gerçek donanımda TEST EDİLMEDİ.** Kamera/gimbal olmadan "hedefi artık akıcı takip
+ediyor mu" nihai olarak doğrulanamaz — bir sonraki adım budur. §7.1'deki hız-kırpma
+(`_nisan_geldi`) ve zaman-sabitli türev yumuşatması (`nisan.TUREV_ZAMAN_SABITI`) düzeltmeleri
+de yerinde duruyor, ByteTrack'le birlikte çalışırlar (birbirini dışlamazlar).
+
+### 7.3 Otonom takip — "ortaladığı an durmuyor, karşı tarafa geçiyor" (13.08.2026 akşam)
+
+ByteTrack düzeltmesinden (§7.2) sonra kullanıcı **artık gerçekten takip ediyor** dedi — ama
+yeni bir davranış bildirdi: hedefi ortalarken **durmuyor**, karşı tarafa geçiyor, oradan geri
+dönüyor, yine geçiyor — **hiç yerleşmeyen bir salınım**. Bu klasik bir "gecikme" (dead-time)
+kontrol sorunu: ESP32 konum geri bildirimi göndermediği için (§5.1) yazılım motorun NE ZAMAN
+fiziksel olarak hedefe vardığını bilemez. Motor bir komutu yerine getirirken (ivmelenme
+profiliyle onlarca-yüzlerce ms sürer, özellikle H_NORMAL'de tepe hıza — 40°/sn — çıkmak 0.4 sn
+ister) kamera görüntüsü henüz güncellenmez; o süre içindeki HER YENİ KARE aynı (bayat) piksel
+hatasını görür ve PD aynı hatadan taze bir düzeltme daha üretir. Her biri tek başına §7.1'in
+hız sınırının içinde kalsa bile **TOPLAMLARI** gerçek ihtiyacın kat kat üstüne çıkar — motor
+nihayet yetiştiğinde hedef zaten karşı tarafa geçmiş olur, aynı şey tersten tekrarlanır.
+
+**Çözüm — "meşgul kapısı" (`MainWindow._nisan_geldi`):** gönderilen komutun tahmini fiziksel
+tamamlanma süresi kadar (üçgen ivme profili: `2×√(mesafe/ivme)`, asgari `NISAN_MIN_ARALIK=0.10`
+sn) **yeni komut kabul edilmez**. Bir sonraki kabul edilen kare artık kameranın GÜNCELLENMİŞ
+(bayat olmayan) görüntüsünü yansıtır, PD gerçek hataya göre karar verir.
+
+⚠ **Simülasyonla ölçülen gerçek bir ödünleşim var: bu düzeltme yakınsamayı YAVAŞLATIYOR.**
+Gerçekçi (ivmelenen) bir motor benzetiminde meşgul kapısı OLMADAN sistem ~3 sn'de yerleşiyordu;
+kapıyla birlikte ~8 sn'ye çıktı (salınım kesinlikle YOK — `yön-değişimi=0` — ama daha temkinli).
+**Ayrıca bu benzetim, meşgul kapısı OLMADAN bile salınım ÜRETMEDİ** — yani gerçek donanımdaki
+salınımın tam mekanizmasını laboratuvar dışında birebir yeniden üretemedim; UART gecikmesi,
+inference'ın kendi işlem süresi (kare "yakalandığı an" değil, ~66ms SONRA sonuç veriyor) veya
+gerçek tespit gürültüsü gibi modellemediğim etkenler de katkıda bulunuyor olabilir. **Meşgul
+kapısı salınımı KESİNLİKLE azaltır/önler** (matematiksel olarak komutların üst üste binmesini
+engeller).
+
+**13.08 gece — ince ayar:** kullanıcı bu ilk sürümü ("tam tamamlanma süresini bekle") denedi:
+açı artık sapıtmıyordu (salınım gerçekten gitmişti) ama **"ortalamakta çok geç kalıyor,
+akıcılık kötü"** dedi. Kök sebep: `2×√(mesafe/ivme)` hareketin TAMAMEN durmasını (üçgen
+profilin hem hızlanma HEM yavaşlama yarısını) bekliyordu — gereğinden çok temkinliydi.
+**`NISAN_MESGUL_ORANI` (0.4) eklendi**: artık bu tam sürenin yalnızca %40'ı kadar beklenir —
+hareketin TAMAMEN durmasını değil, GÖRÜLEBİLİR ölçüde ilerlemesini bekler. Taban da
+`NISAN_MIN_ARALIK` 0.10→0.04 sn'ye indirildi (zaten inference ~15 FPS'te ~0.067 sn'de bir kare
+geldiği için 0.10'un pratik bir etkisi kalmamıştı). Simülasyonla tarandı (oran 0.7→0.2):
+**0.4'te 3 sn'de yerleşme + salınım YOK**, 0.2'de salınım geri gelmeye başlıyor — 0.4 bilinçli
+bir güvenlik payıyla seçildi. Gerçek donanımda hâlâ yavaşsa **bir sonraki adım
+`NISAN_MESGUL_ORANI`'yi kademeli yükseltmek** (0.5, 0.6…) veya salınım geri gelirse düşürmek
+(`arayuz_qt.py`, tek sabit); `NISAN_MIN_ARALIK` ikinci bir tavan.
 
 ---
 
@@ -895,7 +1077,35 @@ Takım ID: 948118 · Başvuru ID: 5007261.
 
 ---
 
-*Son güncelleme: 2026-08-05 · Faz: Video hazırlığı · Durum: ESP32 İLETİŞİMİ GERÇEK FIRMWARE'E
+*Son güncelleme: 2026-08-13 (akşam) · Faz: Video hazırlığı · Durum: Sabah `hedeftakip`
+branch'indeki arayüz/algı iyileştirmeleri `otonom_v4`'e taşındı — SAHI (dilimli tespit)
+**bilinçli olarak hariç tutuldu** (takım kararı, bkz. §6 madde 11): HEDEFLER kartından
+**elle hedef kilitleme** (`algi.hedef_sec`/`kilitli_hedef`), kilit koptuğunda **hayalet hedef**
+ile kutu istikrarı, tespit tablosunun tıklanabilir **HEDEFLER kartına** dönüşmesi (yatay liste,
+sıra sabit: Füze→Helikopter→F16→İHA), **lazer boresight/paralaks kalibrasyonu**
+(`lazer_ofset_x/y` + Qt'de kırmızı referans nişangahı + cv2'de yeşil sabit merkez nişangahı),
+"Aynala" (flip) özelliğinin kaldırılması. Ardından **OpenVINO export** ile CPU inference
+~4→~15 FPS'e çıkarıldı (§6 madde 12) — ki bu, akşam bulunan iki otonom-takip sorununu ortaya
+çıkardı/büyüttü: (a) PD'nin hız tavanı FPS'ten bağımsız değildi, motor hızına göre kırpma
+eklendi + türev yumuşatması zaman-sabitli yapıldı (§7.1); (b) **asıl kök sebep**: sabah
+taşınan "kendi IoU tracker'ımız" (`model.predict()`+`_iou_id_esle`) SAHI için gerekliydi ama
+bu branch'te SAHI yok — otonom modda gimbal kendi hareketiyle görüntüyü kaydırınca hedef ID'si
+kararsızlaşıp **"rastgele hareket, hedefi takip etmiyor"** sorununa yol açtı (manuel modda
+görünmüyordu, çünkü orada otomatik kilit/nişan devrede değil). **ByteTrack'e (`model.track`)
+geri dönüldü**, naif tracker tamamen silindi (§7.2). ByteTrack sonrası kullanıcı "artık takip
+ediyor ama ortaladığında durmuyor, karşı tarafa geçip salınıyor" dedi — klasik gecikme
+(dead-time) kaynaklı salınım: motor bir komutu yerine getirirken kamera görüntüsü henüz
+güncellenmeden yeni kareler AYNI bayat hatadan komut üstüne komut biriktiriyordu. **"Meşgul
+kapısı"** eklendi (`_nisan_geldi`): gönderilen komutun tahmini fiziksel tamamlanma süresi
+kadar yeni komut kabul edilmiyor (§7.3). ⚠ Bu düzeltme simülasyonda yakınsamayı YAVAŞLATIYOR
+(salınım yok ama daha temkinli) — gerçek donanımdaki salınımı laboratuvarda birebir yeniden
+üretemedim, UART/inference gecikmesi gibi modellenmemiş etkenler de rol oynuyor olabilir.
+Tüm modül testleri geçti; `analiz_et` gerçek OpenVINO modeliyle çok karelik duman testinden
+geçti. **Hiçbiri gerçek donanımda (kamera/gimbal) test edilmedi** — bir sonraki iş budur;
+"çok yavaş" hissettirirse `arayuz_qt.NISAN_MIN_ARALIK` ayarlanacak yer. Ardından: dwell
+mantığı + Aşama-1 zarf sırasının bağlanması + gerçek veriyle 5 sınıflı model.*
+
+*Önceki güncelleme: 2026-08-05 · Faz: Video hazırlığı · Durum: ESP32 İLETİŞİMİ GERÇEK FIRMWARE'E
 GÖRE KURULDU (bkz. §5.1) — ekipten gelen AccelStepper kodu esas alındı: Python tarafı ASCII satır
 komutlarına ve **mutlak açıya** taşındı (aynı gün yazılan binary/delta protokol karşılığı olmadığı
 için atıldı). **3 kademe motor hız düzeyi** (S/A komutları: 150/100 · 400/200 · 800/400) eklendi;

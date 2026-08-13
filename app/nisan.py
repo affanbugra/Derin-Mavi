@@ -8,8 +8,9 @@ Otonom modda (Asama 2-3) hedefi TAKIP etme katmani. Zincir:
       -> PDNisanci.adim() : piksel hatasi -> derece -> PD -> (d_yaw, d_pitch)
       -> kontrol.nisan()  : ESP32'ye delta aci komutu
 
-Ayarlar (fov, kp, kd, olu_bolge, ayna) algi.AYAR'dan CANLI okunur — tek ayar kaynagi.
+Ayarlar (fov, kp, kd, olu_bolge, lazer_ofset_x/y) algi.AYAR'dan CANLI okunur — tek ayar kaynagi.
 """
+import math
 import time
 
 import algi
@@ -27,14 +28,25 @@ import algi
 VARSAYILAN_KP = algi.VARSAYILAN_AYAR["kp"]
 VARSAYILAN_KD = algi.VARSAYILAN_AYAR["kd"]      # saniye (~1 kare @ 15 FPS)
 
-# Tespit kutusu kare kare birkac piksel oynar; ham turev bunu buyutur (0-1, 1=yok).
-TUREV_YUMUSATMA = 0.5
+# Tespit kutusu kare kare birkac piksel oynar; ham turev bunu buyutur. ZAMAN-SABITI
+# (saniye) tabanli yumusatma kullanilir — sabit-orneklem alfa DEGIL. Sabit alfa (eski:
+# 0.5 her karede) FPS yukseldikce gercek-zamanda DAHA AZ filtreler: 4 FPS'te 0.5 alfa
+# ~0.25 sn'lik bir pencereyi yumusatirken, 15 FPS'te AYNI 0.5 alfa ~0.07 sn'lik pencereyi
+# yumusatir — gurultu ~3-4x daha az bastirilir. OpenVINO ile FPS ~4 -> ~15'e cikinca
+# (13.08) namlunun "asiri/sacma" titremesinin bas sebeplerinden biri buydu. Alfa =
+# 1 - exp(-dt/TUREV_ZAMAN_SABITI) ile FPS'ten BAGIMSIZ, sabit gercek-zaman filtrelemesi
+# saglanir (bkz. adim()).
+TUREV_ZAMAN_SABITI = 0.12   # saniye
 
 # Olu bolge: merkeze bu kadar yakinsa komut YOK. Aksi halde sistem her karede titrer
 # ve lazer balonun uzerinde sabit duramaz (dwell — CLAUDE.md §7).
 OLU_BOLGE_ORAN = algi.VARSAYILAN_AYAR["olu_bolge"]   # %2 — 1280 px'te ±26 px
 
-# Tek komutta gonderilebilecek en buyuk delta (guvenlik: kacak komut olmasin).
+# Tek adimda gonderilebilecek en buyuk delta — YALNIZCA ilk cagrida (dt bilinmiyor,
+# hedef yeni kilitlendi) kullanilan SABIT guvenlik tavani. Sonraki cagrilarda gercek
+# tavan MainWindow._nisan_geldi()'de secili motor hizina (P.HIZ_TABLO) gore, gecen
+# sureyle olceklenerek ayrica kirpilir — PD burada yalnizca "makul" bir ilk-adim
+# sinirini garanti eder, motorun gercekten yetisebileceginden BAGIMSIZDIR.
 MAKS_ADIM_DER = 8.0
 
 
@@ -111,6 +123,16 @@ class PDNisanci:
         return (float(algi.AYAR.get("olu_bolge", OLU_BOLGE_ORAN))
                 if self._olu is None else self._olu)
 
+    @property
+    def ofset_x(self):
+        """Kamera-lazer boresight ofseti (kare genisliginin orani). Kalibrasyon
+        aci.VARSAYILAN_AYAR["lazer_ofset_x"] = 0.0 (canli okunur, ayar panelinden)."""
+        return float(algi.AYAR.get("lazer_ofset_x", 0.0))
+
+    @property
+    def ofset_y(self):
+        return float(algi.AYAR.get("lazer_ofset_y", 0.0))
+
     def adim(self, hedef_xy, kare_boyut, simdi=None):
         """Bir kontrol adimi.
 
@@ -127,8 +149,11 @@ class PDNisanci:
 
         simdi = time.time() if simdi is None else simdi
         hx, hy = hedef_xy
-        px = hx - w * 0.5              # +x = hedef sagda
-        py = hy - h * 0.5              # +y = hedef asagida
+        # Denge noktasi kare MERKEZI degil, kalibre edilmis lazer referansidir:
+        # kamera ekseni hedefte iken lazer ofset_x/y kadar kaymis vuruyorsa, gimbal
+        # o kaymayi ONCEDEN telafi edecek sekilde durmali (bkz. algi.py boresight notu).
+        px = hx - w * 0.5 - self.ofset_x * w   # +x = hedef sagda
+        py = hy - h * 0.5 - self.ofset_y * h   # +y = hedef asagida
 
         if abs(px) <= w * self.olu_bolge and abs(py) <= h * self.olu_bolge:
             self._son_hata = None      # yerlestik; sonraki kacista turev sifirdan
@@ -136,23 +161,27 @@ class PDNisanci:
             return None, None
 
         dpp = derece_per_piksel(w)
-        ex = px * dpp                  # yaw hatasi (derece)
+        ex = px * dpp                  # yaw hatasi (derece): +x = hedef sagda -> +ex
         ey = py * dpp                  # pitch hatasi (derece)
 
-        # Goruntu aynalanmissa pikseldeki "saga kacis" gercekte soladir; telafi
-        # edilmezse gimbal hedeften KACAR (pozitif geri besleme).
-        if int(algi.AYAR.get("ayna", 0)):
-            ex = -ex
+        # D-pad "Sag" tusu pan'i +1 yonunde hareket ettirir (donanimda dogrulandi,
+        # YON_TABLO["right"]=+1.0) -> hedef sagdayken +ex, negatif ETME. Eskiden burada
+        # "goruntu aynalanmissa ex=-ex" koşulu vardi (yazilimsal flip acikken gerekliydi);
+        # flip ozelligi kaldirildigindan (cv2.flip kalici KAPALI, arayuz_qt.py) hicbir
+        # negatiflemeye gerek yok. Koşulsuz negatifleme BURADA BIR SURE durdu ve yaw
+        # yonunu tersine cevirip gimbali hedeften kacirdi — CLAUDE.md'ye not dusuldu.
 
         # protokol.py'de +dy = YUKARI; hedef altta ise (py>0) gimbal asagi donmeli.
         ey = -ey
 
-        # Hata degisim hizi (yumusatilmis) -> ileri gorus icin.
+        # Hata degisim hizi (yumusatilmis) -> ileri gorus icin. Alfa dt'den turer
+        # (sabit-orneklem DEGIL) — bkz. TUREV_ZAMAN_SABITI yorumu: FPS degisince
+        # (dt kuculunce/buyuyunce) filtrenin GERCEK-ZAMANDAKI gucu SABIT kalir.
         if self._son_hata is not None and self._son_t is not None:
             dt = simdi - self._son_t
             if dt > 1e-3:
                 ham = ((ex - self._son_hata[0]) / dt, (ey - self._son_hata[1]) / dt)
-                y = TUREV_YUMUSATMA
+                y = 1.0 - math.exp(-dt / TUREV_ZAMAN_SABITI)
                 self._hiz = (self._hiz[0] * (1 - y) + ham[0] * y,
                              self._hiz[1] * (1 - y) + ham[1] * y)
         self._son_hata = (ex, ey)
@@ -199,14 +228,14 @@ if __name__ == "__main__":
     dy2, dp2 = n.adim((280, 120), kare, simdi=1.0)
     assert dy2 < 0 and dp2 > 0, (dy2, dp2)
 
-    # 4. AYNA acikken yaw isareti TERS cevrilmeli (yoksa gimbal hedeften kacar).
+    # 4. Boresight ofseti (kamera-lazer kalibrasyonu): merkezdeki hedef, ofset sifirsa
+    #    komut YOK ama pozitif X ofsetiyle "hedef solda kalmis" gibi davranmali (denge
+    #    noktasi saga kaymis) -> yaw NEGATIF (sola don, lazeri hedefe getirmek icin).
+    algi.ayar_guncelle(lazer_ofset_x=0.05)
     n.sifirla()
-    dy_normal, _ = n.adim((1000, 360), kare, simdi=1.0)
-    algi.ayar_guncelle(ayna=1)
-    n.sifirla()
-    dy_ayna, _ = n.adim((1000, 360), kare, simdi=1.0)
-    assert dy_normal > 0 and dy_ayna < 0, (dy_normal, dy_ayna)
-    algi.ayar_guncelle(ayna=0)
+    dy_ofset, _ = n.adim((640, 360), kare, simdi=1.0)
+    assert dy_ofset is not None and dy_ofset < 0, dy_ofset
+    algi.ayar_guncelle(lazer_ofset_x=0.0)
 
     # 5. Maks adim kirpmasi: kadrajin en kenarindaki hedef bile siniri asmamali.
     n.sifirla()
@@ -249,5 +278,5 @@ if __name__ == "__main__":
     kararli_hal = [abs(v) for v in iz[25:]]
     assert max(kararli_hal) < 60, f"hareketli hedef takibi zayif: {max(kararli_hal):.0f} px"
 
-    print("nisan testleri OK — balon nisani, isaretler, ayna telafisi, kirpma, "
+    print("nisan testleri OK — balon nisani, isaretler, boresight ofseti, kirpma, "
           "yakinsama, salinimsizlik, hareketli hedef")

@@ -9,6 +9,7 @@ Calistir:  python app/arayuz_qt.py   (veya kokteki Baslat.bat)
 """
 import glob
 import json
+import math
 import os
 import sys
 import time
@@ -25,8 +26,8 @@ from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, 
 from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
-    QHBoxLayout, QVBoxLayout, QGridLayout, QFrame, QTableWidget,
-    QTableWidgetItem, QHeaderView, QSizePolicy, QButtonGroup,
+    QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
+    QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
     QSlider, QCheckBox, QSpinBox, QScrollArea,
 )
@@ -126,8 +127,10 @@ _ETIKET = ("color:%s; background:rgba(%s,%s); border-radius:9px; padding:2px 10p
 ETIKET_ONERI = _ETIKET % (GRN, "21,135,80", "0.14", "21,135,80", "0.35")
 ETIKET_DEGISIK = _ETIKET % (BLUE, "18,88,168", "0.10", "18,88,168", "0.18")
 
-# D-pad tuslari: 68x54 sabit kutu; yalnizca renk/kalinlik/yazi boyu degisir.
-# Dort varyant (kenar/merkez x normal/basili) ayni iki sablondan uretilir.
+# D-pad tuslari: sabit kutu. Ustteki baslik/aci gostergesi kartlari kucultulerek
+# acilan yer buraya verildi — tuslar 52px'ten 64px'e buyudu, aralari da genisledi
+# (bkz. _dpad_izgarasi spacing). Dort varyant (kenar/merkez x normal/basili) ayni
+# iki sablondan uretilir.
 _DPAD_GOVDE = ("QPushButton {{ "
                "  background: {arka}; "
                "  border: {kalinlik} solid {kenar}; "
@@ -136,7 +139,7 @@ _DPAD_GOVDE = ("QPushButton {{ "
                "  font-size: {punto}; "
                "  font-weight: 700; "
                "  min-width: 86px; max-width: 86px; "
-               "  min-height: 68px; max-height: 68px; "
+               "  min-height: 64px; max-height: 64px; "
                "}} ")
 DPAD_STIL = _DPAD_GOVDE + ("QPushButton:hover {{ "
                            "  background: {ust_arka}; "
@@ -241,12 +244,6 @@ AYAR_TANIM_TESPIT = [
      "Bir karede en fazla kaç kutu işlensin.\n(Ultralytics varsayılanı 300)\n\n"
      "Düşürmek çok kalabalık sahnede işi hafifletir; yarışma senaryosunda (en fazla 3-4 hedef) "
      "varsayılan zaten fazlasıyla yeterli."),
-    ("ayna", "Aynala (yatay çevir)", "anahtar", 0, 1,
-     "Görüntüyü yatay çevirir (selfie görünümü).\n\n"
-     "VARSAYILAN KAPALI — ham YOLO çıktısıyla birebir aynı görüntü.\n\n"
-     "⚠ Webcam ile demo yaparken hareket yönü ters geldiği için açmak isteyebilirsiniz. "
-     "Açıldığında nişan matematiğindeki yaw işareti OTOMATİK düzeltilir (yoksa gimbal hedeften "
-     "kaçardı). Yarışma kamerasında KAPALI kalmalı."),
     ("kamera_fps", "Kamera FPS", "sayi", 5, 120,
      "Kameradan alınması istenen kare hızı (FPS).\n\n"
      "NOT: Değişikliğin etkili olması için yukarıdan kamerayı tekrar seçmelisiniz."),
@@ -276,6 +273,17 @@ AYAR_TANIM_NISAN = [
      "titrer ve balonu patlatacak süre boyunca noktada kalamaz.\n\n"
      "↑ ARTTIRIRSAN: çok sakin durur — ama nişan kabaca ortalanır.\n"
      "↓ AZALTIRSAN: daha hassas ortalar — ama titreme başlar."),
+    ("lazer_ofset_x", "Lazer ofseti — Yatay", "yuzde", -15, 15,
+     "Kamera ile lazer farklı noktalara monteli; ekran merkezi lazerin vurduğu "
+     "nokta değildir (boresight/paralaks).\n\n"
+     "KALİBRASYON: Manuel modda lazeri bir hedefe TAM İSABET ettirin (nokta hedefin "
+     "üzerinde dururken durun). Ekrandaki yeşil nişangah hedeften SAĞDA duruyorsa "
+     "bu değeri AZALTIN, SOLDA duruyorsa ARTIRIN — nişangah hedefe oturana kadar.\n\n"
+     "Otonom takip artık bu kalibre noktaya kilitlenir, ekran merkezine değil."),
+    ("lazer_ofset_y", "Lazer ofseti — Dikey", "yuzde", -15, 15,
+     "Yatay ofsetle aynı kalibrasyon, dikey eksende.\n\n"
+     "Nişangah hedefin ALTINDA duruyorsa bu değeri AZALTIN, ÜSTÜNDE duruyorsa "
+     "ARTIRIN — nişangah hedefe oturana kadar."),
 ]
 
 
@@ -374,6 +382,30 @@ class InferenceThread(QThread):
 # =====================================================================
 #  Video Goruntu is parcacigi (Thread 3 / GUI feed)
 # =====================================================================
+# HEDEFLER karti daima bu sirayla listelenir (takim karari) — kac hedef, hangi
+# sirayla tespit edilirse edilsin degismez. Bilinmeyen/onaysiz ("belirsiz") sinif
+# listenin sonuna duser.
+HEDEF_ONCELIK = {"fuze": 0, "helikopter": 1, "f16": 2, "drone": 3}
+
+# Otonom nisan komutlari arasi ASGARI sure (saniye) — bkz. MainWindow._nisan_geldi
+# "MESGUL KAPISI". Gonderilen her komuttan sonra, o komutun tahmini fiziksel
+# tamamlanma suresinin bir kismi (NISAN_MESGUL_ORANI) kadar yeni komut kabul
+# edilmez — bu sabit yalnizca cok KUCUK komutlar icin bir TABAN. Olmasaydi: motor
+# bir komutu yerine getirirken kamera goruntusu henuz guncellenmez, o sure icindeki
+# her kare AYNI bayat piksel hatasindan taze bir komut daha uretir — her biri hiz
+# sinirinin icinde kalsa bile TOPLAMLARI gercek ihtiyacin katlarina cikar.
+#
+# 13.08 gece: ilk surum TAM tamamlanma suresini bekliyordu (`2*sqrt(mesafe/ivme)`,
+# taban 0.10 sn) — sonuc: sicramaz oldu AMA "cok yavas, ortalamakta gec kaliyor"
+# sikayeti geldi. NISAN_MESGUL_ORANI bu tam sureyi KISALTIR: hareketin TAMAMEN
+# durmasini degil, GORULEBILIR olcude ilerlemesini bekler — daha az temkinli, daha
+# akici. Salinim geri gelirse ilk yukseltilecek yer burasi (1.0'a dogru); "hala
+# yavas" ise dusurulur. Taban da 0.10 -> 0.04 sn'ye indirildi (inference ~15 FPS'te
+# zaten ~0.067 sn'de bir kare geliyor, bu tabanin pratikte etkisi kalmadi).
+NISAN_MESGUL_ORANI = 0.4
+NISAN_MIN_ARALIK = 0.04
+
+
 class VideoThread(QThread):
     kare_hazir = Signal(QImage, dict)
     durum = Signal(str, bool)               # mesaj, hata_mi
@@ -467,8 +499,8 @@ class VideoThread(QThread):
                 if dt_k > 0:
                     kamera_fps = 0.9 * kamera_fps + 0.1 * (1.0 / dt_k)
 
-                if int(algi.AYAR.get("ayna", 0)):
-                    frame = cv2.flip(frame, 1)
+                # Fiziksel kameranin ayna efektini duzeltmek icin (sağ-sol tersligi)
+                # frame = cv2.flip(frame, 1)  # KULLANICI ISTEGI UZERINE IPTAL EDILDI
 
                 with self.veri.kilit:
                     self.veri.kare = frame
@@ -505,7 +537,12 @@ class VideoThread(QThread):
                 durum = "Dost — geç"
             else:
                 durum = "Bekliyor"
-            hedefler.append({"ad": d["ad"], "tip": d["tip"], "durum": durum, "aktif": aktif})
+            hedefler.append({"ad": d["ad"], "tip": d["tip"], "durum": durum, "aktif": aktif,
+                              "id": d.get("id"), "cls": d.get("cls")})
+        # Liste daima Fuze->Helikopter->F16->IHA sirasinda (HEDEF_ONCELIK); tespit sirasi
+        # veya ekrandaki kutu sirasi bunu etkilemez. "aktif" (kilit) her ogeye kendi
+        # sozlugunde bagli oldugu icin sondan sonraya tasinsa bile kilit bilgisi kaybolmaz.
+        hedefler.sort(key=lambda hh: HEDEF_ONCELIK.get(hh["cls"], len(HEDEF_ONCELIK)))
         active = None
         if active_idx >= 0 and not self.estop:
             try:
@@ -665,6 +702,8 @@ class MainWindow(QMainWindow):
         # Motor hiz duzeyi (ESP32'deki iki step motorun tavan hizi). Her iki modda da
         # gecerli oldugu icin manuel panelde DEGIL, sag kolonun altinda durur.
         self.hiz_seviye = P.HIZ_VARSAYILAN
+        self._nisan_son_t = None   # otonom PD komutlari icin hiz-siniri zamanlayicisi
+        self._nisan_mesgul_ta = 0.0   # bu zamana kadar yeni otonom komutu KABUL EDILMEZ
         # Lazer gucu (%). Her acilista GUVENLI VARSAYILANA doner — kalici olarak
         # kaydedilmez: "gecen sefer %100'de birakmisiz" diye baslamak istemeyiz.
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
@@ -1251,42 +1290,106 @@ class MainWindow(QMainWindow):
         # duruyordu (eng_name/eng_sub: "Hedef kilitli · F16 · %92 guven"). Bosalan yer
         # manuel yon kontrollerine verildi; ATES butonu da oraya tasindi.
 
-        # --- tespit tablosu ---
-        self.tk = QFrame()
-        self.tk.setObjectName("panelk")
-        tv = QVBoxLayout(self.tk)
-        tv.setContentsMargins(19, 13, 19, 13)
-        tv.setSpacing(8)
-        tt = QLabel("TESPİT EDİLEN HEDEFLER")
-        tt.setObjectName("ph")
-        tv.addWidget(tt)
-        self.tablo = QTableWidget(0, 3)
-        self.tablo.setHorizontalHeaderLabels(["SINIF", "TİP", "DURUM"])
-        self.tablo.verticalHeader().setVisible(False)
-        self.tablo.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.tablo.setSelectionMode(QTableWidget.NoSelection)
-        self.tablo.setFocusPolicy(Qt.NoFocus)
-        self.tablo.setShowGrid(False)
-        hh = self.tablo.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.Stretch)
-        for c in (1, 2):
-            hh.setSectionResizeMode(c, QHeaderView.ResizeToContents)
-        hh.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        tv.addWidget(self.tablo)
-
-        # Sag kolon stacked widget (Otonom = Tablo, Manuel = Yon kontrolleri)
-        self.sag_stack = QStackedWidget()
-        self.sag_stack.addWidget(self.tk)                       # 0: Otonom
+        # Manuel panel yalniz Manuel modda gorunur (Otonom'da gizlenir, yer kaplamaz).
+        # Eskiden bu alan bir QStackedWidget'ti (Otonom = tespit tablosu, Manuel =
+        # yon kontrolleri); tespit tablosu HEDEFLER kartina tasinip stack disina
+        # cikinca (asagida) ikinci sayfaya gerek kalmadi.
         self.manuel_panel = self._manuel_kontrol_panel()
-        self.sag_stack.addWidget(self.manuel_panel)             # 1: Manuel
-        v.addWidget(self.sag_stack, 1)
+        v.addWidget(self.manuel_panel, 1)
 
-        # Motor hizi ve lazer stack'in DISINDA: ikisi de otonom takipte de gecerli
-        # oldugu icin her iki modda gorunur ve degistirilebilir olmali.
+        # HEDEFLER / Motor Hizi / Lazer: ucu de hem Manuel hem Otonom modda gecerli
+        # oldugu icin sabit alanda durur, moda gore gizlenmez.
+        v.addWidget(self._hedefler_karti(), 0)
         v.addWidget(self._hiz_karti(), 0)
         v.addWidget(self._lazer_karti(), 0)
 
         return kol
+
+    def _hedefler_karti(self):
+        """HEDEFLER — kamerada tanimlanan ve etiketlenen hedeflerin numarali listesi.
+
+        Motor Hizi/Lazer gibi stack DISINDA: hem Manuel hem Otonom modda gorunur.
+        Bir isme tiklamak o hedefi ELLE kilitler (algi.hedef_sec) — otomatik kilitle
+        AYNI mekanizmayi (_kilitli_track_id) kullanir, tetikleyici operatordur.
+        Kilitli hedefe tekrar tiklamak kilidi birakir, otomatik secime doner."""
+        kart = QFrame()
+        kart.setObjectName("panelk")
+        kv = QVBoxLayout(kart)
+        kv.setContentsMargins(19, 11, 19, 13)
+        kv.setSpacing(6)
+
+        t = QLabel("HEDEFLER")
+        t.setObjectName("ph")
+        kv.addWidget(t)
+
+        # Yatay, TEK SATIRLIK liste: yeni hedef tanindikca kart DIKEY buyumesin
+        # (alttaki Motor Hizi/Lazer kartlarini asagi itmesin). Isimler yan yana
+        # dizilir; sigmayan kisim yatay kaydirmayla gorulur (dikey kaydirma YOK).
+        self.hedef_scroll = QScrollArea()
+        self.hedef_scroll.setWidgetResizable(True)
+        self.hedef_scroll.setFrameShape(QFrame.NoFrame)
+        self.hedef_scroll.setFixedHeight(34)
+        self.hedef_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.hedef_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.hedef_scroll.setStyleSheet("QScrollArea { background:transparent; border:none; }")
+
+        hedef_ic = QWidget()
+        hedef_ic.setStyleSheet("background:transparent;")
+        self.hedef_liste_lay = QHBoxLayout(hedef_ic)
+        self.hedef_liste_lay.setContentsMargins(0, 0, 0, 0)
+        self.hedef_liste_lay.setSpacing(4)
+        self.hedef_scroll.setWidget(hedef_ic)
+        kv.addWidget(self.hedef_scroll)
+
+        self.hedef_bos_lbl = QLabel("Hedef bekleniyor…")
+        self.hedef_bos_lbl.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+        kv.addWidget(self.hedef_bos_lbl)
+
+        return kart
+
+    def _hedef_liste_guncelle(self, hedefler, a3):
+        """HEDEFLER kartini gunceller: her hedef icin '<no>- <isim>' YAN YANA (yatay).
+
+        Kart dikey buyumez — cok hedef varsa yatay kaydirma devreye girer.
+        Renk kilit/taraf durumunu gosterir (kilitli = RED/GRN, A3'te dost = BLUE);
+        bu, video uzerindeki kutu etiketinin SABIT yesil renginden ayri ve bagimsizdir."""
+        lay = self.hedef_liste_lay
+        while lay.count():
+            w = lay.takeAt(0).widget()
+            if w is not None:
+                w.deleteLater()
+        self.hedef_bos_lbl.setVisible(not hedefler)
+        for i, hh in enumerate(hedefler):
+            tid = hh.get("id")
+            kilitli = hh["aktif"]
+            if kilitli:
+                renk = RED if a3 else GRN
+            elif a3 and hh["tip"] == "Dost":
+                renk = BLUE
+            else:
+                renk = TXT2
+            btn = QPushButton(f"{i + 1}- {hh['ad']}")
+            btn.setObjectName("hedefsatir")
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setEnabled(tid is not None)   # ID'siz kutu (nadir) elle kilitlenemez
+            btn.setStyleSheet(
+                "QPushButton#hedefsatir { text-align:left; border:none; background:transparent; "
+                f"padding:3px 4px; font-size:13px; font-weight:{700 if kilitli else 600}; color:{renk}; }} "
+                "QPushButton#hedefsatir:hover:enabled { background:rgba(18,88,168,0.10); border-radius:5px; }")
+            btn.clicked.connect(lambda checked=False, t=tid: self._hedef_secildi(t))
+            lay.addWidget(btn)
+        lay.addStretch(1)   # butonlar SOLA yaslanir, sagda bosluk kalir tasmaz
+
+    def _hedef_secildi(self, track_id):
+        """HEDEFLER listesinden ELLE hedef secimi.
+
+        Tek kapi `algi.hedef_sec` — otomatik kilitle AYNI mekanizmadir (_kilitli_track_id),
+        yalniz tetikleyici operatordur. Ayni (kilitli) hedefe tekrar tiklamak kilidi
+        birakir, bir sonraki karede otomatik secime doner."""
+        if track_id is None:
+            return
+        yeni = None if algi.kilitli_hedef() == track_id else track_id
+        algi.hedef_sec(yeni)
 
     def _hiz_karti(self):
         """MOTOR HIZI — ESP32'deki iki step motorun tavan hizi + ivmesi (3 kademe).
@@ -1414,18 +1517,22 @@ class MainWindow(QMainWindow):
         mk = QFrame()
         mk.setObjectName("panelk")
         mv = QVBoxLayout(mk)
-        mv.setContentsMargins(16, 12, 16, 12)
-        mv.setSpacing(8)
+        mv.setContentsMargins(16, 10, 16, 10)
+        mv.setSpacing(6)
 
-        # Baslik + "Aci Ayarlari" butonu
+        # Baslik + "Aci Ayarlari" butonu — yon tuslarina yer acmak icin KUCULTULDU
+        # (paylasilan #ph/#ayaralt stiline DOKUNULMADI, yalnizca bu iki widget'a ozel
+        # ekstra kucultme uygulanir; diger kartlardaki basliklar/butonlar etkilenmez).
         brow = QHBoxLayout()
         mt = QLabel("MANUEL NİŞAN & YÖN KONTROLÜ")
         mt.setObjectName("ph")
+        mt.setStyleSheet("font-size:10px; padding-bottom:4px;")
         brow.addWidget(mt, 1)
         self.aci_ayar_btn = QPushButton("⚙ Açı Ayarları")
         self.aci_ayar_btn.setObjectName("ayaralt")
         self.aci_ayar_btn.setCursor(Qt.PointingHandCursor)
-        self.aci_ayar_btn.setFixedHeight(24)
+        self.aci_ayar_btn.setFixedHeight(20)
+        self.aci_ayar_btn.setStyleSheet("padding:2px 12px; font-size:11px;")
         self.aci_ayar_btn.clicked.connect(self._aci_ayarlar_toggle)
         brow.addWidget(self.aci_ayar_btn, 0)
         mv.addLayout(brow)
@@ -1479,7 +1586,7 @@ class MainWindow(QMainWindow):
         sayfa = QWidget()
         dv = QVBoxLayout(sayfa)
         dv.setContentsMargins(0, 0, 0, 0)
-        dv.setSpacing(8)
+        dv.setSpacing(6)
         dv.addWidget(self._aci_gostergesi())
 
         self.bolge_status = QLabel("● BÖLGE GÜVENLİ")
@@ -1503,7 +1610,7 @@ class MainWindow(QMainWindow):
         yolu kapanmamalidir (E-Stop ve otomatik kesme yollari da yerinde durur)."""
         self.fire_btn = QPushButton(ATES_METIN_KAPALI)
         self.fire_btn.setObjectName("fire")
-        self.fire_btn.setFixedHeight(52)
+        self.fire_btn.setFixedHeight(44)
         self.fire_btn.setCheckable(True)
         self.fire_btn.setCursor(Qt.PointingHandCursor)
         self.fire_btn.setToolTip("[L] — ateşi aç / kes")
@@ -1511,21 +1618,26 @@ class MainWindow(QMainWindow):
         return self.fire_btn
 
     def _aci_gostergesi(self):
-        """Canli azimut/yukselis sayi gostergesi."""
+        """Canli azimut/yukselis sayi gostergesi.
+
+        Yon tuslarina yer acmak icin kucultuldu — baslik/deger fontlari ve kutu
+        dolgusu yalnizca burada (inline) kuculur, paylasilan #engsub/#turn stiline
+        dokunulmaz (diger kartlardaki ayni objectName'ler etkilenmez)."""
         kutu = QFrame()
         kutu.setObjectName("angtgl")
         gh = QHBoxLayout(kutu)
-        gh.setContentsMargins(12, 6, 12, 6)
-        gh.setSpacing(12)
+        gh.setContentsMargins(10, 3, 10, 3)
+        gh.setSpacing(10)
 
         def sutun(baslik, renk):
             v = QVBoxLayout()
-            v.setSpacing(1)
+            v.setSpacing(0)
             bl = QLabel(baslik)
             bl.setObjectName("engsub")
+            bl.setStyleSheet("font-size:10px;")
             deger = QLabel("0.0°")
             deger.setObjectName("turn")
-            deger.setStyleSheet(f"font-size:18px; color:{renk}; font-weight:700;")
+            deger.setStyleSheet(f"font-size:14px; color:{renk}; font-weight:700;")
             v.addWidget(bl)
             v.addWidget(deger)
             return v, bl, deger
@@ -1552,16 +1664,16 @@ class MainWindow(QMainWindow):
 
         dpad = QWidget()
         gl = QGridLayout(dpad)
-        gl.setContentsMargins(0, 2, 0, 2)
-        gl.setSpacing(6)
+        gl.setContentsMargins(0, 4, 0, 4)
+        gl.setSpacing(10)
 
         # (isim, metin, satir, kolon, ipucu, yon, merkez_mi)
         tuslar = [
-            ("btn_up", "▲\nW", 0, 1, "[W] veya [▲] — YUKARI (TİLT +)", "up", False),
-            ("btn_left", "◀\nA", 1, 0, "[A] veya [◄] — SOL (PAN -)", "left", False),
-            ("btn_center", "✛\nMERKEZ", 1, 1, "[R] veya [Space] — SIFIRLA / MERKEZ (0°, 0°)", "home", True),
-            ("btn_right", "►\nD", 1, 2, "[D] veya [►] — SAĞ (PAN +)", "right", False),
-            ("btn_down", "▼\nS", 2, 1, "[S] veya [▼] — AŞAĞI (TİLT -)", "down", False),
+            ("btn_up", "▲", 0, 1, "[W] veya [▲] — YUKARI (TİLT +)", "up", False),
+            ("btn_left", "◀", 1, 0, "[A] veya [◄] — SOL (PAN -)", "left", False),
+            ("btn_center", "MERKEZ", 1, 1, "[R] veya [Space] — SIFIRLA / MERKEZ (0°, 0°)", "home", True),
+            ("btn_right", "▶", 1, 2, "[D] veya [►] — SAĞ (PAN +)", "right", False),
+            ("btn_down", "▼", 2, 1, "[S] veya [▼] — AŞAĞI (TİLT -)", "down", False),
         ]
         for isim, metin, satir, kolon, ipucu, yon, merkez in tuslar:
             b = QPushButton(metin)
@@ -1584,7 +1696,7 @@ class MainWindow(QMainWindow):
             b = QPushButton(etiket)
             b.setCheckable(True)
             b.setChecked(val == secili)
-            b.setFixedHeight(30)
+            b.setFixedHeight(26)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _, v=val: geri_cagri(v))
             self._step_btn_stil_guncelle(b, val == secili)
@@ -1995,10 +2107,46 @@ class MainWindow(QMainWindow):
 
         Manuel hareketle AYNI kapidan (_aci_hareket) gecer: E-Stop, yasak alan ve
         tilt limiti otonom modda da aynen uygulanir — guvenlik icin tek yol olmali.
-        """
+
+        PD'nin urettigi komut, MOTORUN GERCEKTEN GIDEBILECEGI hizla (secili hiz duzeyi,
+        P.HIZ_TABLO) kirpilir — basili-tutma D-pad'de (_tekrar_tik) kullanilan AYNI
+        matematik: adim = tavan_hiz x gecen_sure. ESP32 konum geri bildirimi YOLLAMADIGI
+        icin (CLAUDE.md §5.1) pan_ham/tilt_aci gimbalin fiziksel pozisyonu hakkinda
+        YAZILIMIN inancidir, olcum degil.
+
+        MESGUL KAPISI (13.08 — "ortaladigi an durmuyor, karsi tarafa geciyor, sistem
+        hic yerlesmeden salinip duruyor"): yalniz hiz kirpmasi yetmiyordu. Motor bir
+        komutu fiziksel olarak yerine getirirken (ivmelenme profiliyle onlarca-yuzlerce
+        ms surer, ozellikle kisa duzeltmelerde tepe hiza HIC ulasilmaz — H_NORMAL'de
+        40°/sn'e cikmak 0.4 sn ister) KAMERA GORUNTUSU henuz guncellenmez; o sure icinde
+        gelen her yeni kare AYNI (bayat) piksel hatasini gorur ve PD AYNI hatadan taze
+        bir duzeltme daha uretir — her biri tek basina hiz sinirinin icinde kalsa bile
+        TOPLAMLARI gercek ihtiyacin KAT KAT ustune cikar (motor nihayet yetistiginde
+        hedef zaten karsi tarafa gecmis olur, sonra ayni sey tersten tekrarlanir → hic
+        yerlesmeyen salinim). Cozum: gonderilen komutun TAHMINI fiziksel tamamlanma
+        suresinin bir KISMI kadar (ucgen ivme profili: `2 x sqrt(mesafe/ivme) x
+        NISAN_MESGUL_ORANI`, asgari `NISAN_MIN_ARALIK`) yeni komut KABUL EDILMEZ —
+        tam tamamlanmasini DEGIL, GORULEBILIR ilerlemeyi bekler (bkz. NISAN_MESGUL_ORANI
+        yorumu: tam bekleme akiciligi asiri dusurdugu icin kisaltildi)."""
         if self.mod != "Otonom":
             return
-        self._aci_hareket(d_yaw, d_pitch)
+        simdi = time.time()
+        if simdi < self._nisan_mesgul_ta:
+            return   # onceki komutun fiziksel karsiligi henuz gorulmedi, bekle
+        tavan_hiz, tavan_ivme = P.HIZ_TABLO[self.hiz_seviye]
+        if self._nisan_son_t is not None:
+            dt = min(0.2, simdi - self._nisan_son_t)   # uzun kopukluk sonrasi sicrama olmasin
+            tavan = tavan_hiz * dt
+            d_yaw = max(-tavan, min(tavan, d_yaw))
+            d_pitch = max(-tavan, min(tavan, d_pitch))
+        self._nisan_son_t = simdi
+        if self._aci_hareket(d_yaw, d_pitch):
+            mesafe = max(abs(d_yaw), abs(d_pitch))
+            # Ucgen ivme profili (tepe hiza hic ulasilmadigi varsayimi — kisa
+            # duzeltmelerde gecerli): TAM tamamlanma t = 2*sqrt(mesafe/ivme); yalniz
+            # NISAN_MESGUL_ORANI kadarini bekleriz (bkz. sabitin yorumu — akicilik icin).
+            sure = 2.0 * math.sqrt(mesafe / max(1.0, tavan_ivme)) * NISAN_MESGUL_ORANI
+            self._nisan_mesgul_ta = simdi + max(NISAN_MIN_ARALIK, sure)
 
     def _aci_reset(self):
         self.pan_aci = 0.0
@@ -2267,11 +2415,10 @@ class MainWindow(QMainWindow):
         if isinstance(getattr(self, "thread", None), VideoThread):
             self.inference_thread.otonom = (ad == "Otonom")
             self.inference_thread.nisanci.sifirla()
-        if hasattr(self, "sag_stack"):
-            if self.mod == "Manuel":
-                self.sag_stack.setCurrentWidget(self.manuel_panel)
-            else:
-                self.sag_stack.setCurrentWidget(self.tk)
+        if hasattr(self, "manuel_panel"):
+            # Manuel panel stack DEGIL: yalniz Manuel modda gorunur, Otonom'da
+            # gizlenir (yer kaplamaz) — HEDEFLER/Motor Hizi/Lazer her iki modda sabit.
+            self.manuel_panel.setVisible(self.mod == "Manuel")
         self._asama_uygula()
 
     def _tus_yonu(self, event):
@@ -2321,7 +2468,7 @@ class MainWindow(QMainWindow):
         self._asama_uygula()
 
     def _asama_uygula(self):
-        """Secili asamaya gore stack + pill + kural + algi davranisi + tablo gunceller."""
+        """Secili asamaya gore stack + pill + kural + algi davranisi gunceller."""
         self.stack.setCurrentIndex(self.ASAMA_IDX[self.asama])
         # Algi thread'ine aktif asamayi bildir (renk yalniz A3'te calisir). Thread heniz
         # olusmamis olabilir (ilk cagri __init__ sirasinda). DIKKAT: hasattr(self,"thread")
@@ -2329,12 +2476,6 @@ class MainWindow(QMainWindow):
         if isinstance(getattr(self, "thread", None), VideoThread):
             self.thread.asama = self.ASAMA_IDX[self.asama]
             self.inference_thread.asama = self.ASAMA_IDX[self.asama]
-        # Tespit tablosu basligi: A3'te TARAF (dost/dusman) kolonu var; A1-A2'de yok.
-        if hasattr(self, "tablo"):
-            if self.asama == "Aşama 3":
-                self.tablo.setHorizontalHeaderLabels(["SINIF", "TARAF", "DURUM"])
-            else:
-                self.tablo.setHorizontalHeaderLabels(["SINIF", "DURUM", ""])
         if self.asama:
             self.asama_pill.setText(self.asama)
             self.asama_pill.setVisible(True)
@@ -2686,27 +2827,19 @@ class MainWindow(QMainWindow):
             active_idx = data.get("active_idx", -1)
             estop = data.get("estop", False)
             for i, d in enumerate(data.get("dets", [])):
-                tip = d["tip"]
-                if tip == "Belirsiz":
-                    color = QColor(18, 88, 168)
-                else:
-                    c = d["conf"]
-                    if c >= 75:
-                        color = QColor(40, 200, 40)
-                    elif c >= 50:
-                        color = QColor(60, 200, 235)
-                    else:
-                        color = QColor(191, 32, 32)
-                        
+                # Etiket rengi SABIT yesil (kullanici karari): guven yuzdesine gore
+                # artik degismiyor. Eskiden %75/%50 esiklerine gore yesil/camgobegi/
+                # kirmiziya kayardi; bu ayrim kaldirildi.
+                color = QColor(40, 200, 40)
                 pen.setColor(color)
                 painter.setPen(pen)
-                
+
                 x1, y1, x2, y2 = d["box"]
                 rx1, ry1, rx2, ry2 = x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
-                
+
                 painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
-                
-                tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(tip)
+
+                tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"])
                 ad_cv = "?" if d["cls"] == "belirsiz" else algi.goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
                 txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
                 
@@ -2728,7 +2861,22 @@ class MainWindow(QMainWindow):
                     painter.drawEllipse(QPointF(cx, cy), 16, 16)
                     painter.drawLine(QPointF(cx - 22, cy), QPointF(cx + 22, cy))
                     painter.drawLine(QPointF(cx, cy - 22), QPointF(cx, cy + 22))
-                    
+
+            # --- Lazer Referans Nisangahi ---
+            # Kare merkezi DEGIL: kamera-lazer boresight/paralaks ofseti kalibre
+            # edilmisse (⚙ panel), nisangah lazerin GERCEKTEN vurdugu noktaya kayar.
+            # Kalibrasyon yapilmadiysa (ofset=0) davranis eskisiyle aynidir.
+            mcx = pix.width() / 2 + algi.AYAR.get("lazer_ofset_x", 0.0) * pix.width()
+            mcy = pix.height() / 2 + algi.AYAR.get("lazer_ofset_y", 0.0) * pix.height()
+            pen.setColor(QColor(255, 0, 0)) # Kirmizi
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawLine(QPointF(mcx - 10, mcy), QPointF(mcx + 10, mcy))
+            painter.drawLine(QPointF(mcx, mcy - 10), QPointF(mcx, mcy + 10))
+            painter.setBrush(QColor(255, 0, 0))
+            painter.drawEllipse(QPointF(mcx, mcy), 2, 2)
+            painter.setBrush(Qt.NoBrush) # Reset brush
+
             painter.end()
             
             self.video.setPixmap(pix)
@@ -2760,30 +2908,8 @@ class MainWindow(QMainWindow):
             self.eng_name.setText("Hedef bekleniyor")
             self.eng_sub.setText(data["mesaj"] if estop else "—")
 
-        # tablo (A3: SINIF/TARAF/DURUM · A1-A2: SINIF/DURUM/-)
-        hedefler = data["hedefler"]
-        self.tablo.setRowCount(len(hedefler))
-        lock_bg = QColor(191, 32, 32, 18) if a3 else QColor(0, 170, 255, 22)
-        for r, hh in enumerate(hedefler):
-            tip = hh["tip"]
-            kilitli = hh["aktif"]
-            ad_it = QTableWidgetItem(hh["ad"])
-            ad_it.setForeground(QColor(TXT if kilitli else TXT2))
-            dur_it = QTableWidgetItem(hh["durum"])
-            dur_it.setForeground(QColor((RED if a3 else GRN) if kilitli else TXT3))
-            if kilitli:
-                f = dur_it.font(); f.setBold(True); dur_it.setFont(f)
-            if a3:
-                taraf_it = QTableWidgetItem(tip)
-                taraf_it.setForeground(QColor(RED if tip == "Düşman" else (BLUE if tip == "Dost" else TXT3)))
-                cells = (ad_it, taraf_it, dur_it)
-            else:
-                cells = (ad_it, dur_it, QTableWidgetItem(""))
-            for c, it in enumerate(cells):
-                if kilitli:
-                    it.setBackground(lock_bg)
-                self.tablo.setItem(r, c, it)
-        self.tablo.setRowHeight(0, 36)
+        # HEDEFLER karti: numarali, tiklanabilir isim listesi (secim = manuel kilit).
+        self._hedef_liste_guncelle(data["hedefler"], a3)
 
         self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;{data["mesaj"]}')
         self.sb_fps.setText(
@@ -2904,11 +3030,6 @@ class MainWindow(QMainWindow):
         #fire:checked {{ background:{RED}; color:#ffffff; }}
         #fire:disabled {{ background:transparent; border:2px solid {BD2}; color:{BD2}; }}
         #firest {{ font-size:13px; color:{GRN}; font-weight:500; background:transparent; }}
-        QTableWidget {{ background:{PANEL}; border:none; font-size:14px; }}
-        QTableWidget::item {{ padding:8px 10px; border-bottom:1px solid rgba(226,231,238,0.9); }}
-        QHeaderView::section {{ background:{PANEL}; color:{TXT3}; border:none;
-            border-bottom:1px solid {BD}; padding:0 10px 6px; font-size:11px;
-            font-weight:600; letter-spacing:1px; }}
         #engok {{ background:rgba(21,135,80,0.12); border:1px solid rgba(21,135,80,0.35);
             border-radius:7px; }}
         #engname {{ font-size:14px; font-weight:700; color:{GRN}; background:transparent; }}

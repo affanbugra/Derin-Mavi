@@ -16,6 +16,7 @@ env/
 *.pt
 *.onnx
 *.engine
+*_openvino_model/
 !models/best.pt
 # models/ klasörü YAPISI repoda kalır (README.md + .gitkeep hariç tutulur):
 !models/README.md
