@@ -1,18 +1,23 @@
 {
-  "hassasiyet": 0.7,
-  "gosterim": 0.5,
+  "hassasiyet": 0.25,
+  "gosterim": 0.25,
   "kararlilik": 120,
-  "cozunurluk": 640,
+  "cozunurluk": 1280,
   "iou": 0.9,
   "ortusme": 0.6,
   "maks_tespit": 300,
   "fov": 60.3,
-  "kp": 0.51,
+  "kp": 0.25,
   "kd": 0.0,
   "olu_bolge": 0.02,
   "lazer_ofset_x": 0.0,
   "lazer_ofset_y": 0.0,
+  "balon_ofset": 0.4,
+  "olu_bolge_kutu": 0.12,
   "onay_esigi": 0.7,
   "onay_tekrari": 3,
-  "kamera_fps": 60
+  "kamera_fps": 60,
+  "sahi": 1,
+  "sahi_dilim": 640,
+  "sahi_ortusme": 0.2
 }

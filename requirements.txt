@@ -28,3 +28,8 @@ openvino>=2023.3
 #
 # ONNX alternatifi (DERINMAVI_MODEL=onnx):
 # onnxruntime>=1.16.0
+
+# --- SAHI (Slicing Aided Hyper Inference) ---
+# Uzak/kucuk nesne tespiti icin goruntuyu dilimlere bolup her dilimde ayri cikarim yapar.
+# Kurulu degilse uygulama yine acilir, yalnizca SAHI modu kapalildir (ayar panelinde gorunmez).
+sahi>=0.11.0

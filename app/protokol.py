@@ -59,7 +59,7 @@ ESP32 -> laptop: **yapisal durum paketi YOK.** Kart insan-okur metin yazar
 # ---- ESP32 mekanik sabitleri (esp32/derin_mavi_esp32/derin_mavi_esp32.ino ile AYNI olmali) ----
 STEP_TUR = 6400.0                   # surucu cozunurlugu (1/32 mikroadim)
 PAN_DISLI = 83.0 / 15.0             # motor 15 disli -> cark 83 disli = 5.533:1
-TILT_DISLI = 1.0                    # ⚠ GECICI: dikey eksende de rediksiyon VAR ama orani
+TILT_DISLI = 0.5                    # 45->90 derece donus hatasini telafi eden duzeltme carpani
 #   heniz olculmedi (ekip bildirecek). 1:1 kaldigi surece tilt acilari GERCEK aci degildir —
 #   "60°" komutu gercekte 60/oran kadar dondurur. Oran gelince BURASI ve firmware'deki
 #   TILT_GEAR_RATIO birlikte duzeltilecek.

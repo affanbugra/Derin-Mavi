@@ -249,6 +249,29 @@ AYAR_TANIM_TESPIT = [
      "NOT: Değişikliğin etkili olması için yukarıdan kamerayı tekrar seçmelisiniz."),
 ]
 
+# SAHI (Slicing Aided Hyper Inference) — uzak/kucuk nesneleri tespit icin dilimli cikarim.
+AYAR_TANIM_SAHI = [
+    ("sahi", "SAHI Modu", "anahtar", 0, 1,
+     "Uzak / küçük nesneleri algılamak için SAHI (Slicing Aided Hyper Inference) modunu açar.\n\n"
+     "SAHI görüntüyü üst üste binen dilimlere böler ve her dilimde ayrı ayrı çıkarım yapar. "
+     "Normal YOLO'nun kaçırdığı 15 m'deki küçük İHA gibi hedefleri yakalar.\n\n"
+     "⚠ SAHI modunda ByteTrack takibi DEVRE DIŞI kalır — nesneler ID almaz. "
+     "Gimbal kontrolü yokken (tek açıdan tespit) sorun değildir.\n\n"
+     "AÇARSAN: küçük nesne tespiti dramatik artar — ama FPS düşer (her dilim ayrı çıkarım).\n"
+     "KAPATIRSAN: normal YOLO hızında çalışır — ama uzak nesneleri kaçırabilir."),
+    ("sahi_dilim", "Dilim boyutu", "secim_sahi", 0, 2,
+     "Her dilimin kenar uzunluğu (piksel). Model eğitim boyutuyla (640) aynı olması önerilir.\n\n"
+     "KÜÇÜLTÜRSEN (480): daha çok dilim = daha iyi küçük nesne — ama daha yavaş.\n"
+     "BÜYÜTÜRSEN (800): daha az dilim = daha hızlı — ama küçük nesne avantajı azalır."),
+    ("sahi_ortusme", "Dilim örtüşmesi", "yuzde", 5, 50,
+     "Komşu dilimlerin ne kadar üst üste bineceği.\n\n"
+     "Düşük örtüşme (%%10): hızlı ama dilim kenarlarındaki nesneyi kaçırabilir.\n"
+     "Yüksek örtüşme (%%30-40): kenar nesnelerini yakalar — ama dilim sayısı artar, FPS düşer."),
+]
+
+# SAHI dilim boyutu secenekleri ("secim_sahi" tipi icin)
+SAHI_DILIM_SECENEK = [480, 640, 800]
+
 AYAR_TANIM_NISAN = [
     ("fov", "Kamera görüş açısı", "onda", 200, 1200,
      "Kameranın YATAY görüş açısı (derece). Piksel hatasını açıya çevirmek için kullanılır — "
@@ -267,12 +290,23 @@ AYAR_TANIM_NISAN = [
      "Kamera + işlem gecikmesini telafi eder; tipik olarak bir kare süresi kadar (0.06 sn).\n\n"
      "↑ ARTTIRIRSAN: hızlanan hedefte önünü keser — ama gürültüde zıplama yapar.\n"
      "↓ 0 YAPARSAN: saf oransal kontrol, en sakin ama en geç tepki."),
-    ("olu_bolge", "Ölü bölge", "yuzde", 0, 10,
-     "Hedef merkeze bu kadar yakınsa (kare genişliğinin yüzdesi) motora komut GÖNDERİLMEZ.\n\n"
-     "Amaç: lazer balonun üstünde SABİT dursun (dwell). Sıfırlanırsa sistem her karede "
-     "titrer ve balonu patlatacak süre boyunca noktada kalamaz.\n\n"
-     "↑ ARTTIRIRSAN: çok sakin durur — ama nişan kabaca ortalanır.\n"
-     "↓ AZALTIRSAN: daha hassas ortalar — ama titreme başlar."),
+    ("olu_bolge_kutu", "Ölü bölge (isabet payı)", "yuzde", 2, 60,
+     "Lazer, nişan noktasına bu kadar yaklaşınca \"hedefteyim\" sayılır ve motora komut "
+     "GÖNDERİLMEZ. Birim: HEDEF KUTUSUNUN YÜKSEKLİĞİ.\n\n"
+     "Bu değer doğrudan İSABETİ belirler: ateş kapısı buna bakar, yani sistem bu yarıçapın "
+     "içindeyken lazeri açar. Balondan geniş olursa sistem \"hedefteyim\" der ama lazer "
+     "balonun yanına gider.\n\n"
+     "Neden kutuya oranlı: şartname (s.19) balonu \"kesit alanına göre belli bir "
+     "büyüklükte\" tanımlıyor — balon hedefle birlikte küçülür. Kareye oranlı sabit bir "
+     "yüzde 5 m'de doğru olsa bile 15 m'de balondan geniş kalırdı.\n\n"
+     "↑ ARTTIRIRSAN: çabuk yerleşir, sakin durur — ama ıskalama riski artar.\n"
+     "↓ AZALTIRSAN: daha isabetli — ama titreme başlar ve dwell tamamlanamaz.\n\n"
+     "KALİBRASYON: balonun ekrandaki yarıçapı, hedef kutusunun yüksekliğinin kaçta kaçı? "
+     "Bu değeri onun ALTINDA tutun."),
+    ("olu_bolge", "Ölü bölge (kutu yokken)", "yuzde", 0, 10,
+     "Hedef kutusu bilinmediğinde kullanılan yedek ölü bölge (kare genişliğinin yüzdesi).\n\n"
+     "Normal otonom takipte kullanılmaz — orada yukarıdaki kutuya oranlı değer geçerlidir. "
+     "Bu yalnızca bir geri düşüş (fallback) değeridir."),
     ("lazer_ofset_x", "Lazer ofseti — Yatay", "yuzde", -15, 15,
      "Kamera ile lazer farklı noktalara monteli; ekran merkezi lazerin vurduğu "
      "nokta değildir (boresight/paralaks).\n\n"
@@ -284,10 +318,24 @@ AYAR_TANIM_NISAN = [
      "Yatay ofsetle aynı kalibrasyon, dikey eksende.\n\n"
      "Nişangah hedefin ALTINDA duruyorsa bu değeri AZALTIN, ÜSTÜNDE duruyorsa "
      "ARTIRIN — nişangah hedefe oturana kadar."),
+    ("balon_ofset", "Balon nişan ofseti", "yuzde", 0, 150,
+     "Nişan noktası, hedef kutusunun ALT KENARINDAN ne kadar aşağıya konsun. "
+     "Birim: hedef kutusunun YÜKSEKLİĞİ (%100 = bir maket boyu aşağı).\n\n"
+     "İMHA KANITI BALONUN PATLAMASIDIR ve balon maketin ALTINDADIR — lazer gövdeye "
+     "değil balona nişan almalı. Model şu an balonu göremediği için (best.pt 4 sınıf, "
+     "balon yok) balonun yeri maketten geometrik olarak kestirilir.\n\n"
+     "Oransal olması kasıtlı: balon maketin altında sabit bir FİZİKSEL mesafede durur, "
+     "açısal karşılığı mesafeyle değişir. Kutu yüksekliği de aynı oranda küçüldüğü için "
+     "bu ayar 5/10/15 m'de kendiliğinden doğru kalır.\n\n"
+     "KALİBRASYON: Otonom modda hedefe kilitlenmesini bekleyin; nişangah balonun "
+     "ÜSTÜNDE kalıyorsa ARTIRIN, ALTINA kaçıyorsa AZALTIN.\n\n"
+     "Model bir gün balon sınıfını öğrenirse gerçek tespit bu kestirimi otomatik ezer."),
 ]
 
-
-
+# Otonom Ateşleme Ayarları
+OTONOM_DWELL_SURE = 0.5  # sn (Hedef bu kadar süre merkezde kalırsa lazer açılır)
+OTONOM_ATES_SURE = 1.0   # sn (Lazer açıldıktan sonra en az bu kadar süre açık kalır)
+OTONOM_BEKLEME_SURE = 10.0 # sn (Ateş bittikten sonra hedef aramadan beklenecek süre)
 # =====================================================================
 #  Ortak Veri (Kamera ve Algi threadleri arasi)
 # =====================================================================
@@ -303,6 +351,9 @@ class OrtakVeri:
         self.active_idx = -1
         self.fps = 0.0          # YOLO inference FPS
         self.kamera_fps = 0.0   # Kamera okuma FPS
+        self.merkezde = False   # Hedef olu bolgede mi (dwell icin)
+        self.nisan_hata_px = None   # teshis: (px, py) nisan noktasi - lazer referansi
+        self.olu_bolge_px = None    # teshis: (olu_x, olu_y) o karedeki isabet yaricapi
 
 # =====================================================================
 #  Algilama (Inference) is parcacigi (Thread 2)
@@ -350,12 +401,34 @@ class InferenceThread(QThread):
 
                 dets, balonlar, active_idx = algi.analiz_et(self.model, frame, self.estop, self.asama)
 
-                if self.otonom and not self.estop and active_idx >= 0 and active_idx < len(dets):
-                    h, w = frame.shape[:2]
-                    hedef_xy = nisan.nisan_noktasi(dets[active_idx]["box"], balonlar)
-                    d_yaw, d_pitch = self.nisanci.adim(hedef_xy, (w, h))
-                    if d_yaw is not None:
-                        self.nisan_komut.emit(d_yaw, d_pitch)
+                merkezde = False
+                aktif_det = dets[active_idx] if 0 <= active_idx < len(dets) else None
+                if self.otonom and not self.estop and aktif_det is not None:
+                    if aktif_det.get("hayalet"):
+                        # ⚠ HAYALET HEDEFE NISAN ALINMAZ. Kutu KARE KOORDINATLARINDA
+                        # DONMUS: gimbal ne yaparsa yapsin hata azalmaz, dolayisiyla
+                        # PD ayni yone komut uretmeye devam eder ve namlu yazilimsal
+                        # tavana tirmanir (16.08: tilt 180'e dayaniyordu — 30 kare x
+                        # ~15 FPS = 2 sn, Normal hizda 80 dereceye kadar kacis).
+                        # Sistem OLDUGU YERDE BEKLER.
+                        #
+                        # Ama `merkezde` SIFIRLANMAZ: hayaletin tum varlik sebebi
+                        # kisa tespit kesintilerini yutmak. Her kesintide dwell
+                        # sayacini sifirlasaydik ates hic tamamlanamazdi.
+                        merkezde = self.veri.merkezde
+                    else:
+                        h, w = frame.shape[:2]
+                        kutu = aktif_det["box"]
+                        hedef_xy = nisan.nisan_noktasi(kutu, balonlar)
+                        # Kutu yuksekligi olu bolgeyi olcekler: balon hedefle birlikte
+                        # kuculdugu icin isabet olcutu de kutuya oranli olmali (sartname
+                        # s.19 "kesit alanina gore belli bir buyuklukte balon").
+                        d_yaw, d_pitch = self.nisanci.adim(
+                            hedef_xy, (w, h), hedef_yukseklik=abs(kutu[3] - kutu[1]))
+                        if d_yaw is not None:
+                            self.nisan_komut.emit(d_yaw, d_pitch)
+                        else:
+                            merkezde = True
                 else:
                     self.nisanci.sifirla()
 
@@ -370,6 +443,11 @@ class InferenceThread(QThread):
                     self.veri.balonlar = balonlar
                     self.veri.active_idx = active_idx
                     self.veri.fps = fps
+                    self.veri.merkezde = merkezde
+                    # Teshis: ates kapisi "hata < olu bolge" olunca acilir. Ikisi de
+                    # gorunmezse "neden ates etmiyor" sorusu cevapsiz kalir.
+                    self.veri.nisan_hata_px = self.nisanci.son_hata_px
+                    self.veri.olu_bolge_px = self.nisanci.son_olu_px
             except Exception as e:
                 import traceback
                 print("INFERENCE THREAD ERROR:")
@@ -420,6 +498,7 @@ class VideoThread(QThread):
         self.veri = veri
         self.inference_thread = inference_thread
         self._gui_mesgul = False
+        self._hedef_son_gorulen = {}   # titresim onleme: {track_id: (son_gorulen_zaman, hedef_dict)}
 
     def kare_islendi(self):
         self._gui_mesgul = False
@@ -517,6 +596,9 @@ class VideoThread(QThread):
                 data["balonlar"] = balonlar
                 data["active_idx"] = active_idx
                 data["estop"] = self.estop
+                data["merkezde"] = getattr(self.veri, "merkezde", False)
+                data["nisan_hata_px"] = getattr(self.veri, "nisan_hata_px", None)
+                data["olu_bolge_px"] = getattr(self.veri, "olu_bolge_px", None)
 
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
@@ -529,6 +611,8 @@ class VideoThread(QThread):
     def _panel_verisi(self, dets, active_idx, fps, kamera_fps=0.0):
         a3 = (self.asama == 3)
         hedefler = []
+        simdi = time.time()
+        goruldu = set()
         for i, d in enumerate(dets):
             aktif = (i == active_idx)
             if aktif and not self.estop:
@@ -537,8 +621,23 @@ class VideoThread(QThread):
                 durum = "Dost — geç"
             else:
                 durum = "Bekliyor"
-            hedefler.append({"ad": d["ad"], "tip": d["tip"], "durum": durum, "aktif": aktif,
-                              "id": d.get("id"), "cls": d.get("cls")})
+            h = {"ad": d["ad"], "tip": d["tip"], "durum": durum, "aktif": aktif,
+                              "id": d.get("id"), "cls": d.get("cls")}
+            hedefler.append(h)
+            tid = d.get("id")
+            if tid is not None:
+                goruldu.add(tid)
+                self._hedef_son_gorulen[tid] = (simdi, h)
+        # Titresim onleme: Son 0.7 sn icinde gorulen ama bu karede olmayan hedefleri tut
+        TOLERANS = 0.7
+        for tid, (t, eski_h) in list(self._hedef_son_gorulen.items()):
+            if tid not in goruldu:
+                if simdi - t < TOLERANS:
+                    hayalet = dict(eski_h)
+                    hayalet["aktif"] = False
+                    hedefler.append(hayalet)
+                else:
+                    del self._hedef_son_gorulen[tid]
         # Liste daima Fuze->Helikopter->F16->IHA sirasinda (HEDEF_ONCELIK); tespit sirasi
         # veya ekrandaki kutu sirasi bunu etkilemez. "aktif" (kilit) her ogeye kendi
         # sozlugunde bagli oldugu icin sondan sonraya tasinsa bile kilit bilgisi kaybolmaz.
@@ -552,6 +651,9 @@ class VideoThread(QThread):
                 pass
         if self.estop:
             mesaj = "ACİL DURDURULDU — ateş ve kilit kesildi"
+        elif time.time() < algi._kilitleme_yasagi_t:
+            kalan = int(algi._kilitleme_yasagi_t - time.time())
+            mesaj = f"İmha tamamlandı. Jüri onayı bekleniyor... ({kalan} sn)"
         elif active:
             mesaj = f"{active['ad']} kilitlendi — %{active['conf']} güven"
         else:
@@ -704,6 +806,9 @@ class MainWindow(QMainWindow):
         self.hiz_seviye = P.HIZ_VARSAYILAN
         self._nisan_son_t = None   # otonom PD komutlari icin hiz-siniri zamanlayicisi
         self._nisan_mesgul_ta = 0.0   # bu zamana kadar yeni otonom komutu KABUL EDILMEZ
+        self._otonom_ates_aktif = False
+        self._otonom_hedef_merkezde_t = None
+        self._otonom_ates_bitis_t = None
         # Lazer gucu (%). Her acilista GUVENLI VARSAYILANA doner — kalici olarak
         # kaydedilmez: "gecen sefer %100'de birakmisiz" diye baslamak istemeyiz.
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
@@ -958,7 +1063,7 @@ class MainWindow(QMainWindow):
             b.setObjectName("tab")
             b.setCheckable(True)
             b.setChecked(ad == aktif)
-            b.clicked.connect(lambda _, a=ad: cb(a))
+            b.clicked.connect(lambda checked=False, a=ad: cb(a))
             grp.addButton(b)
             th.addWidget(b)
             kayit[ad] = b
@@ -1078,9 +1183,10 @@ class MainWindow(QMainWindow):
         iv.setContentsMargins(0, 0, 8, 0)     # sagda kaydirma cubugu payi
         iv.setSpacing(15)
 
-        # Iki grup: TESPIT (YOLO/ByteTrack) ve NISAN (gimbal geometrisi).
+        # Uc grup: TESPIT (YOLO/ByteTrack), SAHI (dilimli cikarim) ve NISAN (gimbal).
         # Gruplar hangi ayarin neyi etkiledigini bir bakista gosterir.
         for baslik, tanimlar in (("TESPİT", AYAR_TANIM_TESPIT),
+                                 ("SAHI (Uzak Nesne)", AYAR_TANIM_SAHI),
                                  ("NİŞAN (Otonom takip)", AYAR_TANIM_NISAN)):
             gb = QLabel(baslik)
             gb.setObjectName("ayargrup")
@@ -1143,8 +1249,15 @@ class MainWindow(QMainWindow):
         kutu.addLayout(ust)
 
         sl = QSlider(Qt.Horizontal)
-        sl.setMinimum(0 if tip == "secim" else mn)
-        sl.setMaximum(len(COZUNURLUK_SECENEK) - 1 if tip == "secim" else mx)
+        if tip == "secim":
+            sl.setMinimum(0)
+            sl.setMaximum(len(COZUNURLUK_SECENEK) - 1)
+        elif tip == "secim_sahi":
+            sl.setMinimum(0)
+            sl.setMaximum(len(SAHI_DILIM_SECENEK) - 1)
+        else:
+            sl.setMinimum(mn)
+            sl.setMaximum(mx)
         sl.setValue(self._slider_birimi(algi.AYAR[key], tip))
         # "Onerilen" (yesil) isaret = ALGI'NIN VARSAYILANI. Tek kaynak orasi; burada
         # ikinci bir kopya tutulsaydi varsayilan degisince yesil isaret sessizce yalan soylerdi.
@@ -1174,6 +1287,11 @@ class MainWindow(QMainWindow):
                 return COZUNURLUK_SECENEK.index(int(v))
             return min(range(len(COZUNURLUK_SECENEK)),
                        key=lambda i: abs(COZUNURLUK_SECENEK[i] - int(v)))
+        if tip == "secim_sahi":
+            if int(v) in SAHI_DILIM_SECENEK:
+                return SAHI_DILIM_SECENEK.index(int(v))
+            return min(range(len(SAHI_DILIM_SECENEK)),
+                       key=lambda i: abs(SAHI_DILIM_SECENEK[i] - int(v)))
         if tip == "yuzde":
             return int(round(float(v) * 100))
         if tip == "onda":
@@ -1184,6 +1302,8 @@ class MainWindow(QMainWindow):
         """Slider tam sayisini algi.AYAR degerine cevirir."""
         if tip == "secim":
             return COZUNURLUK_SECENEK[val]
+        if tip == "secim_sahi":
+            return SAHI_DILIM_SECENEK[val]
         if tip == "yuzde":
             return val / 100.0
         if tip == "onda":
@@ -1195,6 +1315,8 @@ class MainWindow(QMainWindow):
             lbl.setText(f"{val / 100:.2f}")
         elif tip == "secim":
             lbl.setText(f"{COZUNURLUK_SECENEK[val]} px")
+        elif tip == "secim_sahi":
+            lbl.setText(f"{SAHI_DILIM_SECENEK[val]} px")
         elif tip == "onda":
             birim = "°" if key == "fov" else " sn"
             lbl.setText(f"{val / 10:.1f}{birim}")
@@ -1286,16 +1408,15 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(12)
 
-        # AKTIF HEDEF karti KALDIRILDI (06.08): gosterdigi her sey zaten ust seritte
-        # duruyordu (eng_name/eng_sub: "Hedef kilitli · F16 · %92 guven"). Bosalan yer
-        # manuel yon kontrollerine verildi; ATES butonu da oraya tasindi.
-
-        # Manuel panel yalniz Manuel modda gorunur (Otonom'da gizlenir, yer kaplamaz).
-        # Eskiden bu alan bir QStackedWidget'ti (Otonom = tespit tablosu, Manuel =
-        # yon kontrolleri); tespit tablosu HEDEFLER kartina tasinip stack disina
-        # cikinca (asagida) ikinci sayfaya gerek kalmadi.
+        # Manuel ve Otonom modlar FARKLI paneller gosterir. QStackedWidget ile
+        # gecis yapilir — setVisible() QGraphicsProxyWidget icinde guvenilir
+        # degil (layout yeniden hesaplanmiyordu). Sayfa 0 = Manuel, Sayfa 1 = Otonom.
+        self.sag_mod_stack = QStackedWidget()
         self.manuel_panel = self._manuel_kontrol_panel()
-        v.addWidget(self.manuel_panel, 1)
+        self.otonom_panel = self._otonom_kontrol_panel()
+        self.sag_mod_stack.addWidget(self.manuel_panel)   # 0 = Manuel
+        self.sag_mod_stack.addWidget(self.otonom_panel)    # 1 = Otonom
+        v.addWidget(self.sag_mod_stack, 1)
 
         # HEDEFLER / Motor Hizi / Lazer: ucu de hem Manuel hem Otonom modda gecerli
         # oldugu icin sabit alanda durur, moda gore gizlenmez.
@@ -1304,6 +1425,114 @@ class MainWindow(QMainWindow):
         v.addWidget(self._lazer_karti(), 0)
 
         return kol
+
+    def _otonom_kontrol_panel(self):
+        """Otonom mod paneli — takip durumu, aktif hedef bilgisi ve nisan durumu.
+
+        Manuel panelin yerini alir; Otonom modda operatorun gormesi gereken
+        bilgi D-pad/ATES degil, sistemin NEYI TAKIP ETTIGINI ve ne durumda oldugudur."""
+        mk = QFrame()
+        mk.setObjectName("panelk")
+        mv = QVBoxLayout(mk)
+        mv.setContentsMargins(16, 10, 16, 10)
+        mv.setSpacing(8)
+
+        # Baslik
+        mt = QLabel("OTONOM TAKİP DURUMU")
+        mt.setObjectName("ph")
+        mt.setStyleSheet("font-size:10px; padding-bottom:4px;")
+        mv.addWidget(mt)
+
+        # Takip durumu gostergesi (kilitli / araniyor / E-Stop)
+        self.oto_durum_frame = QFrame()
+        self.oto_durum_frame.setObjectName("engok")
+        dh = QHBoxLayout(self.oto_durum_frame)
+        dh.setContentsMargins(11, 9, 11, 9)
+        dh.setSpacing(8)
+
+        self.oto_durum_dot = QLabel()
+        self.oto_durum_dot.setFixedSize(10, 10)
+        self.oto_durum_dot.setStyleSheet(f"background:{AMB};border-radius:5px;")
+        dh.addWidget(self.oto_durum_dot)
+
+        oto_sub = QVBoxLayout()
+        oto_sub.setSpacing(1)
+        self.oto_durum_baslik = QLabel("Hedef aranıyor…")
+        self.oto_durum_baslik.setObjectName("engname")
+        self.oto_durum_alt = QLabel("—")
+        self.oto_durum_alt.setObjectName("engsub")
+        oto_sub.addWidget(self.oto_durum_baslik)
+        oto_sub.addWidget(self.oto_durum_alt)
+        dh.addLayout(oto_sub, 1)
+        mv.addWidget(self.oto_durum_frame)
+
+        # Nisan (PD) durumu
+        nisan_kart = QFrame()
+        nisan_kart.setStyleSheet(f"background:{CARD}; border-radius:8px;")
+        nv = QVBoxLayout(nisan_kart)
+        nv.setContentsMargins(12, 8, 12, 8)
+        nv.setSpacing(4)
+        nt = QLabel("NİŞAN KONTROLÜ")
+        nt.setStyleSheet(f"font-size:10px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
+        nv.addWidget(nt)
+
+        self.oto_nisan_durum = QLabel("Bekleniyor")
+        self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+        nv.addWidget(self.oto_nisan_durum)
+
+        # ATES KAPISI: otonom ates neden acilmadi/acildi. Bu satir olmadan sistem
+        # sessizce ates etmiyor ve sebebi gorulmuyordu (bkz. _ates_engeli).
+        self.oto_ates_kapi = QLabel("—")
+        self.oto_ates_kapi.setStyleSheet(f"font-size:11px; color:{TXT3}; padding:2px 0;")
+        self.oto_ates_kapi.setWordWrap(True)
+        nv.addWidget(self.oto_ates_kapi)
+
+        # Aci bilgisi (pan/tilt)
+        aci_row = QHBoxLayout()
+        aci_row.setSpacing(16)
+        self.oto_pan_lbl = QLabel("Azimut: 0.0°")
+        self.oto_pan_lbl.setStyleSheet(f"font-family:{FM}; font-size:12px; color:{TXT2};")
+        self.oto_tilt_lbl = QLabel("Yükseliş: 0.0°")
+        self.oto_tilt_lbl.setStyleSheet(f"font-family:{FM}; font-size:12px; color:{TXT2};")
+        aci_row.addWidget(self.oto_pan_lbl)
+        aci_row.addWidget(self.oto_tilt_lbl)
+        aci_row.addStretch(1)
+        nv.addLayout(aci_row)
+
+        mv.addWidget(nisan_kart)
+
+        # Aktif gorev bilgisi
+        gorev_kart = QFrame()
+        gorev_kart.setStyleSheet(f"background:{CARD}; border-radius:8px;")
+        gv = QVBoxLayout(gorev_kart)
+        gv.setContentsMargins(12, 8, 12, 8)
+        gv.setSpacing(4)
+        gt = QLabel("GÖREV BİLGİSİ")
+        gt.setStyleSheet(f"font-size:10px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
+        gv.addWidget(gt)
+
+        self.oto_gorev_lbl = QLabel("Aşama seçilmedi")
+        self.oto_gorev_lbl.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+        self.oto_gorev_lbl.setWordWrap(True)
+        gv.addWidget(self.oto_gorev_lbl)
+
+        mv.addWidget(gorev_kart)
+
+        # Bolge durumu (otonom icin de)
+        self.oto_bolge_status = QLabel("● BÖLGE GÜVENLİ")
+        self.oto_bolge_status.setAlignment(Qt.AlignCenter)
+        self.oto_bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+        mv.addWidget(self.oto_bolge_status)
+
+        mv.addStretch(1)
+
+        # Otonom ATES bilgisi — buton YOK ama lazer durumu gosterilir
+        self.oto_lazer_durum = QLabel("○ Lazer kapalı")
+        self.oto_lazer_durum.setAlignment(Qt.AlignCenter)
+        self.oto_lazer_durum.setStyleSheet(f"font-size:13px; font-weight:600; color:{TXT3}; padding:6px 0;")
+        mv.addWidget(self.oto_lazer_durum)
+
+        return mk
 
     def _hedefler_karti(self):
         """HEDEFLER — kamerada tanimlanan ve etiketlenen hedeflerin numarali listesi.
@@ -1368,7 +1597,12 @@ class MainWindow(QMainWindow):
                 renk = BLUE
             else:
                 renk = TXT2
-            btn = QPushButton(f"{i + 1}- {hh['ad']}")
+            # A3'te Dost/Dusman etiketini de goster ki ayni tip hedeflerde karismasin
+            if a3 and hh.get("tip"):
+                btn_text = f"{i + 1}- {hh['tip']} · {hh['ad']}"
+            else:
+                btn_text = f"{i + 1}- {hh['ad']}"
+            btn = QPushButton(btn_text)
             btn.setObjectName("hedefsatir")
             btn.setCursor(Qt.PointingHandCursor)
             btn.setEnabled(tid is not None)   # ID'siz kutu (nadir) elle kilitlenemez
@@ -1698,7 +1932,7 @@ class MainWindow(QMainWindow):
             b.setChecked(val == secili)
             b.setFixedHeight(26)
             b.setCursor(Qt.PointingHandCursor)
-            b.clicked.connect(lambda _, v=val: geri_cagri(v))
+            b.clicked.connect(lambda checked=False, v=val: geri_cagri(v))
             self._step_btn_stil_guncelle(b, val == secili)
             satir.addWidget(b, 1)
             btns[val] = b
@@ -2409,16 +2643,26 @@ class MainWindow(QMainWindow):
             self.asama = None
             for b in self.asama_btns.values():
                 b.setChecked(False)
+        # Otonom'a gecerken asama secili degilse ASAMA 3'e dus. Otonom ates kapisi
+        # zaten yalniz Asama 2/3'te acilir (_otonom_ates_kontrol); asamasiz Otonom
+        # "her sey calisiyor ama ates etmiyor" gibi gorunuyordu. A3 varsayilan cunku
+        # dost/dusman ayrimi (renk) yalniz orada devrede ve en genis davranis o.
+        if ad == "Otonom" and self.asama is None and "Aşama 3" in izin:
+            self.asama = "Aşama 3"
+            for a, b in self.asama_btns.items():
+                b.setChecked(a == self.asama)
         self.sb_mod.setText(f'<span style="color:{BLUE}">Sistem:</span>&nbsp;{ad}')
         # B3: otonom nisan dongusu yalniz Otonom modda calisir. Mod degisince
         # kontrolcunun turev gecmisi sifirlanir (yeni moda gecince sicrama olmasin).
         if isinstance(getattr(self, "thread", None), VideoThread):
             self.inference_thread.otonom = (ad == "Otonom")
             self.inference_thread.nisanci.sifirla()
-        if hasattr(self, "manuel_panel"):
-            # Manuel panel stack DEGIL: yalniz Manuel modda gorunur, Otonom'da
-            # gizlenir (yer kaplamaz) — HEDEFLER/Motor Hizi/Lazer her iki modda sabit.
-            self.manuel_panel.setVisible(self.mod == "Manuel")
+        if hasattr(self, "sag_mod_stack"):
+            # Sag kolondaki QStackedWidget: 0 = Manuel, 1 = Otonom.
+            self.sag_mod_stack.setCurrentIndex(0 if ad == "Manuel" else 1)
+        # Otonom paneldeki gorev bilgisini guncelle
+        if hasattr(self, "oto_gorev_lbl"):
+            self._otonom_gorev_guncelle()
         self._asama_uygula()
 
     def _tus_yonu(self, event):
@@ -2476,14 +2720,20 @@ class MainWindow(QMainWindow):
         if isinstance(getattr(self, "thread", None), VideoThread):
             self.thread.asama = self.ASAMA_IDX[self.asama]
             self.inference_thread.asama = self.ASAMA_IDX[self.asama]
+        
+        # Asama (gorev) degistiginde eski hedefe kilitli kalmamak icin kilidi sifirla
+        algi.hedefi_birak_ve_bekle(0.0)
+
         if self.asama:
             self.asama_pill.setText(self.asama)
             self.asama_pill.setVisible(True)
             self.kural.setVisible(True)
             self._kural_guncelle()
+            self._otonom_gorev_guncelle()
         else:
             self.asama_pill.setVisible(False)
             self.kural.setVisible(False)
+            self._otonom_gorev_guncelle()
 
     def _kural_guncelle(self):
         kurallar = {
@@ -2827,10 +3077,14 @@ class MainWindow(QMainWindow):
             active_idx = data.get("active_idx", -1)
             estop = data.get("estop", False)
             for i, d in enumerate(data.get("dets", [])):
-                # Etiket rengi SABIT yesil (kullanici karari): guven yuzdesine gore
-                # artik degismiyor. Eskiden %75/%50 esiklerine gore yesil/camgobegi/
-                # kirmiziya kayardi; bu ayrim kaldirildi.
-                color = QColor(40, 200, 40)
+                # Etiket rengi: Dost ise Mavi, Düşman ise Kırmızı, aksi halde (Aşama 1/2) Yeşil
+                if d.get("tip") == "Düşman":
+                    color = QColor(255, 40, 40)  # Kirmizi
+                elif d.get("tip") == "Dost":
+                    color = QColor(40, 150, 255) # Mavi
+                else:
+                    color = QColor(40, 200, 40)  # Yesil
+                
                 pen.setColor(color)
                 painter.setPen(pen)
 
@@ -2841,26 +3095,53 @@ class MainWindow(QMainWindow):
 
                 tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"])
                 ad_cv = "?" if d["cls"] == "belirsiz" else algi.goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
-                txt = f"{tip_cv} - {ad_cv} - %{d['conf']}" if tip_cv else f"{ad_cv} - %{d['conf']}"
+
+                txt1 = f"{tip_cv}" if tip_cv else ""
+                # Hayalet: gercek bir tespit DEGIL, son bilinen konum. Guveni yapay
+                # olarak 1 oldugu icin "%1" yazmak yanilticiydi (operator zayif ama
+                # gercek bir tespit sanabilir) — acikca soyluyoruz.
+                if d.get("hayalet"):
+                    txt2 = f"{ad_cv} · KAYIP"
+                else:
+                    txt2 = f"{ad_cv} %{d['conf']}"
                 
                 fm = painter.fontMetrics()
-                tw = fm.horizontalAdvance(txt)
+                tw = max(fm.horizontalAdvance(txt1) if txt1 else 0, fm.horizontalAdvance(txt2))
                 th = fm.height()
                 
-                ly = max(ry1, th + 10.0)
+                toplam_h = th * (2 if txt1 else 1)
+                # Kutunun biraz uzerinden baslasin (cok yukardaysa sifira yapissin)
+                y_bg = max(ry1 - 5 - toplam_h, 0.0)
                 
-                painter.fillRect(QRectF(rx1, ly - th - 4, tw + 8, th + 4), color)
+                painter.fillRect(QRectF(rx1, y_bg, tw + 8, toplam_h + 4), color)
                 
                 painter.setPen(QColor(255, 255, 255))
-                painter.drawText(QPointF(rx1 + 4, ly - 4), txt)
-                
+                if txt1:
+                    painter.drawText(QPointF(rx1 + 4, y_bg + fm.ascent() + 2), txt1)
+                    painter.drawText(QPointF(rx1 + 4, y_bg + th + fm.ascent() + 2), txt2)
+                else:
+                    painter.drawText(QPointF(rx1 + 4, y_bg + fm.ascent() + 2), txt2)
                 if i == active_idx and not estop:
-                    cx, cy = (rx1 + rx2) / 2, (ry1 + ry2) / 2
+                    # Nisangah KUTU MERKEZINE degil, gimbalin gercekten nisan aldigi
+                    # NOKTAYA cizilir: nisan noktasi balondur (maketin ALTINDA), govde
+                    # merkezi degil. Ayni fonksiyon (nisan.nisan_noktasi) hem PD'yi hem
+                    # bu cizimi besler — ikisi ayri hesaplansaydi ekran lazerin gittigi
+                    # yeri YANLIS gosterirdi ve operator kalibrasyonu (balon_ofset)
+                    # neye gore cevirecegini goremezdi.
+                    hx, hy = nisan.nisan_noktasi(d["box"], data.get("balonlar", []))
+                    cx, cy = hx * scale_x, hy * scale_y
                     pen.setColor(color)
                     painter.setPen(pen)
                     painter.drawEllipse(QPointF(cx, cy), 16, 16)
                     painter.drawLine(QPointF(cx - 22, cy), QPointF(cx + 22, cy))
                     painter.drawLine(QPointF(cx, cy - 22), QPointF(cx, cy + 22))
+                    # Govde merkezinden nisan noktasina ince bir bag: operator artinin
+                    # HANGI hedefe ait oldugunu govdeden ayrik dururken de gorsun.
+                    gcx, gcy = (rx1 + rx2) / 2, (ry1 + ry2) / 2
+                    pen.setWidth(1)
+                    painter.setPen(pen)
+                    painter.drawLine(QPointF(gcx, gcy), QPointF(cx, cy))
+                    pen.setWidth(2)
 
             # --- Lazer Referans Nisangahi ---
             # Kare merkezi DEGIL: kamera-lazer boresight/paralaks ofseti kalibre
@@ -2911,12 +3192,169 @@ class MainWindow(QMainWindow):
         # HEDEFLER karti: numarali, tiklanabilir isim listesi (secim = manuel kilit).
         self._hedef_liste_guncelle(data["hedefler"], a3)
 
+        # Otonom paneli guncelle (her karede)
+        self._otonom_ates_kontrol(data, estop)
+        self._otonom_panel_guncelle(a, data, estop)
+
         self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;{data["mesaj"]}')
         self.sb_fps.setText(
             f"CAM&nbsp;<span style='color:{BLUE}'>{data['kamera_fps']:.1f}</span>"
             f"&nbsp;|&nbsp;"
             f"AI&nbsp;<span style='color:{BLUE}'>{data['fps']:.1f}</span>"
         )
+
+    def _ates_engeli(self, a, data):
+        """Otonom ates neden acilmadi? (baslik, ayrinti, renk) doner.
+
+        Ates kapisi "nisan hatasi < olu bolge" olunca acilir; ikisi de ekranda
+        gorunmedigi surece sistem sessizce ates etmez ve sebebi anlasilmaz —
+        sahada tam bu yasandi (16.08: "dusmani taniyor ama ates etmiyor").
+        """
+        if not a:
+            return "Hedef yok", "kilitlenecek düşman bulunamadı", TXT3
+        hata = data.get("nisan_hata_px")
+        olu = data.get("olu_bolge_px")
+        if not hata or not olu:
+            return "Nişan hesaplanmadı", "otonom nişan döngüsü çalışmıyor", AMB
+        px, py = hata
+        ox, oy = olu
+        # Hangi eksen engelliyor: operator neyi duzeltecegini bilsin.
+        eksen = []
+        if abs(px) > ox:
+            eksen.append(f"yatay {abs(px):.0f}>{ox:.0f}px")
+        if abs(py) > oy:
+            eksen.append(f"dikey {abs(py):.0f}>{oy:.0f}px")
+        return "Nişan tutmuyor", " · ".join(eksen) or "—", AMB
+
+    def _ates_kapi_yaz(self, baslik, ayrinti, renk):
+        """Otonom paneldeki ATES KAPISI satirini gunceller (varsa)."""
+        if not hasattr(self, "oto_ates_kapi"):
+            return
+        self.oto_ates_kapi.setText(f"{baslik} — {ayrinti}")
+        self.oto_ates_kapi.setStyleSheet(f"font-size:11px; color:{renk}; padding:2px 0;")
+
+    def _otonom_ates_kontrol(self, data, estop):
+        """Hedef olu bolgeye girdiginde (merkezde) dwell suresi kadar bekler,
+        sonrasinda otonom olarak atesi baslatir ve ATES_SURESI kadar acik tutar."""
+        if self.mod != "Otonom" or estop or self.asama not in ("Aşama 2", "Aşama 3"):
+            self._otonom_hedef_merkezde_t = None
+            self._ates_kapi_yaz("Otonom ateş kapalı",
+                                "Aşama 2/3 + Otonom mod gerekir", AMB)
+            if self._otonom_ates_aktif:
+                self._otonom_ates_aktif = False
+                if self.fire_btn.isChecked():
+                    self.fire_btn.setChecked(False)
+                    self._ates_kes("Otonom mod iptali / E-Stop")
+            return
+
+        simdi = time.time()
+        a = data.get("active")
+        
+        # Hedef merkezde ise zamani tut (Dwell Time tetikleyicisi)
+        if a and data.get("merkezde", False):
+            if self._otonom_hedef_merkezde_t is None:
+                self._otonom_hedef_merkezde_t = simdi
+            gecen = simdi - self._otonom_hedef_merkezde_t
+            if gecen >= OTONOM_DWELL_SURE and not self._otonom_ates_aktif:
+                # Dwell suresi doldu -> ATESI BASLAT
+                self._otonom_ates_aktif = True
+                self._otonom_ates_bitis_t = simdi + OTONOM_ATES_SURE
+                if not self.fire_btn.isChecked():
+                    self.fire_btn.setChecked(True)
+                    self._ates_bas()
+            elif not self._otonom_ates_aktif:
+                self._ates_kapi_yaz("Nişanda — bekleniyor",
+                                    f"dwell {gecen:.1f} / {OTONOM_DWELL_SURE:.1f} sn", BLUE)
+        else:
+            self._otonom_hedef_merkezde_t = None
+            if not self._otonom_ates_aktif:
+                self._ates_kapi_yaz(*self._ates_engeli(a, data))
+
+        # Ates suresi doldu mu veya hedef tamamen kayboldu mu kontrolu
+        if self._otonom_ates_aktif:
+            self._ates_kapi_yaz("● ATEŞ",
+                                f"kalan {max(0.0, self._otonom_ates_bitis_t - simdi):.1f} sn", RED)
+            # Eger hedef hic yoksa (active = None) veya ates suresi dolduysa LAZERI KES
+            if not a or simdi >= self._otonom_ates_bitis_t:
+                self._otonom_ates_aktif = False
+                if self.fire_btn.isChecked():
+                    self.fire_btn.setChecked(False)
+                    sebep = "Otomatik ateş süresi doldu" if a else "Hedef kaybedildi"
+                    self._ates_kes(sebep)
+                
+                # Eger ates sure doldugu icin bittiyse (basarili imha), juri onayi icin bekle!
+                if a and simdi >= self._otonom_ates_bitis_t:
+                    algi.hedefi_birak_ve_bekle(OTONOM_BEKLEME_SURE)
+
+    def _otonom_panel_guncelle(self, active_hedef, data, estop):
+        """Otonom moddaki takip ve nisan durumunu (sag kolon paneli) gunceller."""
+        if not hasattr(self, "oto_durum_baslik"):
+            return
+
+        # 1. Takip Durumu
+        if active_hedef:
+            self.oto_durum_dot.setStyleSheet(f"background:{GRN};border-radius:5px;")
+            self.oto_durum_baslik.setText("Hedef Kilitli")
+            self.oto_durum_baslik.setStyleSheet(f"font-size:14px; font-weight:700; color:{GRN}; background:transparent;")
+            
+            taraf = f" · {active_hedef['tip']}" if data.get("a3") else ""
+            self.oto_durum_alt.setText(f"{active_hedef['ad']}{taraf} · %{active_hedef['conf']} güven")
+        elif estop:
+            self.oto_durum_dot.setStyleSheet(f"background:{RED};border-radius:5px;")
+            self.oto_durum_baslik.setText("ACİL DURDURMA")
+            self.oto_durum_baslik.setStyleSheet(f"font-size:14px; font-weight:700; color:{RED}; background:transparent;")
+            self.oto_durum_alt.setText(data.get("mesaj", ""))
+        else:
+            self.oto_durum_dot.setStyleSheet(f"background:{AMB};border-radius:5px;")
+            self.oto_durum_baslik.setText("Hedef Aranıyor...")
+            self.oto_durum_baslik.setStyleSheet(f"font-size:14px; font-weight:700; color:{AMB}; background:transparent;")
+            self.oto_durum_alt.setText("Görüş alanında hedef yok")
+
+        # 2. Bolge Durumu
+        if hasattr(self, "bolge_status"):
+            # Manuel paneldeki ayni metin ve stili (guvenli/yasak) kopyala
+            self.oto_bolge_status.setText(self.bolge_status.text())
+            self.oto_bolge_status.setStyleSheet(self.bolge_status.styleSheet())
+
+        # 3. Nisan Durumu (PD aktif mi)
+        if hasattr(self, "pan_val_lbl"):
+            self.oto_pan_lbl.setText(f"Azimut: {self.pan_val_lbl.text()}")
+            self.oto_tilt_lbl.setText(f"Yükseliş: {self.tilt_val_lbl.text()}")
+
+        if self.mod == "Otonom":
+            if estop:
+                self.oto_nisan_durum.setText("Sistem durduruldu")
+                self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{RED}; padding:2px 0;")
+            elif active_hedef:
+                simdi = time.time()
+                if simdi < getattr(self, "_nisan_mesgul_ta", 0):
+                    self.oto_nisan_durum.setText("Konumlanıyor...")
+                    self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{BLUE}; padding:2px 0;")
+                else:
+                    self.oto_nisan_durum.setText("Takip aktif")
+                    self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{GRN}; padding:2px 0;")
+            else:
+                self.oto_nisan_durum.setText("Bekleniyor")
+                self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+
+        # 4. Lazer Durumu
+        acik = bool(getattr(self, "kontrol", None) and self.kontrol.bagli and self.kontrol.lazer_acik)
+        self.oto_lazer_durum.setText(f"● ATEŞ AKTİF · %{self.lazer_guc}" if acik else f"○ Lazer Kapalı · %{self.lazer_guc}")
+        self.oto_lazer_durum.setStyleSheet(
+            f"font-size:13px; font-weight:{700 if acik else 600}; "
+            f"color:{RED if acik else TXT3}; padding:6px 0;")
+
+    def _otonom_gorev_guncelle(self):
+        """Otonom paneldeki aktif gorev aciklamasini gunceller."""
+        if not hasattr(self, "oto_gorev_lbl"):
+            return
+            
+        if self.asama == "Aşama 2":
+            self.oto_gorev_lbl.setText("Sürü Saldırısı İmhası\nSıra ve tip gözetmeksizin tüm hedefler düşman kabul edilir.")
+        elif self.asama == "Aşama 3":
+            self.oto_gorev_lbl.setText("Farklı Katmanlarda İmha\nYalnızca düşman (kırmızı) hedefler vurulur. Dost (camgöbeği) hedeflere ateş yasaktır.")
+        else:
+            self.oto_gorev_lbl.setText("Aşama seçilmedi")
 
     def _fit(self):
         """Icerigi pencereye orantili sigdir (en-boy oranini koru)."""

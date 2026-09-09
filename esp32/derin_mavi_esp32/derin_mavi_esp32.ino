@@ -51,16 +51,13 @@
 #include <AccelStepper.h>
 
 // ---- Pinler ----
-AccelStepper tiltMotor(AccelStepper::DRIVER, 4, 5);   // DIKEY eksen (STEP, DIR)
-AccelStepper panMotor(AccelStepper::DRIVER, 6, 7);    // YATAY eksen (STEP, DIR)
-const int PAN_EN_PIN  = 16;                           // pan surucusu ENABLE hatti
-const int TILT_EN_PIN = 17;                           // tilt surucusu ENABLE hatti
-const int ESTOP_PIN   = 15;                           // ACIL STOP BUTONU (NO, GND'ye ceker)
-// ⚠ LAZER PINI **18**, 25 DEGIL. ESP32-S3'te GPIO 22/23/24/25 FIZIKSEL OLARAK YOKTUR
-//   (soc_caps.h: SOC_GPIO_VALID_GPIO_MASK bu dordunu maskeden cikarir) — klasik ESP32'de
-//   vardilar, S3'te yoklar. 25'e yazmak sessizce hicbir sey yapar: derleme hata vermez,
-//   ledcAttach false doner, lazer hic tetiklenmez.
-const int LAZER_PIN   = 18;                           // lazer PWM tetigi
+AccelStepper tiltMotor(AccelStepper::DRIVER, 19, 18); // DIKEY eksen (STEP, DIR)
+AccelStepper panMotor(AccelStepper::DRIVER, 5, 17);   // YATAY eksen (STEP, DIR)
+const int PAN_EN_PIN  = 4;                            // pan surucusu ENABLE hatti
+const int TILT_EN_PIN = 0;                            // tilt surucusu ENABLE hatti
+const int ESTOP_PIN   = 16;                           // ACIL STOP BUTONU (NO, GND'ye ceker)
+// ⚠ LAZER PINI
+const int LAZER_PIN   = 2;                            // lazer PWM tetigi
 
 // ---- LAZER GUCU (PWM) ----
 // Lazer surucusunun PWM/TTL girisi duty oraniyla gucu belirler: %40 duty ≈ %40 ortalama
@@ -83,15 +80,23 @@ int lazerYuzde = LAZER_GUC_VARSAYILAN;
 const unsigned long ATES_ZAMAN_ASIMI_MS = 1000;
 unsigned long sonAtesKomutu = 0;
 
-// Surucu ENABLE polaritesi.
-//   Olculen: ENABLE hatlarina HICBIR SEY BAGLI DEGILKEN motorlar calisiyor.
-//   Bu, iki yaygin surucu ailesinde de boyledir (A4988/DRV8825'te EN dahili pull-down'li,
-//   TB6600/HBS57'de opto akim yok) ve tek basina polariteyi BELIRLEMEZ. Asagidaki deger
-//   yayginin (LOW = motor enerjili, HIGH = surucu serbest); motorlar E-Stop'ta serbest
-//   kalmiyorsa false yapin.
+// Surucu ENABLE polaritesi — ⚠ IKI EKSENDE FARKLI, tek sabit YETMEZ (16.08 olcumu).
+//   Tek bir ENA_AKTIF_LOW vardi ve false idi (HIGH = enerjili). Tilt bununla calisiyordu
+//   ama PAN HIC DONMUYORDU: komutlar kabul ediliyor, sayac ilerliyor (230 dereceye kadar
+//   birikmisti), motor kipirdamiyordu — cunku pan surucusu surekli DEVRE DISI kaliyordu.
+//   Hicbir hata satiri uretmedigi icin aylarca "kablo sorunu" gibi gorundu.
+//
+//   OLCUM (X teshis komutu ile, AccelStepper bypass edilerek):
+//     reset sonrasi (pan ENA = HIGH) -> X5 darbesi -> pan DONMEDI
+//     X4 ile pan ENA LOW'a cekildi   -> X5 darbesi -> pan DONDU
+//   Yani pan surucusu LOW ile enerjilenir, tilt HIGH ile. Muhtemel fiziksel sebep:
+//   optokuplorlu suruculerde ENA+ / ENA- uclari ters takilinca polarite tersine doner.
+//   Kablo duzeltilirse ikisi de ayni degere alinabilir; o zamana kadar eksen basina ayri.
+//
 //   ⚠ Yanlis polarite HAREKETI DURDURMAYI ENGELLEMEZ: acil durdurmada systemActive=false
 //     olur ve run() hic cagrilmaz. ENABLE, ustune binen IKINCI guvenlik katmanidir.
-const bool ENA_AKTIF_LOW = true;
+const bool PAN_ENA_AKTIF_LOW  = true;   // olculdu: LOW = pan surucusu enerjili
+const bool TILT_ENA_AKTIF_LOW = false;  // olculdu: HIGH = tilt surucusu enerjili
 
 // Acil stop butonu: NO (normalde acik), GND'ye ceker -> INPUT_PULLUP ile basili = LOW.
 // ⚠ NO butonun zaafi: KABLO KOPARSA hat HIGH kalir ve buton "basilmamis" gorunur — yani
@@ -107,7 +112,7 @@ const float PAN_GEAR_RATIO = 83.0 / 15.0;             // motor 15 disli -> cark 
 //   1:1 kaldigi surece tilt acilari GERCEK acilar degildir — "60°" komutu gercekte
 //   60/oran kadar dondurur. Oran gelince BU SATIR ve app/protokol.py TILT_DISLI birlikte
 //   duzeltilecek.
-const float TILT_GEAR_RATIO = 1.0;
+const float TILT_GEAR_RATIO = 0.5; // (Guncellendi: 45->90 derece tasmasini duzeltmek icin 0.5 carpan)
 const float PAN_STEPS_PER_DEG  = STEP_PER_REV * PAN_GEAR_RATIO / 360.0;   // ~98.37
 const float TILT_STEPS_PER_DEG = STEP_PER_REV * TILT_GEAR_RATIO / 360.0;  // ~17.78
 
@@ -167,9 +172,8 @@ void setLaser(bool on) {
 //   Hareketi durduran sey zaten `systemActive = false`: o durumda komut kabul edilmez ve
 //   pan hedefi konumuna kilitlenir. ENABLE ikinci bir katmandi; bedeli faydasindan buyuktu.
 void enableAc() {
-  int seviye = ENA_AKTIF_LOW ? LOW : HIGH;
-  digitalWrite(PAN_EN_PIN, seviye);
-  digitalWrite(TILT_EN_PIN, seviye);
+  digitalWrite(PAN_EN_PIN,  PAN_ENA_AKTIF_LOW  ? LOW : HIGH);
+  digitalWrite(TILT_EN_PIN, TILT_ENA_AKTIF_LOW ? LOW : HIGH);
 }
 
 // Hiz duzeyini iki eksene de uygular (derece -> step cevirimi burada).
@@ -349,7 +353,9 @@ void loop() {
       // AccelStepper'i BYPASS eder. "Motor donmuyor" durumunda soruyu ikiye ayirir:
       // darbe gonderince motor donuyorsa ESP32 pini + kablo + surucu saglamdir, sorun
       // yazilim yapilandirmasindadir; donmuyorsa o hat fiziksel olarak kopuktur.
-      // Or. "X4" = tilt STEP pini, "X6" = pan STEP pini (calisan eksen, kiyas icin).
+      // Or. "X5" = pan STEP pini, "X19" = tilt STEP pini (calisan eksen, kiyas icin).
+      // ⚠ "X2" GONDERMEYIN: lazer pini. Komut pini OUTPUT yapip LOW'da birakir; ENABLE
+      //   veya E-Stop pinine gonderilirse o hat bir sonraki resete kadar bozulur.
       if (eksen == 'X') {
         int pin = komut.substring(1).toInt();
         pinMode(pin, OUTPUT);

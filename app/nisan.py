@@ -42,6 +42,11 @@ TUREV_ZAMAN_SABITI = 0.12   # saniye
 # ve lazer balonun uzerinde sabit duramaz (dwell — CLAUDE.md §7).
 OLU_BOLGE_ORAN = algi.VARSAYILAN_AYAR["olu_bolge"]   # %2 — 1280 px'te ±26 px
 
+# Olu bolgenin PIKSEL taban degeri. Kutuya oranli olu bolge cok kucuk hedefte
+# sifira yaklasir; tespit kutusu zaten kare kare birkac piksel titrestigi icin
+# bunun altini kovalamak sonsuz arayisa (hunting) yol acar, dwell hic tamamlanmaz.
+TABAN_OLU_BOLGE_PX = 4.0
+
 # Tek adimda gonderilebilecek en buyuk delta — YALNIZCA ilk cagrida (dt bilinmiyor,
 # hedef yeni kilitlendi) kullanilan SABIT guvenlik tavani. Sonraki cagrilarda gercek
 # tavan MainWindow._nisan_geldi()'de secili motor hizina (P.HIZ_TABLO) gore, gecen
@@ -50,26 +55,18 @@ OLU_BOLGE_ORAN = algi.VARSAYILAN_AYAR["olu_bolge"]   # %2 — 1280 px'te ±26 px
 MAKS_ADIM_DER = 8.0
 
 
-def nisan_noktasi(box, balonlar=()):
-    """Nisan alinacak (x, y) pikseli.
-
-    Nisan noktasi maketin govdesi DEGIL, ona ait balondur (imha kaniti balonun
-    patlamasi, balon maketin altinda — CLAUDE.md §7). Hedefe ait balon: merkezi
-    kutunun yatay araliginda ve hedefin ustunde degil; birden fazlaysa en yakini.
-    Balon yoksa (or. model balon sinifi icermiyor) kutu merkezine duseriz."""
-    x1, y1, x2, y2 = box
-    hx = (x1 + x2) * 0.5
-    hy = (y1 + y2) * 0.5
-    en_iyi, en_iyi_mesafe = None, None
-    for bx1, by1, bx2, by2 in balonlar:
-        bcx = (bx1 + bx2) * 0.5
-        bcy = (by1 + by2) * 0.5
-        if not (x1 <= bcx <= x2) or bcy < y1:   # baska hedefin balonu
-            continue
-        mesafe = abs(bcy - y2) + abs(bcx - hx)
-        if en_iyi_mesafe is None or mesafe < en_iyi_mesafe:
-            en_iyi, en_iyi_mesafe = (bcx, bcy), mesafe
-    return en_iyi if en_iyi is not None else (hx, hy)
+# Nisan noktasi geometrisi algi.py'de yasar ve BURADAN YENIDEN YAYINLANIR.
+#
+# Neden orada: ayni hesabi UC yer kullaniyor — bu PD kontrolcusu, Qt canli
+# gorunumdeki nisangah ve algi.draw_overlay. Uc ayri kopya olsaydi ekrandaki
+# arti, lazerin gercekte gittigi yerden baska bir noktayi gosterebilirdi.
+# Neden burada DEGIL: algi.py bu modulu import EDEMEZ (nisan -> algi bagimliligi
+# zaten var, tersi dongusel olurdu), o yuzden ortak sahip algi.py.
+#
+# Ozet: nisan noktasi BALONDUR (maketin ALTINDA), govde merkezi degil. Balon
+# tespit edilebiliyorsa gercek balon, edilemiyorsa kutu yuksekliginin
+# `balon_ofset` kati kadar altindaki nokta. Ayrinti icin algi.nisan_noktasi.
+nisan_noktasi = algi.nisan_noktasi
 
 
 def derece_per_piksel(kare_genislik, fov_yatay=None):
@@ -101,6 +98,12 @@ class PDNisanci:
         self._son_hata = None      # (ex_der, ey_der)
         self._son_t = None
         self._hiz = (0.0, 0.0)     # yumusatilmis hata degisim hizi (derece/sn)
+        # Teshis (arayuz okur, kontrol matematigine KATILMAZ): son karedeki piksel
+        # hatasi ve o karede gecerli olu bolge yaricapi. Ates kapisi "hata < olu
+        # bolge" olunca aciliyor; ikisi gorunmezse operator neden ates edilmedigini
+        # anlayamiyor — sahada tam bu yasandi (16.08).
+        self.son_hata_px = None    # (px, py) — nisan noktasinin lazer referansina uzakligi
+        self.son_olu_px = None     # (olu_x, olu_y) — o karedeki olu bolge yaricapi
 
     def sifirla(self):
         """Turev gecmisini temizler. Hedef kaybolunca/degisince cagrilmali; yoksa yeni
@@ -124,6 +127,29 @@ class PDNisanci:
                 if self._olu is None else self._olu)
 
     @property
+    def olu_bolge_kutu(self):
+        return float(algi.AYAR.get("olu_bolge_kutu",
+                                   algi.VARSAYILAN_AYAR["olu_bolge_kutu"]))
+
+    def _olu_bolge_px(self, hedef_yukseklik, w, h):
+        """Olu bolgeyi PIKSEL olarak verir: (yatay_yaricap, dikey_yaricap).
+
+        Hedef kutusunun yuksekligi biliniyorsa olcut KUTUYA oranlidir — sartname
+        (s.19) balonu "kesit alanina gore belli bir buyuklukte" tanimladigi icin
+        balon ekranda hedefle birlikte kucuur; sabit bir kare yuzdesi uzak hedefte
+        balondan genis kalir ve sistem lazer balonun yanindayken "hedefteyim" der.
+        Kutu bilinmiyorsa (eski cagri bicimi, testler) kareye oranli davranisa doner.
+
+        TABAN_PX: cok kucuk kutuda olu bolge sifira yaklasip sistemi sonsuz
+        arayisa (hunting) sokmasin diye alt sinir — tespit kutusu zaten kare kare
+        birkac piksel oynuyor, onun altini kovalamak anlamsiz.
+        """
+        if hedef_yukseklik and hedef_yukseklik > 0:
+            r = max(TABAN_OLU_BOLGE_PX, hedef_yukseklik * self.olu_bolge_kutu)
+            return r, r
+        return w * self.olu_bolge, h * self.olu_bolge
+
+    @property
     def ofset_x(self):
         """Kamera-lazer boresight ofseti (kare genisliginin orani). Kalibrasyon
         aci.VARSAYILAN_AYAR["lazer_ofset_x"] = 0.0 (canli okunur, ayar panelinden)."""
@@ -133,11 +159,14 @@ class PDNisanci:
     def ofset_y(self):
         return float(algi.AYAR.get("lazer_ofset_y", 0.0))
 
-    def adim(self, hedef_xy, kare_boyut, simdi=None):
+    def adim(self, hedef_xy, kare_boyut, simdi=None, hedef_yukseklik=None):
         """Bir kontrol adimi.
 
-        hedef_xy   : nisan noktasi (x, y) piksel
-        kare_boyut : (genislik, yukseklik) piksel
+        hedef_xy        : nisan noktasi (x, y) piksel
+        kare_boyut      : (genislik, yukseklik) piksel
+        hedef_yukseklik : hedef kutusunun yuksekligi (piksel). Verilirse olu bolge
+                          KUTUYA oranli olur (bkz. _olu_bolge_px); verilmezse
+                          kareye oranli eski davranis surer.
         Doner (d_yaw, d_pitch) derece; (None, None) = komut gonderme.
         """
         if hedef_xy is None or kare_boyut is None:
@@ -155,7 +184,10 @@ class PDNisanci:
         px = hx - w * 0.5 - self.ofset_x * w   # +x = hedef sagda
         py = hy - h * 0.5 - self.ofset_y * h   # +y = hedef asagida
 
-        if abs(px) <= w * self.olu_bolge and abs(py) <= h * self.olu_bolge:
+        olu_x, olu_y = self._olu_bolge_px(hedef_yukseklik, w, h)
+        self.son_hata_px = (px, py)      # teshis (bkz. __init__)
+        self.son_olu_px = (olu_x, olu_y)
+        if abs(px) <= olu_x and abs(py) <= olu_y:
             self._son_hata = None      # yerlestik; sonraki kacista turev sifirdan
             self._son_t = simdi
             return None, None
@@ -173,6 +205,17 @@ class PDNisanci:
 
         # protokol.py'de +dy = YUKARI; hedef altta ise (py>0) gimbal asagi donmeli.
         ey = -ey
+
+        # NOT: Balon (hedef alti) ofseti BURADA DEGIL, nisan_noktasi()'nda uygulanir.
+        # Burada bir sure sabit "ey -= 3.0" duruyordu; iki sebeple yanlisti:
+        #   1. Sabit aci mesafeye gore olceklenmez (5 m'de dogru, 15 m'de uc kati).
+        #   2. Yukaridaki olu bolge kontrolu bu satirdan ONCE calisiyor ve kare
+        #      MERKEZINE olan uzakliga bakiyordu -> govde ortalanir ortalanmaz
+        #      (None, None) donuyor, ofset dinlenme noktasina HIC yansimiyordu.
+        #      Yani lazer balona degil govdeye nisan aliyordu ve ustelik ates
+        #      kapisi (`merkezde`) "govde ortalandi" anlamina geliyordu.
+        # Ofset nisan noktasina tasininca olu bolge dogrudan NISAN NOKTASINA olan
+        # uzakligi olcer: `merkezde` artik "lazer balonun uzerinde" demektir.
 
         # Hata degisim hizi (yumusatilmis) -> ileri gorus icin. Alfa dt'den turer
         # (sabit-orneklem DEGIL) — bkz. TUREV_ZAMAN_SABITI yorumu: FPS degisince
@@ -198,14 +241,34 @@ class PDNisanci:
 
 
 if __name__ == "__main__":
-    # --- nisan_noktasi: balon varsa balona nisan al ---
-    hedef = (100, 100, 200, 180)                 # maket kutusu
+    # --- nisan_noktasi: nisan noktasi BALONDUR, govde merkezi DEGIL ---
+    hedef = (100, 100, 200, 180)                 # maket kutusu (yukseklik 80)
     balon_alt = (140, 190, 160, 215)             # maketin ALTINDA (bizim balonumuz)
     balon_baska = (400, 190, 420, 215)           # baska hedefin balonu (yatayda uzak)
-    assert nisan_noktasi(hedef, []) == (150.0, 140.0)                 # balon yok -> merkez
-    assert nisan_noktasi(hedef, [balon_alt]) == (150.0, 202.5)        # balona nisan
-    assert nisan_noktasi(hedef, [balon_baska]) == (150.0, 140.0)      # baskasininki sayilmaz
+    algi.ayar_guncelle(balon_ofset=0.40)
+
+    # 1. Gercek balon tespiti varsa o kazanir.
+    assert nisan_noktasi(hedef, [balon_alt]) == (150.0, 202.5)
     assert nisan_noktasi(hedef, [balon_baska, balon_alt]) == (150.0, 202.5)
+
+    # 2. Balon gorunmuyorsa yeri kutudan kestirilir: alt kenar + 0.40 * yukseklik.
+    assert nisan_noktasi(hedef, []) == (150.0, 180 + 80 * 0.40)       # = 212.0
+    assert nisan_noktasi(hedef, [balon_baska]) == (150.0, 212.0)      # baskasininki sayilmaz
+
+    # 3. Nisan noktasi HER ZAMAN govde merkezinin ALTINDA olmali (balon asagida).
+    assert nisan_noktasi(hedef, [])[1] > (100 + 180) * 0.5
+
+    # 4. Ofset MESAFEDEN BAGIMSIZ: ayni maket yarim boyutta gorununce (2x uzak)
+    #    nisan noktasinin kutuya gore BAGIL yeri degismemeli.
+    uzak = (100, 100, 150, 140)                  # ayni maket, yukseklik 40 (yarisi)
+    yakin_bagil = (nisan_noktasi(hedef, [])[1] - 180) / 80.0
+    uzak_bagil = (nisan_noktasi(uzak, [])[1] - 140) / 40.0
+    assert abs(yakin_bagil - uzak_bagil) < 1e-9, (yakin_bagil, uzak_bagil)
+
+    # 5. Ayar 0 ise nisan noktasi kutunun tam alt kenari olur.
+    algi.ayar_guncelle(balon_ofset=0.0)
+    assert nisan_noktasi(hedef, []) == (150.0, 180.0)
+    algi.ayar_guncelle(balon_ofset=0.40)
 
     # --- derece/piksel ---
     algi.ayar_guncelle(fov=60.0)
@@ -245,6 +308,37 @@ if __name__ == "__main__":
     # 6. sifirla() turev gecmisini temizlemeli (yeni hedefte sicrama olmasin).
     n.sifirla()
     assert n._son_hata is None and n._son_t is None
+
+    # --- Olu bolge KUTUYA oranli (isabet payi) ---
+    algi.ayar_guncelle(olu_bolge_kutu=0.12)
+    n2 = PDNisanci()
+
+    # 6a. Kutu verilmezse kareye oranli ESKI davranis surer (geriye donuk uyum).
+    assert n2._olu_bolge_px(None, 1920, 1080) == (1920 * n2.olu_bolge, 1080 * n2.olu_bolge)
+
+    # 6b. Kutu verilirse olcut kutuya oranli ve IKI EKSENDE AYNI olur (balon yuvarlak).
+    ox, oy = n2._olu_bolge_px(200.0, 1920, 1080)
+    assert ox == oy == 200.0 * 0.12, (ox, oy)
+
+    # 6c. ⭐ ASIL KAZANC: uzak hedefte olu bolge KUCULUR. Eski sabit-kare olcutu
+    #     15 m'de balondan genis kaliyordu (lazer yaninda dururken "hedefteyim").
+    yakin, _ = n2._olu_bolge_px(200.0, 1920, 1080)
+    uzak, _ = n2._olu_bolge_px(70.0, 1920, 1080)
+    assert uzak < yakin, (uzak, yakin)
+    assert uzak < 1920 * n2.olu_bolge, "uzak hedefte olu bolge eski sabit olcutten dar olmali"
+
+    # 6d. Cok kucuk kutuda taban devreye girer (sonsuz arayis olmasin).
+    kucucuk, _ = n2._olu_bolge_px(5.0, 1920, 1080)
+    assert kucucuk == TABAN_OLU_BOLGE_PX
+
+    # 6e. Uctan uca: ayni piksel hatasi, YAKIN hedefte "yerlesti" sayilirken
+    #     UZAK hedefte sayilmamali (daha hassas nisan istenir).
+    kare_orta = (1920 * 0.5 + 15.0, 1080 * 0.5)     # merkeze 15 px yatay hata
+    n2.sifirla()
+    assert n2.adim(kare_orta, (1920, 1080), simdi=1.0, hedef_yukseklik=200.0) == (None, None)
+    n2.sifirla()
+    dy_uzak, _ = n2.adim(kare_orta, (1920, 1080), simdi=1.0, hedef_yukseklik=70.0)
+    assert dy_uzak is not None, "uzak hedefte 15 px hata icin komut URETILMELIYDI"
 
     # --- Kapali cevrim benzetimi: gimbal dondukce hedef kadrajda merkeze kayar ---
     KARE_SURESI = 0.07
