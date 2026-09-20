@@ -432,6 +432,10 @@ class TiltSurucu:
         self._son_pos = 0
         self.hiz_seviye = HIZ_VARSAYILAN
         self._gonderilen_hiz = None     # karta en son giden (hiz, ivme) — None = gonderilmedi
+        # Karttaki firmware "Z" komutunu tanimiyorsa (eski surum yuklu) hiz kademesi
+        # calismaz. Hareketin geri kalani calismaya DEVAM EDER: G/E/H/X/D eski
+        # surumde de var. Bu yuzden bu durum bir HATA degil, bir UYARIDIR.
+        self.hiz_desteklenmiyor = False
         self.kalibrasyon_uyarildi = False
         # Kart RESET ATTI mi? (bkz. _kart_yaziyor) — arayuz bunu operatore GORUNUR
         # sekilde soylemeli; sessiz kalirsa aci referansi bozulmus olarak devam eder.
@@ -537,7 +541,7 @@ class TiltSurucu:
 
         Firmware Z'yi yalnizca DURURKEN kabul eder (hareket ortasinda profil
         degistirmek rampayi tutarsiz birakir), bu yuzden gonderim ertelenebilir."""
-        if not self.hazir or self.durum["hareket"]:
+        if self.hiz_desteklenmiyor or not self.hazir or self.durum["hareket"]:
             return False
         dpd = self.darbe_per_derece
         if dpd is None:
@@ -615,6 +619,16 @@ class TiltSurucu:
         del self.satirlar[:-20]
         if s.startswith("ERR,"):
             sebep = s.split(',')[-1]
+            # ESKI FIRMWARE: "Z" komutu yok. Hiz kademesi calismaz ama hareketin
+            # geri kalani calisir (G/E/H/X/D eski surumde de var). Bir kez soylenir
+            # ve bir daha DENENMEZ — yoksa her kademe degisiminde ayni hata dusuerdi.
+            if s.startswith("ERR,Z") and sebep == "UNKNOWN_COMMAND":
+                self.hiz_desteklenmiyor = True
+                self._gonderilen_hiz = None
+                self.hata = ("Karttaki firmware hız komutunu (Z) tanımıyor — eski sürüm. "
+                             "Hareket çalışır ama hız kademesi etkisizdir. "
+                             "ws_motor_test/esp32_ws_test yeniden yüklenmeli.")
+                return
             self.hata = HATALAR.get(sebep, f"Tilt kartı hatası: {sebep}")
 
     def _oku(self):
@@ -938,6 +952,36 @@ if __name__ == "__main__":
     assert abs(h.mock.maks_hiz - round(der_h * dpd, 1)) < 0.2, \
         "yavas kademe hareketten ONCE gitmeliydi"
     assert not any(s.endswith("STOP_FIRST") for s in h.satirlar), h.satirlar
+
+    # 14g. ⭐ ESKI FIRMWARE (Z komutu yok): hareket calismaya devam etmeli, yalniz
+    #      hiz kademesi etkisiz kalmali ve bu BIR KEZ soylenmeli. Kullanici
+    #      uygulamayi karta yeni firmware yuklemeden acabilir — sik bir durum.
+    class _EskiFirmware(MockTiltKart):
+        def islet(self, satir, simdi=None):
+            s = satir.strip()
+            if s.startswith("Z"):
+                self.kayit.append(s)
+                return f"ERR,{s},UNKNOWN_COMMAND"
+            return super().islet(satir, simdi)
+
+    saat[0] += 1.0
+    e = TiltSurucu("mock", _saat=lambda: saat[0])
+    e.mock = _EskiFirmware(simdi=saat[0])
+    tike = lambda: (saat.__setitem__(0, saat[0] + 0.25), e.yokla())[1]
+    tike(); tike(); tike()
+    assert e.hiz_desteklenmiyor, "eski firmware tespit edilmeliydi"
+    assert e.hata and "eski sürüm" in e.hata, e.hata
+    n_z = len([k for k in e.mock.kayit if k.startswith("Z")])
+    e.hiz_ayarla(H_HIZLI); tike(); tike()
+    assert len([k for k in e.mock.kayit if k.startswith("Z")]) == n_z, \
+        "eski firmware'e Z gondermeye devam edildi"
+    # ...ama HAREKET calismali: G/E/H/X eski surumde de var.
+    e.git(20.0)
+    for _ in range(60):
+        tike()
+        if not e.hareket and e._bekleyen_hedef is None:
+            break
+    assert abs(e.aci - 20.0) < 0.5, f"eski firmware'de hareket bozuldu: {e.aci}"
 
     # 14f. Kirpma: kaba bir kalibrasyon firmware tavanini astirirsa deger KIRPILIR,
     #      komut reddedilmez (kol yavaslar ama calismaya devam eder).
