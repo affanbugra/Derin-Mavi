@@ -480,6 +480,11 @@ HEDEF_ONCELIK = {"fuze": 0, "helikopter": 1, "f16": 2, "drone": 3}
 # akici. Salinim geri gelirse ilk yukseltilecek yer burasi (1.0'a dogru); "hala
 # yavas" ise dusurulur. Taban da 0.10 -> 0.04 sn'ye indirildi (inference ~15 FPS'te
 # zaten ~0.067 sn'de bir kare geliyor, bu tabanin pratikte etkisi kalmadi).
+# Tilt kartinin nabiz periyodu (ms). Firmware 350 ms sessizlikte kendini kilitler
+# (tilt_surucu.ZAMAN_ASIMI_MS); bu deger asimin ~1/3'u olacak sekilde secildi ki
+# arka arkaya iki nabiz kacsa bile kart kilitlenmesin.
+TILT_NABIZ_MS = 100
+
 NISAN_MESGUL_ORANI = 0.4
 NISAN_MIN_ARALIK = 0.04
 
@@ -908,6 +913,17 @@ class MainWindow(QMainWindow):
             self.esp_timer.timeout.connect(self._esp_yokla)
             # Periyot ATES TAZELEMESINI de belirler: bu dongu durursa kart lazeri keser.
             self.esp_timer.start(P.ATES_TAZELE_MS)
+            # TILT KARTININ NABZI AYRI VE DAHA SIK. Firmware 350 ms sessizlikte
+            # kendini kilitler; 250 ms'lik yoklama yalnizca 100 ms pay birakir ve
+            # GUI'nin kisa bir takilmasi (YOLO cikarimi, kamera acilisi, pencere
+            # tasima) karti kilitler — kilit acilana kadar MOTOR DURUR ve kullanici
+            # "hareket etmiyor" diye gorur.
+            # Ayri zamanlayici "arayuz donarsa kart kilitlenir" guvenligini BOZMAZ:
+            # bu timer da GUI is parcaciginda calisir, arayuz donarsa o da durur.
+            if self.kontrol.tilt_ayri:
+                self.tilt_timer = QTimer(self)
+                self.tilt_timer.timeout.connect(self.kontrol.tilt.yokla)
+                self.tilt_timer.start(TILT_NABIZ_MS)
         elif self.kontrol.hata:
             self._ci("ESP32", BD2, "· hata")
 
