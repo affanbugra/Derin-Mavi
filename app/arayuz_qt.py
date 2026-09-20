@@ -2092,7 +2092,17 @@ class MainWindow(QMainWindow):
             return
         ad, kpan, ktilt = self.YON_TABLO[direction]
         getattr(self, ad).setStyleSheet(self._key_active_style)
-        self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)   # tek dokunus
+        # DIKEYDE BASISTA HEMEN SUREKLI HAREKET BASLAR — once "tek dokunus adimi,
+        # sonra 300 ms bekle, sonra devam" sirasi yoktu artik. Eski sira kolu
+        # once 5 derece goturup DURDURUYOR, sonra yeniden kaldiriyordu: kullanici
+        # bunu "ilk hamlede takilma" olarak goruyordu.
+        # Tek dokunusun hassasligi KAYBOLMAZ: tus 300 ms'den once birakilirsa
+        # `_tilt_surekli_bitir` tam adim acisina oturtur (bkz. orada).
+        surekli = bool(ktilt) and self._tilt_surekli_mi() and self._tilt_surekli_baslat(ktilt)
+        if not surekli:
+            self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)  # tek dokunus
+        elif kpan:
+            self._aci_hareket(kpan * self.aci_adim, 0.0)                    # yatay ayri
         self._basili_yonler.add(direction)
         if not self._tekrar_timer.isActive():
             self._tekrar_gecikme.start(self.TEKRAR_GECIKME_MS)
@@ -2103,13 +2113,15 @@ class MainWindow(QMainWindow):
             return
         getattr(self, self.YON_TABLO[direction][0]).setStyleSheet(self._key_normal_style)
         self._basili_yonler.discard(direction)
+        tilt_yonu = self.YON_TABLO[direction][2]
+        if tilt_yonu:
+            # Dikey tus birakildi: surekli hareket biter. Kisa basisti ise tam
+            # adim acisina oturur (bkz. _tilt_surekli_bitir). Bunu atlarsak
+            # "yukari"yi birakip "saga" basili tutan operator kolu sinira kadar
+            # tirmanmaya devam ederken gorurdu.
+            self._tilt_surekli_bitir(dokunus_yonu=tilt_yonu)
         if not self._basili_yonler:
             self._tekrar_durdur()
-        elif self.YON_TABLO[direction][2]:
-            # Dikey tus birakildi ama yatay hala basili: yalniz dikeyin surekli
-            # hareketi biter. Bunu atlarsak "yukari"yi birakip "saga" basili
-            # tutan operator, kolu sinira kadar tirmanmaya devam ederken gorurdu.
-            self._tilt_surekli_bitir()
 
     # ---- USB GAMEPAD ----
     GP_TARAMA_TIK = 40      # cihaz yokken kac tikta bir yeniden taransin (~2 sn)
@@ -2224,10 +2236,18 @@ class MainWindow(QMainWindow):
         if not self._aci_hareket(0.0, hedef - taban, taban_olculen=True):
             return False
         self._tilt_surekli = True
+        self._tilt_basis_t = time.time()
+        self._tilt_basis_aci = taban          # dokunus adimi buradan olculur
         return True
 
-    def _tilt_surekli_bitir(self):
-        """Tus birakildi / hareket kesildi: kolu durdur ve ekrani gercege cek."""
+    def _tilt_surekli_bitir(self, dokunus_yonu=None):
+        """Tus birakildi / hareket kesildi: kolu durdur ve ekrani gercege cek.
+
+        `dokunus_yonu` verilir ve basis KISA ise (TEKRAR_GECIKME_MS altinda) bu bir
+        TEK DOKUNUS sayilir: kol, basis anindaki acidan tam `aci_adim` kadar uzaga
+        oturtulur. Boylece hassas nisan icin tek tik davranisi korunur — basista
+        surekli harekete gecmek onu kaybettirmez, yalnizca erteler.
+        Komut MUTLAK oldugu icin kol bu sirada hedefi asmis olsa bile geri gelir."""
         if not getattr(self, "_tilt_surekli", False):
             return
         self._tilt_surekli = False
@@ -2236,6 +2256,13 @@ class MainWindow(QMainWindow):
             return
         self._esp_goster(k.tilt_dur())
         olculen = k.tilt_olculen
+        basis_suresi = time.time() - getattr(self, "_tilt_basis_t", 0.0)
+        baslangic = getattr(self, "_tilt_basis_aci", None)
+        if (dokunus_yonu and olculen is not None and baslangic is not None
+                and basis_suresi < self.TEKRAR_GECIKME_MS / 1000.0):
+            hedef = baslangic + dokunus_yonu * self.aci_adim
+            self._aci_hareket(0.0, hedef - olculen, taban_olculen=True)
+            return
         if olculen is not None:
             # Arayuzun inanci kolun DURDUGU yere cekilir; yoksa bir sonraki
             # manuel dokunus uzak hedeften hesaplanirdi.
@@ -2246,7 +2273,9 @@ class MainWindow(QMainWindow):
         if not self._basili_yonler:
             return
         self._son_tekrar_t = time.time()
-        if self._tilt_surekli_mi():
+        # Dikey surekli hareket normalde BASISTA baslar (_dpad_press). Burasi yalniz
+        # o an baslatilamadiysa (kart henuz hazir degildi) ikinci bir sans verir.
+        if not self._tilt_surekli and self._tilt_surekli_mi():
             ktilt = sum(self.YON_TABLO[y][2] for y in self._basili_yonler)
             if ktilt:
                 self._tilt_surekli_baslat(1.0 if ktilt > 0 else -1.0)

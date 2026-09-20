@@ -339,8 +339,15 @@ class Kontrol:
         return self._gonder(P.lazer_guc(self.lazer_guc))
 
     def hiz_ayarla(self, seviye):
-        """Motor hiz duzeyi (tavan hiz + ivme). ESP'ye iki satir olarak gider."""
+        """Motor hiz duzeyi (tavan hiz + ivme). ESP'ye iki satir olarak gider.
+
+        Dikey eksen ayri karttaysa AYNI kademe oraya da bildirilir (Z komutu).
+        Kademeler her iki tarafta da 1/2/3 olarak numaralandirildigi icin
+        arayuzdeki tek secim iki ekseni birden ayarlar; yalniz sayisal karsiliklari
+        farklidir (pan derece/sn konusur, tilt darbe/sn)."""
         self.hiz = P.hiz_kirp(seviye)
+        if self.tilt_ayri:
+            self.tilt.hiz_ayarla(self.hiz)
         return self._gonder(*P.hiz(self.hiz))
 
     def kapat(self):

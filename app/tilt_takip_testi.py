@@ -282,12 +282,16 @@ if __name__ == "__main__":
             sure = 2.0 * math.sqrt(abs(d_pitch) / max(1.0, tavan_ivme)) * NISAN_MESGUL_ORANI
             self._nisan_mesgul_ta = self.saat + max(NISAN_MIN_ARALIK, sure)
 
+    #     ⚠ OLCUT SON HATA DEGIL, SALINIMDIR. Inanc referansi hedefi buyuk bir
+    #     asmayla gecer, geri doner, tekrar gecer — ve sonunda olu bolgeye
+    #     DUSEBILIR. Yalnizca son hataya bakan bir test bunu "basarili" sayardi;
+    #     oysa dwell (lazerin hedefte kalma suresi) bu salinimla imkansizdir.
     b7 = _InancReferansi(hedef_aci=25.0, baslangic_aci=0.0)
-    iz7 = b7.calistir(8.0)
-    assert abs(iz7[-1]) > esik, \
-        ("inanc referansi da yakinsadi — benzetim artik bu farki olcmuyor. "
-         "taban_olculen'i savunan gerekce dogrulanamiyorsa test guncellenmeli.")
-    assert max(iz7) > esik, f"inanc referansinda asma gorulmedi: {max(iz7):.1f} px"
+    iz7 = b7.calistir(9.0)
+    dgs7 = yon_degisimi(iz7, esik)
+    assert dgs7 >= 1 and max(iz7) > 5 * esik, \
+        (f"inanc referansi salinmadi (yon degisimi {dgs7}, asma {max(iz7):.0f} px) — "
+         f"benzetim artik bu farki olcmuyor, test guncellenmeli.")
 
     # 10. ⭐ KULLANILAN KAZANCLAR GECIKMEYLE BIRLIKTE KARARLI MI?
     #     Bu test, ayarlar.json'daki (veya varsayilan) kp/kd ile 133 ms gecikmede
@@ -323,6 +327,6 @@ if __name__ == "__main__":
     print(f"tilt takip benzetimi OK — yerlesme {abs(iz[-1]):.1f} px / esik {esik:.1f} px, "
           f"asma yok, salinim yok, iki yon, hareketli hedef, 0-{T.ACI_MAX:.0f}° araligi, "
           f"kalibrasyon kapisi, {g_sayisi} komut / {kare_sayisi} kare "
-          f"(inanc referansi karsi deneyi: {max(iz7):.0f} px asma) | "
+          f"(inanc referansi karsi deneyi: {max(iz7):.0f} px asma, {dgs7} yon degisimi) | "
           f"gecikmeli (133 ms) kp={algi.AYAR['kp']} kd={algi.AYAR['kd']}: "
           f"salinim yok, hareketli hata {kalici:.0f} px")

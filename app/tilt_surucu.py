@@ -62,6 +62,31 @@ ZAMAN_ASIMI_MS = 350                # MotionCore::TIMEOUT_MS — bu sure sessizl
 CANLILIK_MS = 120                   # biz bu sikligda "H" yolluyoruz (asiminin ~1/3'u)
 JOG_HIZLAR = (100, 400, 800)
 
+# ---- HEDEF HAREKETI HIZ PROFILI (firmware "Z<hiz>,<ivme>" komutu) ----
+# Firmware'deki siniirlar (MotionCore::HIZ_TABAN/TAVAN, IVME_TABAN/TAVAN) ile AYNI
+# olmali; disina cikan deger BAD_SPEED ile reddedilir.
+HIZ_TABAN, HIZ_TAVAN = 100.0, 5000.0          # darbe/s
+IVME_TABAN, IVME_TAVAN = 200.0, 60000.0       # darbe/s^2
+
+# Kademeler DERECE cinsinden tanimlanir, darbeye kalibrasyondan cevrilir: mekanizma
+# degisir veya yeniden kalibre edilirse kademeler KENDILIGINDEN dogru kalir.
+# Darbe cinsinden yazilsaydi 60 derece kac darbe ediyorsa ona baglanirdi.
+#
+# ⚠ ASIL MESELE IVME. Eski firmware 1600 darbe/s tepe hiza 3200 darbe/s^2 ile
+# cikiyordu: tepe hiza ulasma suresi 0.5 sn. Kisa hareketlerde tepe hiza HIC
+# ulasilmiyor, hareket "agir" hissettiriyordu. Buradaki kademelerde bu sure
+# ~0.11 sn. Olculen (2675 darbe/60 derece, 0->20 derece):
+#     eski profil (1600/3200)   : 1.04 sn  = 19 derece/sn
+#     Normal                    : 0.55 sn  = 36 derece/sn
+#     Hizli                     : 0.37 sn  = 54 derece/sn
+H_YAVAS, H_NORMAL, H_HIZLI = 1, 2, 3
+HIZ_TABLO = {                 # seviye: (tepe hiz derece/sn, ivme derece/sn^2)
+    H_YAVAS:  (20.0, 150.0),  # hassas nisan
+    H_NORMAL: (45.0, 400.0),
+    H_HIZLI:  (75.0, 700.0),  # ani hareket
+}
+HIZ_VARSAYILAN = H_NORMAL
+
 # Kartin "durum yok" kabul ettigimiz suresi: STATE3 100 ms'de bir gelir; 3 paket
 # kacarsa bagi kopmus sayariz (arayuz de oyle gosterir).
 DURUM_ASIMI_S = 0.6
@@ -152,6 +177,16 @@ def git(derece):
     return f"G{aci_kirp(derece):.4f}\n"
 
 
+def hiz_profili(darbe_sn, ivme_darbe_sn2):
+    """Z<hiz>,<ivme> — hedef hareketinin tepe hizi ve ivmesi (darbe cinsinden).
+
+    Firmware yalnizca DURURKEN kabul eder ve araligi asani reddeder; burada da
+    kirpilir, iki tarafa birden guvenilmez."""
+    h = max(HIZ_TABAN, min(HIZ_TAVAN, float(darbe_sn)))
+    iv = max(IVME_TABAN, min(IVME_TAVAN, float(ivme_darbe_sn2)))
+    return f"Z{h:.1f},{iv:.1f}\n"
+
+
 def jog_hiz(darbe_sn):
     if darbe_sn not in JOG_HIZLAR:
         raise ValueError(f"jog hizi {JOG_HIZLAR} icinden olmali")
@@ -236,7 +271,7 @@ class MockTiltKart:
     # (mekanizma dogrusal degil); burada yalnizca mock'un ne kadar surede
     # ilerleyecegini belirler.
     UST_DARBE = 6400
-    MAKS_HIZ = 1600.0       # darbe/s — MotionCore::MAX_SPEED
+    MAKS_HIZ = 3200.0       # darbe/s — MotionCore::MAX_SPEED_VARSAYILAN
 
     def __init__(self, kalibre=True, simdi=None):
         self.pos = 0
@@ -244,6 +279,8 @@ class MockTiltKart:
         self.acik = False
         self.bekleyen = None
         self.jog = 400
+        self.maks_hiz = self.MAKS_HIZ      # Z komutuyla degisir
+        self.ivme = 12800.0                # ACCEL_VARSAYILAN (mock ivmeyi UYGULAMAZ)
         self.kalibre = kalibre
         self.son_canli = simdi if simdi is not None else time.time()
         self.t = self.son_canli
@@ -281,6 +318,19 @@ class MockTiltKart:
             if self.acik:
                 self.son_canli = simdi
             return None                     # firmware H'ye yanit YAZMAZ
+        if s.startswith("Z"):
+            # Firmware'de Z, silahlandirma kapisinin ONUNDEDIR (V gibi).
+            if self.pos != self.hedef:
+                return f"ERR,{s},STOP_FIRST"
+            try:
+                h_s, iv_s = s[1:].split(",", 1)
+                h, iv = float(h_s), float(iv_s)
+            except ValueError:
+                return f"ERR,{s},BAD_SPEED"
+            if not (HIZ_TABAN <= h <= HIZ_TAVAN and IVME_TABAN <= iv <= IVME_TAVAN):
+                return f"ERR,{s},BAD_SPEED"
+            self.maks_hiz, self.ivme = h, iv
+            return f"OK,{s}"
         if not self.acik:
             return f"ERR,{s},DISARMED"
         if s.startswith("V"):
@@ -327,7 +377,7 @@ class MockTiltKart:
             self._watchdog(self.t)
             if self.acik and self.pos != self.hedef:
                 yon = 1 if self.hedef > self.pos else -1
-                git_darbe = int(self.MAKS_HIZ * adim)
+                git_darbe = int(self.maks_hiz * adim)
                 kalan = abs(self.hedef - self.pos)
                 self.pos += yon * min(git_darbe, kalan)
             if self.pos == self.hedef and self.bekleyen is not None:
@@ -380,6 +430,8 @@ class TiltSurucu:
         self._son_canli_t = 0.0
         self._ac_denendi_t = 0.0
         self._son_pos = 0
+        self.hiz_seviye = HIZ_VARSAYILAN
+        self._gonderilen_hiz = None     # karta en son giden (hiz, ivme) — None = gonderilmedi
         self.kalibrasyon_uyarildi = False
         # Kart RESET ATTI mi? (bkz. _kart_yaziyor) — arayuz bunu operatore GORUNUR
         # sekilde soylemeli; sessiz kalirsa aci referansi bozulmus olarak devam eder.
@@ -463,6 +515,41 @@ class TiltSurucu:
     def hedef_aci(self):
         return self.durum["hedef"] if (self.taze and self.durum["kalibre"]) else None
 
+    @property
+    def darbe_per_derece(self):
+        """Kalibrasyondan turer: ust sinir darbesi / 60 derece. Mekanizma yeniden
+        kalibre edilirse hiz kademeleri KENDILIGINDEN dogru kalir."""
+        if not (self.taze and self.durum["kalibre"]) or self.durum["upper"] <= 0:
+            return None
+        return self.durum["upper"] / ACI_MAX
+
+    def hiz_ayarla(self, seviye):
+        """Hiz kademesini secer (Z komutu). Kart mesgul/hazir degilse BEKLETILIR.
+
+        Kademe DERECE cinsinden tanimlidir; darbeye burada, kartin bildirdigi
+        kalibrasyona gore cevrilir."""
+        self.hiz_seviye = seviye if seviye in HIZ_TABLO else HIZ_VARSAYILAN
+        self._hiz_bosalt()
+        return self.hiz_seviye
+
+    def _hiz_bosalt(self):
+        """Secili kademeyi, kart uygun durumdayken karta bildirir.
+
+        Firmware Z'yi yalnizca DURURKEN kabul eder (hareket ortasinda profil
+        degistirmek rampayi tutarsiz birakir), bu yuzden gonderim ertelenebilir."""
+        if not self.hazir or self.durum["hareket"]:
+            return False
+        dpd = self.darbe_per_derece
+        if dpd is None:
+            return False
+        der_hiz, der_ivme = HIZ_TABLO[self.hiz_seviye]
+        cift = (round(der_hiz * dpd, 1), round(der_ivme * dpd, 1))
+        if cift == self._gonderilen_hiz:
+            return False
+        self._gonderilen_hiz = cift
+        self._yaz(hiz_profili(*cift))
+        return True
+
     def ozet(self):
         """Alt cubugun gosterecegi ozet (None = kart kapali)."""
         if not self.bagli:
@@ -516,6 +603,9 @@ class TiltSurucu:
             if d["pos"] == 0 and not d["acik"] and self._son_pos > 20:
                 self.kart_resetlendi = True
                 self._bekleyen_hedef = None     # eski hedef artik anlamsiz referansta
+                # Kart acilis degerlerine dondu: hiz profili yeniden bildirilmeli,
+                # yoksa kol sessizce firmware varsayilaninda kalir.
+                self._gonderilen_hiz = None
             self._son_pos = d["pos"]
             self.durum = d
             self.son_durum_t = self._saat()
@@ -573,6 +663,9 @@ class TiltSurucu:
         if self.taze and not self.durum["acik"] and (simdi - self._ac_denendi_t) > 0.3:
             self._ac_denendi_t = simdi
             self._yaz(AC)
+        # Hiz profili HEDEFTEN ONCE gider: hedef once gonderilirse kart hareketi
+        # eski profille baslatir ve Z artik "hareket halinde" diye reddedilir.
+        self._hiz_bosalt()
         self._bosalt()
         self._oku()
         return self.ozet()
@@ -802,6 +895,64 @@ if __name__ == "__main__":
     assert not kapali.bagli and kapali.ozet() is None
     assert kapali.git(30.0) is None and kapali.yokla() is None
     kapali.dur(); kapali.kapat()
+
+    # 14. HIZ KADEMESI (Z komutu) — kademeler DERECE, karta DARBE gider
+    #     GERCEK kalibrasyonla denenir (olculen: 60 derece = 2675 darbe). Mock'un
+    #     kaba varsayilaniyla (6400) Hizli kademesi firmware tavanina carpar ve
+    #     test gercekte olmayan bir kirpmayi olcerdi.
+    _eski_ust_darbe = MockTiltKart.UST_DARBE
+    MockTiltKart.UST_DARBE = 2675
+    saat[0] += 1.0
+    h = TiltSurucu("mock", _saat=lambda: saat[0])
+    tikh = lambda: (saat.__setitem__(0, saat[0] + 0.25), h.yokla())[1]
+    tikh(); tikh()
+    assert h.hazir and abs(h.darbe_per_derece - MockTiltKart.UST_DARBE / ACI_MAX) < 1e-9
+    dpd = h.darbe_per_derece
+
+    # 14a. Acilista varsayilan kademe kendiliginden bildirilir
+    tikh()
+    der_h, der_iv = HIZ_TABLO[HIZ_VARSAYILAN]
+    assert abs(h.mock.maks_hiz - round(der_h * dpd, 1)) < 0.2, h.mock.maks_hiz
+    assert abs(h.mock.ivme - round(der_iv * dpd, 1)) < 0.2, h.mock.ivme
+
+    # 14b. Kademe degisimi karta gider ve DERECE->DARBE cevrimi kalibrasyondan turer
+    h.hiz_ayarla(H_HIZLI); tikh()
+    der_h, der_iv = HIZ_TABLO[H_HIZLI]
+    assert abs(h.mock.maks_hiz - round(der_h * dpd, 1)) < 0.2, h.mock.maks_hiz
+
+    # 14c. Ayni kademe tekrar secilirse komut GITMEZ (hatta gereksiz trafik yok)
+    n = len([k for k in h.mock.kayit if k.startswith("Z")])
+    h.hiz_ayarla(H_HIZLI); tikh()
+    assert len([k for k in h.mock.kayit if k.startswith("Z")]) == n
+
+    # 14d. Gecersiz kademe varsayilana duser
+    assert h.hiz_ayarla(99) == HIZ_VARSAYILAN
+
+    # 14e. ⭐ Z HAREKET ORTASINDA REDDEDILIR; kademe kart durunca uygulanir.
+    #      Sira onemli: yokla() once hizi, sonra hedefi gonderir — tersi olsaydi
+    #      hareket eski profille baslar ve Z bir daha hic gecmezdi.
+    h.hiz_ayarla(H_YAVAS)
+    h.git(50.0); tikh()
+    assert h.hareket, "hareket baslamaliydi"
+    der_h, _ = HIZ_TABLO[H_YAVAS]
+    assert abs(h.mock.maks_hiz - round(der_h * dpd, 1)) < 0.2, \
+        "yavas kademe hareketten ONCE gitmeliydi"
+    assert not any(s.endswith("STOP_FIRST") for s in h.satirlar), h.satirlar
+
+    # 14f. Kirpma: kaba bir kalibrasyon firmware tavanini astirirsa deger KIRPILIR,
+    #      komut reddedilmez (kol yavaslar ama calismaya devam eder).
+    assert hiz_profili(99999, 999999) == f"Z{HIZ_TAVAN:.1f},{IVME_TAVAN:.1f}\n"
+    assert hiz_profili(1, 1) == f"Z{HIZ_TABAN:.1f},{IVME_TABAN:.1f}\n"
+    MockTiltKart.UST_DARBE = 6400          # kaba kalibrasyon: Hizli tavani asar
+    saat[0] += 1.0
+    hk = TiltSurucu("mock", _saat=lambda: saat[0])
+    for _ in range(3):
+        saat[0] += 0.25; hk.yokla()
+    hk.hiz_ayarla(H_HIZLI)
+    saat[0] += 0.25; hk.yokla()
+    assert hk.mock.maks_hiz == HIZ_TAVAN, hk.mock.maks_hiz
+    assert not any(s.endswith("BAD_SPEED") for s in hk.satirlar), hk.satirlar
+    MockTiltKart.UST_DARBE = _eski_ust_darbe
 
     # 12. mock kaynagi seri port acmaya CALISMAMALI (otomatik-bulma dali eklenince
     #     mock, seri acma koduna dusup "port acilamadi" hatasi uretmisti).
