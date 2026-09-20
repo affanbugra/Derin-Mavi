@@ -90,12 +90,78 @@ def _model_bul():
     m = _modelleri_bul()
     return m[0] if m else None
 
-# ---- HTML tasarim tokenlari (gorev_kontrol_yedek.html :root) ----
-BG = "#dde3ea"; PANEL = "#ffffff"; CARD = "#edf1f6"; BD = "#bbc8d6"; BD2 = "#96aabb"
-TXT = "#0b1620"; TXT2 = "#2c4560"; TXT3 = "#527088"
-BLUE = "#1258a8"; RED = "#bf2020"; GRN = "#158750"; AMB = "#8e5c08"
-F = "'Public Sans','Segoe UI',sans-serif"
-FM = "Consolas,'Courier New',monospace"
+# ---- Apple Human Interface Guidelines (macOS Dark Glassmorphism) Tokens ----
+# Derin Mavi logo renk paleti: Elektrik Okyanus Mavisi / Parlak Camgöbeği (#2ca6e7)
+BG = "#050811"; PANEL = "rgba(20, 32, 54, 0.85)"; CARD = "rgba(24, 38, 64, 0.80)"; BD = "rgba(255, 255, 255, 0.10)"; BD2 = "rgba(44, 166, 231, 0.40)"
+TXT = "#f5f5f7"; TXT2 = "#94a3b8"; TXT3 = "#64748b"
+MAVI = "#2ca6e7"; MAVI_ACIK = "#38bdf8"; MAVI_KOYU = "#0284c7"; MAVI_BG = "rgba(44, 166, 231, 0.15)"
+BLUE = "#2ca6e7"; RED = "#ff453a"; GRN = "#30d158"; AMB = "#ffd60a"
+F = "'.AppleSystemUIFont', 'SF Pro Display', 'SF Pro Text', '-apple-system', 'Helvetica Neue', sans-serif"
+FM = "'SF Mono', 'Menlo', 'Consolas', 'Courier New', monospace"
+
+
+class AppleSwitch(QWidget):
+    """Apple iOS / macOS tarzı akıcı, yuvarlatılmış cam toggle switch bileşeni."""
+    toggled = Signal(bool)
+
+    def __init__(self, checked=False, parent=None, active_color=MAVI):
+        super().__init__(parent)
+        self.setFixedSize(38, 22)
+        self.setCursor(Qt.PointingHandCursor)
+        self._checked = bool(checked)
+        self._active_color = QColor(active_color)
+        self._track_inactive = QColor(18, 28, 46, 220)
+        self._border_inactive = QColor(255, 255, 255, 28)
+        self._thumb_color = QColor("#ffffff")
+        self.oneri_val = 0
+
+    def isChecked(self):
+        return self._checked
+
+    def setChecked(self, checked):
+        checked = bool(checked)
+        if self._checked != checked:
+            self._checked = checked
+            self.update()
+            self.toggled.emit(self._checked)
+
+    def value(self):
+        return 1 if self._checked else 0
+
+    def setValue(self, val):
+        self.setChecked(bool(val))
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.setChecked(not self._checked)
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+
+        w, h = self.width(), self.height()
+        r = h / 2.0
+        track_rect = QRectF(0, 0, w, h)
+
+        if self._checked:
+            # Apple Glass Blue Track
+            p.setBrush(self._active_color)
+            p.setPen(QColor(56, 189, 248, 160))
+            p.drawRoundedRect(track_rect.adjusted(0.5, 0.5, -0.5, -0.5), r, r)
+        else:
+            p.setBrush(self._track_inactive)
+            p.setPen(self._border_inactive)
+            p.drawRoundedRect(track_rect.adjusted(0.5, 0.5, -0.5, -0.5), r, r)
+
+        # Smooth white thumb with subtle inner glow
+        thumb_diam = h - 4.0
+        thumb_x = (w - thumb_diam - 2.0) if self._checked else 2.0
+        thumb_rect = QRectF(thumb_x, 2.0, thumb_diam, thumb_diam)
+
+        p.setBrush(self._thumb_color)
+        p.setPen(Qt.NoPen)
+        p.drawEllipse(thumb_rect)
+        p.end()
 
 
 # =====================================================================
@@ -103,72 +169,79 @@ FM = "Consolas,'Courier New',monospace"
 # =====================================================================
 COZUNURLUK_SECENEK = [416, 512, 640, 960, 1280]
 
-# Kaydirici gorunumu: onerilen degerde YESIL tutamac, degistirilmisse MAVI.
-# Tek sablon + iki renk takimi (eskiden ayni CSS iki kez kopyalanmisti).
+# Kaydirici gorunumu: onerilen degerde YESIL tutamac, degistirilmisse DERIN MAVI.
 SLIDER_TASLAK = """
     QSlider#ayarsl {{ height: 22px; }}
-    QSlider#ayarsl::groove:horizontal {{ height: 5px; border-radius: 2px; background: #dbe3ec; margin: 0 2px; }}
-    QSlider#ayarsl::sub-page:horizontal {{ height: 5px; border-radius: 2px; background: %s; margin: 0 2px; }}
-    QSlider#ayarsl::add-page:horizontal {{ height: 5px; border-radius: 2px; background: #dbe3ec; margin: 0 2px; }}
-    QSlider#ayarsl::handle:horizontal {{ width: 16px; height: 16px; margin: -6px 0; border-radius: 8px;
+    QSlider#ayarsl::groove:horizontal {{ height: 5px; border-radius: 2.5px; background: rgba(255, 255, 255, 0.12); margin: 0 2px; }}
+    QSlider#ayarsl::sub-page:horizontal {{ height: 5px; border-radius: 2.5px; background: %s; margin: 0 2px; }}
+    QSlider#ayarsl::add-page:horizontal {{ height: 5px; border-radius: 2.5px; background: rgba(255, 255, 255, 0.12); margin: 0 2px; }}
+    QSlider#ayarsl::handle:horizontal {{ width: 16px; height: 16px; margin: -5.5px 0; border-radius: 8px;
         background: {tutamac}; border: 2px solid {kenar}; }}
     QSlider#ayarsl::handle:horizontal:hover {{ background: {ust_tutamac}; border: 2px solid {ust_kenar}; }}
     QSlider#ayarsl::handle:horizontal:pressed {{ background: {bas_tutamac}; border: 2px solid {bas_kenar}; }}
-""" % BLUE
-SLIDER_ONERI = {"tutamac": GRN, "kenar": GRN,
-                "ust_tutamac": "#189a5c", "ust_kenar": "#189a5c",
-                "bas_tutamac": "#0f6c3f", "bas_kenar": "#0f6c3f"}
-SLIDER_DEGISIK = {"tutamac": "#ffffff", "kenar": BLUE,
-                  "ust_tutamac": "#f3f8ff", "ust_kenar": "#0e4a90",
-                  "bas_tutamac": "#dbe9fb", "bas_kenar": BLUE}
+""" % MAVI
 
-_ETIKET = ("color:%s; background:rgba(%s,%s); border-radius:9px; padding:2px 10px; "
+SLIDER_ONERI = {"tutamac": "#ffffff", "kenar": GRN,
+                "ust_tutamac": "#f0fdf4", "ust_kenar": "#22c55e",
+                "bas_tutamac": "#dcfce7", "bas_kenar": "#16a34a"}
+SLIDER_DEGISIK = {"tutamac": "#ffffff", "kenar": MAVI,
+                  "ust_tutamac": "#f0f9ff", "ust_kenar": MAVI_ACIK,
+                  "bas_tutamac": "#e0f2fe", "bas_kenar": MAVI_KOYU}
+
+_ETIKET = ("color:%s; background:rgba(%s,%s); border-radius:8px; padding:2px 10px; "
            "font-family:" + FM + "; border: 1px solid rgba(%s,%s); font-size:12px; font-weight:700;")
-ETIKET_ONERI = _ETIKET % (GRN, "21,135,80", "0.14", "21,135,80", "0.35")
-ETIKET_DEGISIK = _ETIKET % (BLUE, "18,88,168", "0.10", "18,88,168", "0.18")
+ETIKET_ONERI = _ETIKET % (GRN, "48,209,88", "0.14", "48,209,88", "0.35")
+ETIKET_DEGISIK = _ETIKET % (MAVI, "44,166,231", "0.14", "44,166,231", "0.35")
 
-# D-pad tuslari: sabit kutu. Ustteki baslik/aci gostergesi kartlari kucultulerek
-# acilan yer buraya verildi — tuslar 52px'ten 64px'e buyudu, aralari da genisledi
-# (bkz. _dpad_izgarasi spacing). Dort varyant (kenar/merkez x normal/basili) ayni
-# iki sablondan uretilir.
+# D-pad tuslari: Apple macOS Tactile Glass Keycaps
 _DPAD_GOVDE = ("QPushButton {{ "
                "  background: {arka}; "
                "  border: {kalinlik} solid {kenar}; "
+               "  border-top: {kalinlik} solid {ust_cizgi}; "
                "  border-radius: 8px; "
                "  color: {yazi}; "
                "  font-size: {punto}; "
                "  font-weight: 700; "
-               "  min-width: 86px; max-width: 86px; "
-               "  min-height: 64px; max-height: 64px; "
+               "  min-width: 58px; max-width: 58px; "
+               "  min-height: 32px; max-height: 32px; "
                "}} ")
 DPAD_STIL = _DPAD_GOVDE + ("QPushButton:hover {{ "
                            "  background: {ust_arka}; "
                            "  border-color: {ust_kenar}; "
+                           "  color: {ust_yazi}; "
                            "}}")
 DPAD_STIL_BASILI = _DPAD_GOVDE          # basili halde :hover kurali yok
 
-DPAD_KENAR = {"arka": "#f7f9fb", "kenar": "#dfe4ea", "kalinlik": "1px",
-              "yazi": "#2b3540", "punto": "13px",
-              "ust_arka": "#eef3f8", "ust_kenar": "#c3d3e2"}
-DPAD_KENAR_BASILI = {"arka": "#dbe6f1", "kenar": "#1e4b7a", "kalinlik": "1.5px",
-                     "yazi": "#1e4b7a", "punto": "13px"}
-DPAD_MERKEZ = {"arka": "#1e4b7a", "kenar": "#1e4b7a", "kalinlik": "1px",
-               "yazi": "#ffffff", "punto": "11px",
-               "ust_arka": "#265a8f", "ust_kenar": "#265a8f"}
-DPAD_MERKEZ_BASILI = {"arka": "#17395d", "kenar": "#17395d", "kalinlik": "1.5px",
-                      "yazi": "#ffffff", "punto": "11px"}
+DPAD_KENAR = {
+    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(30, 46, 74, 0.90), stop:1 rgba(15, 25, 42, 0.95))",
+    "kenar": "rgba(255, 255, 255, 0.10)", "ust_cizgi": "rgba(255, 255, 255, 0.22)",
+    "kalinlik": "1px",
+    "yazi": "#f5f5f7", "punto": "13px",
+    "ust_arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(44, 166, 231, 0.30), stop:1 rgba(2, 132, 199, 0.20))",
+    "ust_kenar": "#38bdf8", "ust_yazi": "#ffffff"
+}
+DPAD_KENAR_BASILI = {
+    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #38bdf8, stop:1 #0284c7)",
+    "kenar": "#7dd3fc", "ust_cizgi": "rgba(255, 255, 255, 0.60)",
+    "kalinlik": "1.5px",
+    "yazi": "#ffffff", "punto": "13px"
+}
+DPAD_MERKEZ = {
+    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(22, 38, 64, 0.92), stop:1 rgba(12, 22, 38, 0.96))",
+    "kenar": "rgba(44, 166, 231, 0.40)", "ust_cizgi": "rgba(56, 189, 248, 0.50)",
+    "kalinlik": "1px",
+    "yazi": "#38bdf8", "punto": "9.5px",
+    "ust_arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #38bdf8, stop:1 #0284c7)",
+    "ust_kenar": "#7dd3fc", "ust_yazi": "#ffffff"
+}
+DPAD_MERKEZ_BASILI = {
+    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0284c7, stop:1 #0369a1)",
+    "kenar": "#38bdf8", "ust_cizgi": "rgba(255, 255, 255, 0.60)",
+    "kalinlik": "1.5px",
+    "yazi": "#ffffff", "punto": "9.5px"
+}
 
-# Adim hassasiyeti butonlari (1°/5°/10°): D-pad ile ayni mantik — tek govde sablonu,
-# secili/normal yalnizca renk-kalinlikta ayrisir (secilide hover kurali yok).
-_ADIM_GOVDE = ("QPushButton {{ background: {arka}; border: {kalinlik} solid {kenar}; "
-               "border-radius: 8px; color: {yazi}; font-size: 12px;{ek} }} ")
-ADIM_STIL_SECILI = _ADIM_GOVDE.format(arka="#eaf1f8", kalinlik="1.5px", kenar="#1e4b7a",
-                                      yazi="#1e4b7a", ek=" font-weight: 700;")
-ADIM_STIL_NORMAL = (_ADIM_GOVDE.format(arka="#ffffff", kalinlik="1px", kenar="#dfe4ea",
-                                       yazi="#5f6b78", ek="")
-                    + "QPushButton:hover { border-color: #c3d3e2; color: #2b3540; }")
-
-# ATES butonu metinleri — tek kaynak (uc yerde ayri ayri yazilinca biri unutuluyordu).
+# ATES butonu metinleri
 ATES_METIN_KAPALI = "A T E Ş   [L]"
 ATES_METIN_ACIK = "ATEŞİ KES   [L]"
 
@@ -961,23 +1034,27 @@ class MainWindow(QMainWindow):
         def ekle(widget, stretch=0):
             h.addWidget(widget, stretch, Qt.AlignVCenter)
 
-        # Logo + "Hava Savunma Sistemi" yazisi
+        # Logo + "DERİN MAVİ" + "Hava Savunma Sistemi"
         brand_w = QWidget()
         bh = QHBoxLayout(brand_w)
         bh.setContentsMargins(0, 0, 0, 0)
-        bh.setSpacing(11)
+        bh.setSpacing(10)
         logo = QLabel()
         logo_path = os.path.join(HERE, "Grafik", "logo-mKXFEkR2.png")
         pm = QPixmap(logo_path)
         if not pm.isNull():
-            logo.setPixmap(pm.scaledToHeight(40, Qt.SmoothTransformation))
-        else:
-            logo.setText("DERİN MAVİ")
-            logo.setObjectName("brand")
+            logo.setPixmap(pm.scaledToHeight(36, Qt.SmoothTransformation))
         bh.addWidget(logo, 0, Qt.AlignVCenter)
-        brand_txt = QLabel("Hava Savunma Sistemi")
-        brand_txt.setObjectName("brandtxt")
-        bh.addWidget(brand_txt, 0, Qt.AlignVCenter)
+
+        brand_text_v = QVBoxLayout()
+        brand_text_v.setSpacing(0)
+        brand_title = QLabel("DERİN MAVİ")
+        brand_title.setObjectName("brand")
+        brand_sub = QLabel("Hava Savunma Sistemi")
+        brand_sub.setObjectName("brandtxt")
+        brand_text_v.addWidget(brand_title)
+        brand_text_v.addWidget(brand_sub)
+        bh.addLayout(brand_text_v)
         ekle(brand_w)
         ekle(self._div())
 
@@ -1245,6 +1322,19 @@ class MainWindow(QMainWindow):
         ust.addWidget(lab)
         ust.addWidget(info)
         ust.addStretch(1)
+
+        if tip == "anahtar":
+            sw = AppleSwitch(checked=bool(algi.AYAR[key]))
+            sw.oneri_val = self._slider_birimi(algi.VARSAYILAN_AYAR[key], tip)
+            sw.toggled.connect(lambda chk, k=key, t=tip, d=deger, s=sw: self._ayar_degisti(k, t, 1 if chk else 0, d, s))
+            ust.addWidget(deger)
+            ust.addWidget(sw)
+            kutu.addLayout(ust)
+            layout.addLayout(kutu)
+            self.ayar_sliderlar[key] = (sw, tip)
+            self._ayar_degisti(key, tip, sw.value(), deger, sw)
+            return
+
         ust.addWidget(deger)
         kutu.addLayout(ust)
 
@@ -1333,8 +1423,14 @@ class MainWindow(QMainWindow):
         self._slider_stil_guncelle(slider, val, deger_lbl)
 
     def _slider_stil_guncelle(self, sl, val, deger_lbl=None):
-        """Kaydirici onerilen degerdeyse YESIL, degistirilmisse MAVI gorunur.
-        Iki durum yalnizca tutamac/etiket renklerinde ayrisir (bkz. SLIDER_* sabitleri)."""
+        """Kaydirici onerilen degerdeyse YESIL, degistirilmisse MOR gorunur."""
+        if sl is None:
+            return
+        if isinstance(sl, AppleSwitch):
+            if deger_lbl:
+                onerilen = (val == getattr(sl, "oneri_val", None))
+                deger_lbl.setStyleSheet(ETIKET_ONERI if onerilen else ETIKET_DEGISIK)
+            return
         onerilen = (val == getattr(sl, "oneri_val", None))
         sl.setStyleSheet(SLIDER_TASLAK.format(**(SLIDER_ONERI if onerilen else SLIDER_DEGISIK)))
         if deger_lbl:
@@ -1406,7 +1502,7 @@ class MainWindow(QMainWindow):
         kol = QWidget()
         v = QVBoxLayout(kol)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(12)
+        v.setSpacing(8)
 
         # Manuel ve Otonom modlar FARKLI paneller gosterir. QStackedWidget ile
         # gecis yapilir — setVisible() QGraphicsProxyWidget icinde guvenilir
@@ -1427,15 +1523,12 @@ class MainWindow(QMainWindow):
         return kol
 
     def _otonom_kontrol_panel(self):
-        """Otonom mod paneli — takip durumu, aktif hedef bilgisi ve nisan durumu.
-
-        Manuel panelin yerini alir; Otonom modda operatorun gormesi gereken
-        bilgi D-pad/ATES degil, sistemin NEYI TAKIP ETTIGINI ve ne durumda oldugudur."""
+        """Otonom mod paneli — takip durumu, aktif hedef bilgisi ve nisan durumu."""
         mk = QFrame()
         mk.setObjectName("panelk")
         mv = QVBoxLayout(mk)
-        mv.setContentsMargins(16, 10, 16, 10)
-        mv.setSpacing(8)
+        mv.setContentsMargins(15, 8, 15, 8)
+        mv.setSpacing(6)
 
         # Baslik
         mt = QLabel("OTONOM TAKİP DURUMU")
@@ -1447,7 +1540,7 @@ class MainWindow(QMainWindow):
         self.oto_durum_frame = QFrame()
         self.oto_durum_frame.setObjectName("engok")
         dh = QHBoxLayout(self.oto_durum_frame)
-        dh.setContentsMargins(11, 9, 11, 9)
+        dh.setContentsMargins(11, 7, 11, 7)
         dh.setSpacing(8)
 
         self.oto_durum_dot = QLabel()
@@ -1470,8 +1563,8 @@ class MainWindow(QMainWindow):
         nisan_kart = QFrame()
         nisan_kart.setStyleSheet(f"background:{CARD}; border-radius:8px;")
         nv = QVBoxLayout(nisan_kart)
-        nv.setContentsMargins(12, 8, 12, 8)
-        nv.setSpacing(4)
+        nv.setContentsMargins(12, 6, 12, 6)
+        nv.setSpacing(3)
         nt = QLabel("NİŞAN KONTROLÜ")
         nt.setStyleSheet(f"font-size:10px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
         nv.addWidget(nt)
@@ -1480,8 +1573,6 @@ class MainWindow(QMainWindow):
         self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
         nv.addWidget(self.oto_nisan_durum)
 
-        # ATES KAPISI: otonom ates neden acilmadi/acildi. Bu satir olmadan sistem
-        # sessizce ates etmiyor ve sebebi gorulmuyordu (bkz. _ates_engeli).
         self.oto_ates_kapi = QLabel("—")
         self.oto_ates_kapi.setStyleSheet(f"font-size:11px; color:{TXT3}; padding:2px 0;")
         self.oto_ates_kapi.setWordWrap(True)
@@ -1505,8 +1596,8 @@ class MainWindow(QMainWindow):
         gorev_kart = QFrame()
         gorev_kart.setStyleSheet(f"background:{CARD}; border-radius:8px;")
         gv = QVBoxLayout(gorev_kart)
-        gv.setContentsMargins(12, 8, 12, 8)
-        gv.setSpacing(4)
+        gv.setContentsMargins(12, 6, 12, 6)
+        gv.setSpacing(3)
         gt = QLabel("GÖREV BİLGİSİ")
         gt.setStyleSheet(f"font-size:10px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
         gv.addWidget(gt)
@@ -1535,29 +1626,21 @@ class MainWindow(QMainWindow):
         return mk
 
     def _hedefler_karti(self):
-        """HEDEFLER — kamerada tanimlanan ve etiketlenen hedeflerin numarali listesi.
-
-        Motor Hizi/Lazer gibi stack DISINDA: hem Manuel hem Otonom modda gorunur.
-        Bir isme tiklamak o hedefi ELLE kilitler (algi.hedef_sec) — otomatik kilitle
-        AYNI mekanizmayi (_kilitli_track_id) kullanir, tetikleyici operatordur.
-        Kilitli hedefe tekrar tiklamak kilidi birakir, otomatik secime doner."""
+        """HEDEFLER — kamerada tanimlanan ve etiketlenen hedeflerin numarali listesi."""
         kart = QFrame()
         kart.setObjectName("panelk")
         kv = QVBoxLayout(kart)
-        kv.setContentsMargins(19, 11, 19, 13)
-        kv.setSpacing(6)
+        kv.setContentsMargins(15, 8, 15, 8)
+        kv.setSpacing(4)
 
         t = QLabel("HEDEFLER")
         t.setObjectName("ph")
         kv.addWidget(t)
 
-        # Yatay, TEK SATIRLIK liste: yeni hedef tanindikca kart DIKEY buyumesin
-        # (alttaki Motor Hizi/Lazer kartlarini asagi itmesin). Isimler yan yana
-        # dizilir; sigmayan kisim yatay kaydirmayla gorulur (dikey kaydirma YOK).
         self.hedef_scroll = QScrollArea()
         self.hedef_scroll.setWidgetResizable(True)
         self.hedef_scroll.setFrameShape(QFrame.NoFrame)
-        self.hedef_scroll.setFixedHeight(34)
+        self.hedef_scroll.setFixedHeight(30)
         self.hedef_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.hedef_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.hedef_scroll.setStyleSheet("QScrollArea { background:transparent; border:none; }")
@@ -1577,11 +1660,7 @@ class MainWindow(QMainWindow):
         return kart
 
     def _hedef_liste_guncelle(self, hedefler, a3):
-        """HEDEFLER kartini gunceller: her hedef icin '<no>- <isim>' YAN YANA (yatay).
-
-        Kart dikey buyumez — cok hedef varsa yatay kaydirma devreye girer.
-        Renk kilit/taraf durumunu gosterir (kilitli = RED/GRN, A3'te dost = BLUE);
-        bu, video uzerindeki kutu etiketinin SABIT yesil renginden ayri ve bagimsizdir."""
+        """HEDEFLER kartini gunceller: her hedef icin '<no>- <isim>' YAN YANA (yatay)."""
         lay = self.hedef_liste_lay
         while lay.count():
             w = lay.takeAt(0).widget()
@@ -1597,7 +1676,6 @@ class MainWindow(QMainWindow):
                 renk = BLUE
             else:
                 renk = TXT2
-            # A3'te Dost/Dusman etiketini de goster ki ayni tip hedeflerde karismasin
             if a3 and hh.get("tip"):
                 btn_text = f"{i + 1}- {hh['tip']} · {hh['ad']}"
             else:
@@ -1605,37 +1683,28 @@ class MainWindow(QMainWindow):
             btn = QPushButton(btn_text)
             btn.setObjectName("hedefsatir")
             btn.setCursor(Qt.PointingHandCursor)
-            btn.setEnabled(tid is not None)   # ID'siz kutu (nadir) elle kilitlenemez
+            btn.setEnabled(tid is not None)
             btn.setStyleSheet(
                 "QPushButton#hedefsatir { text-align:left; border:none; background:transparent; "
                 f"padding:3px 4px; font-size:13px; font-weight:{700 if kilitli else 600}; color:{renk}; }} "
                 "QPushButton#hedefsatir:hover:enabled { background:rgba(18,88,168,0.10); border-radius:5px; }")
             btn.clicked.connect(lambda checked=False, t=tid: self._hedef_secildi(t))
             lay.addWidget(btn)
-        lay.addStretch(1)   # butonlar SOLA yaslanir, sagda bosluk kalir tasmaz
+        lay.addStretch(1)
 
     def _hedef_secildi(self, track_id):
-        """HEDEFLER listesinden ELLE hedef secimi.
-
-        Tek kapi `algi.hedef_sec` — otomatik kilitle AYNI mekanizmadir (_kilitli_track_id),
-        yalniz tetikleyici operatordur. Ayni (kilitli) hedefe tekrar tiklamak kilidi
-        birakir, bir sonraki karede otomatik secime doner."""
         if track_id is None:
             return
         yeni = None if algi.kilitli_hedef() == track_id else track_id
         algi.hedef_sec(yeni)
 
     def _hiz_karti(self):
-        """MOTOR HIZI — ESP32'deki iki step motorun tavan hizi + ivmesi (3 kademe).
-
-        Duzeyler protokol.HIZ_TABLO'da (tek kaynak); burada yalnizca secim yapilir.
-        Karta iki satir gider: S<derece/sn> (tavan hiz) ve A<derece/sn²> (ivme);
-        step'e cevirmek kartin isi (iki eksenin disli orani farkli)."""
+        """MOTOR HIZI — ESP32'deki iki step motorun tavan hizi + ivmesi (3 kademe)."""
         kart = QFrame()
         kart.setObjectName("panelk")
         kv = QVBoxLayout(kart)
-        kv.setContentsMargins(19, 11, 19, 13)
-        kv.setSpacing(7)
+        kv.setContentsMargins(15, 8, 15, 8)
+        kv.setSpacing(5)
 
         ust = QHBoxLayout()
         t = QLabel("MOTOR HIZI")
@@ -1646,9 +1715,9 @@ class MainWindow(QMainWindow):
         ust.addWidget(self.hiz_bilgi, 0, Qt.AlignVCenter)
         kv.addLayout(ust)
 
-        satir, self.hiz_btns = self._seviye_butonlari(
+        capsule, self.hiz_btns = self._seviye_butonlari(
             [(s, P.HIZ_AD[s]) for s in P.HIZ_SEVIYELER], self.hiz_seviye, self._hiz_sec)
-        kv.addLayout(satir)
+        kv.addWidget(capsule)
         self._hiz_bilgi_yaz()
         return kart
 
@@ -1661,7 +1730,6 @@ class MainWindow(QMainWindow):
         self.hiz_seviye = seviye
         for v, b in self.hiz_btns.items():
             b.setChecked(v == seviye)
-            self._step_btn_stil_guncelle(b, v == seviye)
         self._hiz_bilgi_yaz()
         if getattr(self, "kontrol", None) and self.kontrol.bagli:
             self._esp_goster(self.kontrol.hiz_ayarla(seviye))
@@ -1669,21 +1737,12 @@ class MainWindow(QMainWindow):
                                 f'Motor hızı: {P.HIZ_AD[seviye]}')
 
     def _lazer_karti(self):
-        """LAZER — imha gucu (%) ve anlik ates durumu.
-
-        "Ne kadar" ile "ne zaman" AYRI: guc kalici bir ayardir (karta G<yuzde> gider),
-        ates ac/kes ayri komuttur (L1/L0, ATES butonu). Motor tarafindaki S/A ile P/T
-        ayriminin aynisi. Guc ATES SIRASINDA da degistirilebilir — kart yeni duty'yi
-        aninda uygular, atesi kesmeden.
-
-        ⚠ Tam guc kullanilmiyor (varsayilan %40) ve dusuk guc DWELL SURESINI uzatir:
-          %40'ta balonun patlamasi tam guce gore ~2.5 kat surer. Sure yarismada puana
-          baglidir (Asama 1 bonus suresi, Asama 2-3 tur sureleri)."""
+        """LAZER — imha gucu (%) ve anlik ates durumu."""
         kart = QFrame()
         kart.setObjectName("panelk")
         kv = QVBoxLayout(kart)
-        kv.setContentsMargins(19, 11, 19, 13)
-        kv.setSpacing(7)
+        kv.setContentsMargins(15, 8, 15, 8)
+        kv.setSpacing(5)
 
         ust = QHBoxLayout()
         t = QLabel("LAZER")
@@ -1705,12 +1764,11 @@ class MainWindow(QMainWindow):
         self.lazer_sl.valueChanged.connect(self._lazer_guc_degisti)
         kv.addWidget(self.lazer_sl)
 
-        # Sik kullanilan guclere tek dokunusla gitmek icin (kaydiriciyi hassas surmek
-        # zor); ayni "kademe secici" kalibi motor hizinda ve adim hassasiyetinde de var.
-        satir, self.lazer_btns = self._seviye_butonlari(
+        # Sik kullanilan guclere tek dokunusla gitmek icin (Apple segmented capsule)
+        capsule, self.lazer_btns = self._seviye_butonlari(
             [(20, "%20"), (40, "%40"), (70, "%70"), (100, "%100")],
             self.lazer_guc, self._lazer_guc_degisti)
-        kv.addLayout(satir)
+        kv.addWidget(capsule)
 
         self._lazer_bilgi_yaz()
         return kart
@@ -1727,7 +1785,6 @@ class MainWindow(QMainWindow):
             f"color:{RED if acik else TXT3}; font-weight:{700 if acik else 600};")
         for v, b in getattr(self, "lazer_btns", {}).items():
             b.setChecked(v == self.lazer_guc)
-            self._step_btn_stil_guncelle(b, v == self.lazer_guc)
 
     def _lazer_guc_degisti(self, deger):
         """Guc degisiminin TEK kapisi (kaydirici + kademe butonlari ayni yoldan gecer)."""
@@ -1754,9 +1811,7 @@ class MainWindow(QMainWindow):
         mv.setContentsMargins(16, 10, 16, 10)
         mv.setSpacing(6)
 
-        # Baslik + "Aci Ayarlari" butonu — yon tuslarina yer acmak icin KUCULTULDU
-        # (paylasilan #ph/#ayaralt stiline DOKUNULMADI, yalnizca bu iki widget'a ozel
-        # ekstra kucultme uygulanir; diger kartlardaki basliklar/butonlar etkilenmez).
+        # Baslik + "Aci Ayarlari" butonu
         brow = QHBoxLayout()
         mt = QLabel("MANUEL NİŞAN & YÖN KONTROLÜ")
         mt.setObjectName("ph")
@@ -1765,7 +1820,7 @@ class MainWindow(QMainWindow):
         self.aci_ayar_btn = QPushButton("⚙ Açı Ayarları")
         self.aci_ayar_btn.setObjectName("ayaralt")
         self.aci_ayar_btn.setCursor(Qt.PointingHandCursor)
-        self.aci_ayar_btn.setFixedHeight(20)
+        self.aci_ayar_btn.setFixedHeight(22)
         self.aci_ayar_btn.setStyleSheet("padding:2px 12px; font-size:11px;")
         self.aci_ayar_btn.clicked.connect(self._aci_ayarlar_toggle)
         brow.addWidget(self.aci_ayar_btn, 0)
@@ -1782,13 +1837,8 @@ class MainWindow(QMainWindow):
     def _aci_durum_baslat(self):
         """Gimbal aci durumu ve yasak alan sinirlari (arayuz tarafindaki tek kaynak)."""
         self.pan_aci = 0.0            # azimut, 0-360 (EKRAN icin sarmali)
-        # ESP32'ye giden azimut SARMASIZ (birikimli) olmalidir: 350°'den 10°'ye gecerken
-        # "P370" denir, "P10" degil — yoksa motor kisa yoldan degil 340° geri doner.
         self.pan_ham = 0.0
         self.tilt_aci = 0.0           # yukselis, 0 - max_tilt_limit
-        # Operatorun calisma siniri; mekanik tavan protokol.TILT_MAX'tir ve bunun
-        # USTUNE cikilamaz (kontrol katmani ayrica kirpar). Acilista tavanin tamami
-        # DEGIL, guvenli bir varsayilan gelir — daha yukarisi ⚙ panelinden acilir.
         self.max_tilt_limit = float(P.TILT_CALISMA_VARSAYILAN)
         self.aci_adim = 5.0           # D-pad adim hassasiyeti (derece)
 
@@ -1802,10 +1852,6 @@ class MainWindow(QMainWindow):
         self.atis_pan_min = 45.0
         self.atis_pan_max = 75.0
 
-        # Tusa BASILI TUTUNCA surekli hareket (klavye tekrari mantigi: once kisa bir
-        # gecikme, sonra sabit araliklarla tik). Qt'nin kendi auto-repeat'i KULLANILMAZ;
-        # hizi isletim sistemi ayari belirlerdi ve iki tus ayni anda basiliyken caprazlama
-        # calismazdi.
         self._basili_yonler = set()
         self._son_tekrar_t = 0.0
         self._tekrar_gecikme = QTimer(self)
@@ -1820,31 +1866,27 @@ class MainWindow(QMainWindow):
         sayfa = QWidget()
         dv = QVBoxLayout(sayfa)
         dv.setContentsMargins(0, 0, 0, 0)
-        dv.setSpacing(6)
+        dv.setSpacing(4)
         dv.addWidget(self._aci_gostergesi())
 
         self.bolge_status = QLabel("● BÖLGE GÜVENLİ")
-        self.bolge_status.setObjectName("firest")
+        self.bolge_status.setObjectName("bolgestatus")
         self.bolge_status.setAlignment(Qt.AlignCenter)
-        self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+        self.bolge_status.setStyleSheet(
+            f"background: rgba(48, 209, 88, 0.12); border: 1px solid rgba(48, 209, 88, 0.30); "
+            f"border-radius: 8px; padding: 3px 10px; color: {GRN}; font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px;")
         dv.addWidget(self.bolge_status)
 
         dv.addWidget(self._dpad_izgarasi(), 0, Qt.AlignCenter)
-        dv.addLayout(self._adim_butonlari())
-        dv.addStretch(1)                       # bosalan yer tuslarin ustune degil altina
+        dv.addWidget(self._adim_butonlari())
         dv.addWidget(self._ates_butonu())
         return sayfa
 
     def _ates_butonu(self):
-        """ATES butonu — AKTIF HEDEF kartindan buraya tasindi (06.08).
-
-        Atesin TEK kapisi hala `_ates_bas`; buton yalnizca yer degistirdi. Klavyeden
-        [L] de ayni kapiya baglidir (bkz. keyPressEvent) ve L HER MODDA calisir —
-        buton manuel panelde oldugu icin otonom modda gorunmez, ama lazeri kesmenin
-        yolu kapanmamalidir (E-Stop ve otomatik kesme yollari da yerinde durur)."""
+        """ATES butonu — Apple Glass High-Impact Action Button."""
         self.fire_btn = QPushButton(ATES_METIN_KAPALI)
         self.fire_btn.setObjectName("fire")
-        self.fire_btn.setFixedHeight(44)
+        self.fire_btn.setFixedHeight(38)
         self.fire_btn.setCheckable(True)
         self.fire_btn.setCursor(Qt.PointingHandCursor)
         self.fire_btn.setToolTip("[L] — ateşi aç / kes")
@@ -1852,15 +1894,11 @@ class MainWindow(QMainWindow):
         return self.fire_btn
 
     def _aci_gostergesi(self):
-        """Canli azimut/yukselis sayi gostergesi.
-
-        Yon tuslarina yer acmak icin kucultuldu — baslik/deger fontlari ve kutu
-        dolgusu yalnizca burada (inline) kuculur, paylasilan #engsub/#turn stiline
-        dokunulmaz (diger kartlardaki ayni objectName'ler etkilenmez)."""
+        """Canli azimut/yukselis sayi gostergesi (Apple Dark Glass Metric Card)."""
         kutu = QFrame()
         kutu.setObjectName("angtgl")
         gh = QHBoxLayout(kutu)
-        gh.setContentsMargins(10, 3, 10, 3)
+        gh.setContentsMargins(10, 4, 10, 4)
         gh.setSpacing(10)
 
         def sutun(baslik, renk):
@@ -1868,10 +1906,10 @@ class MainWindow(QMainWindow):
             v.setSpacing(0)
             bl = QLabel(baslik)
             bl.setObjectName("engsub")
-            bl.setStyleSheet("font-size:10px;")
+            bl.setStyleSheet(f"font-size:9px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
             deger = QLabel("0.0°")
             deger.setObjectName("turn")
-            deger.setStyleSheet(f"font-size:14px; color:{renk}; font-weight:700;")
+            deger.setStyleSheet(f"font-size:15px; font-family:{FM}; color:{renk}; font-weight:700;")
             v.addWidget(bl)
             v.addWidget(deger)
             return v, bl, deger
@@ -1885,7 +1923,7 @@ class MainWindow(QMainWindow):
         gh.addWidget(ayirac)
 
         tilt_kol, self.tilt_lbl_ref, self.tilt_val_lbl = sutun(
-            f"YÜKSELİŞ (TİLT max {int(self.max_tilt_limit)}°)", BLUE)
+            f"YÜKSELİŞ (TİLT max {int(self.max_tilt_limit)}°)", MAVI_ACIK)
         gh.addLayout(tilt_kol, 1)
         return kutu
 
@@ -1897,9 +1935,10 @@ class MainWindow(QMainWindow):
         self._key_center_active_style = DPAD_STIL_BASILI.format(**DPAD_MERKEZ_BASILI)
 
         dpad = QWidget()
+        dpad.setFixedSize(186, 108)
         gl = QGridLayout(dpad)
-        gl.setContentsMargins(0, 4, 0, 4)
-        gl.setSpacing(10)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.setSpacing(4)
 
         # (isim, metin, satir, kolon, ipucu, yon, merkez_mi)
         tuslar = [
@@ -1911,40 +1950,43 @@ class MainWindow(QMainWindow):
         ]
         for isim, metin, satir, kolon, ipucu, yon, merkez in tuslar:
             b = QPushButton(metin)
+            b.setFixedSize(58, 32)
             b.setStyleSheet(self._key_center_normal_style if merkez else self._key_normal_style)
             b.setToolTip(ipucu)
             b.setCursor(Qt.PointingHandCursor)
             b.pressed.connect(lambda y=yon: self._dpad_press(y))
             b.released.connect(lambda y=yon: self._dpad_release(y))
-            gl.addWidget(b, satir, kolon)
+            gl.addWidget(b, satir, kolon, Qt.AlignCenter)
             setattr(self, isim, b)
         return dpad
 
     def _seviye_butonlari(self, secenekler, secili, geri_cagri):
-        """Yatay 'kademe secici' buton satiri — adim hassasiyeti ve motor hizi AYNI kalip.
-        secenekler: [(deger, etiket), ...]   Doner: (satir_layout, {deger: buton})"""
-        satir = QHBoxLayout()
-        satir.setSpacing(6)
+        """Apple macOS birleşik kapsül segment kontrolü.
+        secenekler: [(deger, etiket), ...]   Doner: (capsule_frame, {deger: buton})"""
+        capsule = QFrame()
+        capsule.setObjectName("tabs")
+        th = QHBoxLayout(capsule)
+        th.setContentsMargins(2, 2, 2, 2)
+        th.setSpacing(2)
         btns = {}
         for val, etiket in secenekler:
             b = QPushButton(etiket)
+            b.setObjectName("tab")
             b.setCheckable(True)
             b.setChecked(val == secili)
-            b.setFixedHeight(26)
+            b.setFixedHeight(24)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda checked=False, v=val: geri_cagri(v))
-            self._step_btn_stil_guncelle(b, val == secili)
-            satir.addWidget(b, 1)
+            th.addWidget(b, 1)
             btns[val] = b
-        return satir, btns
+        return capsule, btns
 
     def _adim_butonlari(self):
-        """Adim hassasiyeti secimi (1° / 5° / 10°) — D-pad'in bir basista attigi aci.
-        (Motor HIZI ile karistirilmamali: bu 'ne kadar', hiz 'ne kadar cabuk'.)"""
-        satir, self.step_btns = self._seviye_butonlari(
+        """Adim hassasiyeti secimi (1° / 5° / 10°) — Apple segmented capsule."""
+        capsule, self.step_btns = self._seviye_butonlari(
             [(1.0, "1° Hassas"), (5.0, "5° Orta"), (10.0, "10° Geniş")],
             self.aci_adim, self._aci_adim_sec)
-        return satir
+        return capsule
 
     # ---- Ic sayfa 1: Aci ve yasak alan ayarlari ----
     def _aci_ayar_sayfasi(self):
@@ -2247,19 +2289,31 @@ class MainWindow(QMainWindow):
                 txts.append(f"T:{int(self.tilt_yasak_min)}°-{int(self.tilt_yasak_max)}°")
             self.hareket_yasak_lbl.setText(f'<span style="color:{AMB};font-weight:700;">Aktif</span> '
                                            f'<small style="color:{TXT2}">({", ".join(txts)})</small>')
-            self.hareket_yasak_sw.setStyleSheet(f"background:{AMB};border-radius:8px;")
+            if hasattr(self.hareket_yasak_sw, "setChecked"):
+                self.hareket_yasak_sw.setChecked(True)
+            else:
+                self.hareket_yasak_sw.setStyleSheet(f"background:{AMB};border-radius:8px;")
         else:
             self.hareket_yasak_lbl.setText(f'<small style="color:{TXT3}">Devre Dışı — Serbest</small>')
-            self.hareket_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
+            if hasattr(self.hareket_yasak_sw, "setChecked"):
+                self.hareket_yasak_sw.setChecked(False)
+            else:
+                self.hareket_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
 
         # Atışa Yasak Alan Kartı
         if self.atis_yasak_aktif:
             self.atis_yasak_lbl.setText(f'<span style="color:{RED};font-weight:700;">Aktif</span> '
                                         f'<small style="color:{TXT2}">({int(self.atis_pan_min)}°-{int(self.atis_pan_max)}°)</small>')
-            self.atis_yasak_sw.setStyleSheet(f"background:{RED};border-radius:8px;")
+            if hasattr(self.atis_yasak_sw, "setChecked"):
+                self.atis_yasak_sw.setChecked(True)
+            else:
+                self.atis_yasak_sw.setStyleSheet(f"background:{RED};border-radius:8px;")
         else:
             self.atis_yasak_lbl.setText(f'<small style="color:{TXT3}">Devre Dışı — Serbest</small>')
-            self.atis_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
+            if hasattr(self.atis_yasak_sw, "setChecked"):
+                self.atis_yasak_sw.setChecked(False)
+            else:
+                self.atis_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
 
     def _ap_varsayilana_don(self):
         tavan = int(P.TILT_CALISMA_VARSAYILAN)   # sabit 60 yaziliydi: tavan degisince kalirdi
@@ -2407,13 +2461,12 @@ class MainWindow(QMainWindow):
             self.aci_ayar_btn.setText("⚙ Açı Ayarları")
 
     def _step_btn_stil_guncelle(self, btn, secili):
-        btn.setStyleSheet(ADIM_STIL_SECILI if secili else ADIM_STIL_NORMAL)
+        btn.setChecked(secili)
 
     def _aci_adim_sec(self, val):
         self.aci_adim = val
         for v, b in self.step_btns.items():
             b.setChecked(v == val)
-            self._step_btn_stil_guncelle(b, v == val)
 
     def _asama1_panel(self):
         """Asama 1: zarf sirasina gore dizilen 4 hedef karti."""
@@ -2538,11 +2591,9 @@ class MainWindow(QMainWindow):
         th = QHBoxLayout(tgl)
         th.setContentsMargins(12, 9, 12, 9)
         th.setSpacing(10)
-        lbl = QLabel('<small style="color:#8094a8">Devre Dışı — Serbest</small>')
+        lbl = QLabel('<small style="color:#71717a">Devre Dışı — Serbest</small>')
         lbl.setObjectName("tgll")
-        sw = QLabel()
-        sw.setFixedSize(32, 16)
-        sw.setStyleSheet("background:#c3d3e2;border-radius:8px;")
+        sw = AppleSwitch(checked=False)
         th.addWidget(lbl, 1)
         th.addWidget(sw)
         kv.addWidget(tgl)
@@ -3031,16 +3082,16 @@ class MainWindow(QMainWindow):
 
     def _badge_stil(self, badge, tip):
         if tip == "Düşman":
-            badge.setStyleSheet(f"background:rgba(191,32,32,0.14);color:{RED};"
-                                f"border:1px solid rgba(191,32,32,0.38);border-radius:13px;"
+            badge.setStyleSheet(f"background:rgba(255,69,58,0.14);color:{RED};"
+                                f"border:1px solid rgba(255,69,58,0.38);border-radius:13px;"
                                 f"padding:3px 11px 5px 11px;font-size:10px;font-weight:700;")
         elif tip == "Dost":
-            badge.setStyleSheet(f"background:rgba(18,88,168,0.12);color:{BLUE};"
-                                f"border:1px solid rgba(18,88,168,0.32);border-radius:13px;"
+            badge.setStyleSheet(f"background:rgba(59,130,246,0.14);color:{BLUE};"
+                                f"border:1px solid rgba(59,130,246,0.38);border-radius:13px;"
                                 f"padding:3px 11px 5px 11px;font-size:10px;font-weight:700;")
         else:
-            badge.setStyleSheet(f"background:rgba(82,112,136,0.12);color:{TXT3};"
-                                f"border:1px solid rgba(82,112,136,0.32);border-radius:13px;"
+            badge.setStyleSheet(f"background:rgba(113,113,122,0.14);color:{TXT3};"
+                                f"border:1px solid rgba(113,113,122,0.35);border-radius:13px;"
                                 f"padding:3px 11px 5px 11px;font-size:10px;font-weight:700;")
 
     def _saat_guncelle(self):
@@ -3382,108 +3433,477 @@ class MainWindow(QMainWindow):
             self.kontrol.kapat()
         e.accept()
 
-    # ================= STIL (HTML CSS birebir) =================
+    # ================= STIL (Apple macOS Dark Glassmorphism) =================
     def _stil(self):
-        self.content.setStyleSheet(f"""
-        QWidget {{ background:transparent; color:{TXT};
-            font-family:{F}; font-size:13px; }}
-        #content {{ background:{BG}; }}
-        #top {{ background:{PANEL}; border:1px solid {BD}; border-radius:8px; }}
-        #brand {{ font-size:15px; font-weight:700; color:{TXT}; background:transparent; }}
-        #brandtxt {{ font-size:15px; font-weight:700; color:{BLUE}; background:transparent; }}
-        #vdiv {{ background:{BD}; }}
-        #sbdiv {{ background:{BD}; }}
-        #tgcap {{ font-size:11px; font-weight:700; letter-spacing:1px; color:{TXT};
-            background:transparent; }}
-        #tabs {{ background:{BG}; border:1px solid {BD}; border-radius:5px; }}
-        #tab {{ padding:4px 13px 6px 13px; font-size:13px; font-weight:600; color:{TXT};
-            background:transparent; border:none; border-radius:3px; }}
-        #tab:checked {{ background:{BLUE}; color:#ffffff; font-weight:700; }}
-        #tab:disabled {{ color:{TXT3}; background:transparent; }}
-        #tab:disabled:checked {{ background:rgba(150,170,187,0.45); color:#ffffff; }}
-        #camsel {{ background:{BG}; border:1px solid {BD}; border-radius:5px;
-            padding:4px 10px; font-size:13px; font-weight:600; color:{TXT}; min-width:130px; }}
-        #camsel QAbstractItemView {{ background:{PANEL}; color:{TXT};
-            selection-background-color:{BLUE}; selection-color:#fff; border:1px solid {BD}; }}
-        #stt {{ font-size:12px; color:{TXT2}; background:transparent; }}
-        #estop {{ padding:6px 15px; border-radius:5px; border:2px solid {RED};
-            color:{RED}; font-size:13px; font-weight:700; background:transparent; }}
-        #estop:hover {{ background:{RED}; color:#ffffff; }}
-        #estop:checked {{ background:{RED}; color:#ffffff; }}
-        #cam {{ background:#c8d0d8; border:1px solid {BD}; border-radius:8px; }}
-        #video {{ background:#c8d0d8; border-radius:8px; color:{TXT3}; font-size:15px; }}
-        #livet {{ font-size:11px; font-weight:700; color:{RED}; background:transparent; }}
+        qss = f"""
+        QWidget {{
+            background: transparent;
+            color: {TXT};
+            font-family: {F};
+            font-size: 13px;
+        }}
+        #content {{
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
+                                        stop:0 #050811, stop:0.35 #070d1a, stop:0.75 #0a1326, stop:1 #060a14);
+        }}
+        #top {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 rgba(24, 38, 64, 0.82), stop:1 rgba(14, 24, 42, 0.90));
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-top: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 14px;
+        }}
+        #brand {{
+            font-size: 15px;
+            font-weight: 800;
+            color: {TXT};
+            background: transparent;
+            letter-spacing: 0.5px;
+        }}
+        #brandtxt {{
+            font-size: 14px;
+            font-weight: 700;
+            color: {MAVI_ACIK};
+            background: transparent;
+            letter-spacing: 0.3px;
+        }}
+        #vdiv {{
+            background: rgba(255, 255, 255, 0.10);
+        }}
+        #sbdiv {{
+            background: rgba(255, 255, 255, 0.10);
+        }}
+        #tgcap {{
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            color: {TXT2};
+            background: transparent;
+            text-transform: uppercase;
+        }}
+        #tabs {{
+            background: rgba(8, 14, 26, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 9px;
+            padding: 2px;
+        }}
+        #tab {{
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: {TXT2};
+            background: transparent;
+            border: none;
+            border-radius: 7px;
+        }}
+        #tab:hover {{
+            background: rgba(255, 255, 255, 0.07);
+            color: {TXT};
+        }}
+        #tab:checked {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {MAVI_ACIK}, stop:1 {MAVI_KOYU});
+            color: #ffffff;
+            font-weight: 700;
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            border-top: 1px solid rgba(255, 255, 255, 0.50);
+        }}
+        #tab:disabled {{
+            color: {TXT3};
+            background: transparent;
+        }}
+        #tab:disabled:checked {{
+            background: rgba(44, 166, 231, 0.30);
+            color: rgba(255, 255, 255, 0.65);
+        }}
+        #camsel {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 rgba(28, 44, 72, 0.85), stop:1 rgba(16, 26, 46, 0.90));
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-top: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 8px;
+            padding: 4px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            color: {TXT};
+            min-width: 120px;
+        }}
+        #camsel:hover {{
+            border-color: {MAVI_ACIK};
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 rgba(36, 56, 92, 0.90), stop:1 rgba(22, 36, 62, 0.95));
+        }}
+        #camsel QAbstractItemView {{
+            background: #0c1524;
+            color: {TXT};
+            selection-background-color: {MAVI};
+            selection-color: #ffffff;
+            border: 1px solid rgba(44, 166, 231, 0.35);
+            border-radius: 8px;
+            padding: 4px;
+        }}
+        #stt {{
+            font-size: 12px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #estop {{
+            padding: 6px 16px;
+            border-radius: 9px;
+            border: 1.5px solid {RED};
+            border-top: 1.5px solid #ff857d;
+            color: #ff6961;
+            font-size: 12px;
+            font-weight: 700;
+            background: rgba(255, 69, 58, 0.12);
+            letter-spacing: 0.5px;
+        }}
+        #estop:hover {{
+            background: {RED};
+            color: #ffffff;
+        }}
+        #estop:checked {{
+            background: #dc2626;
+            color: #ffffff;
+            border-color: #ffffff;
+        }}
+        #cam {{
+            background: #040711;
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-top: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 14px;
+        }}
+        #video {{
+            background: #040711;
+            border-radius: 14px;
+            color: {TXT3};
+            font-size: 14px;
+        }}
+        #livet {{
+            font-size: 11px;
+            font-weight: 700;
+            color: {RED};
+            background: transparent;
+            letter-spacing: 0.5px;
+        }}
         /* --- Ayar paneli (kamera uzeri overlay) --- */
-        #ayarbtn {{ background:rgba(15,22,32,0.70); color:#fff; border:1px solid rgba(255,255,255,0.22);
-            border-radius:10px; font-size:17px; }}
-        #ayarbtn:hover {{ background:{BLUE}; border:1px solid {BLUE}; }}
-        #ayarpanel {{ background:#ffffff; border:1px solid rgba(15,22,32,0.06); border-radius:16px; }}
-        #ayarbaslik {{ font-size:15px; font-weight:800; color:{TXT}; background:transparent; }}
-        #ayarkapat {{ background:{CARD}; color:{TXT3}; border:none; border-radius:12px;
-            font-size:12px; font-weight:700; }}
-        #ayarkapat:hover {{ background:rgba(191,32,32,0.12); color:{RED}; }}
-        #ayarlbl {{ font-size:13px; font-weight:600; color:{TXT}; background:transparent; }}
-        #ayargrup {{ font-size:10px; font-weight:800; color:{TXT3}; background:transparent;
-            letter-spacing:1.1px; padding-top:2px; }}
-        #ayarkaydir, #ayaric {{ background:transparent; border:none; }}
-        #ayarkaydir QScrollBar:vertical {{ background:transparent; width:7px; margin:0; }}
-        #ayarkaydir QScrollBar::handle:vertical {{ background:{BD}; border-radius:3px; min-height:28px; }}
-        #ayarkaydir QScrollBar::handle:vertical:hover {{ background:{BD2}; }}
-        #ayarkaydir QScrollBar::add-line:vertical, #ayarkaydir QScrollBar::sub-line:vertical {{ height:0; }}
-        #ayarkaydir QScrollBar::add-page:vertical, #ayarkaydir QScrollBar::sub-page:vertical {{ background:transparent; }}
-        #ayardeg {{ font-size:12px; font-weight:700; color:{BLUE}; background:rgba(18,88,168,0.10);
-            border-radius:9px; padding:2px 10px; font-family:{FM}; }}
-        #ayarinfo {{ background:rgba(18,88,168,0.13); color:{BLUE}; border:none; border-radius:8px;
-            font-size:11px; font-weight:800; font-style:italic; }}
-        #ayarinfo:hover {{ background:{BLUE}; color:#fff; }}
-        #ayaralt {{ background:transparent; color:{TXT2}; border:1px solid {BD}; border-radius:9px;
-            padding:8px 18px; font-size:12px; font-weight:600; min-height:16px; }}
-        #ayaralt:hover {{ background:{CARD}; border:1px solid {BD2}; }}
-        #ayarkaydet {{ background:{BLUE}; color:#fff; border:none; border-radius:9px;
-            padding:8px 22px; font-size:12px; font-weight:700; min-height:16px; }}
-        #ayarkaydet:hover {{ background:#0e4a90; }}
-        #panelk {{ background:{PANEL}; border:1px solid {BD}; border-radius:8px; }}
-        #ph {{ font-size:11px; font-weight:600; letter-spacing:1px; color:{TXT3};
-            padding-bottom:7px; border-bottom:1px solid {BD}; background:transparent; }}
-        #turn {{ font-size:21px; font-weight:700; color:{TXT}; background:transparent; }}
-        #asamap {{ font-size:10px; font-weight:700; letter-spacing:1px;
-            padding:3px 10px 5px 10px; border-radius:12px; background:rgba(142,92,8,0.14);
-            color:{AMB}; border:1px solid rgba(142,92,8,0.38); }}
-        #cit {{ font-size:13px; color:{TXT2}; background:transparent; }}
-        #kural {{ padding:9px 12px; background:{CARD}; border:1px solid {BD};
-            border-radius:7px; font-size:13px; color:{TXT2}; line-height:1.8; }}
-        #bosmsg {{ font-size:14px; color:{TXT3}; background:transparent; padding:28px 0; }}
-        #ipucu {{ font-size:12.5px; color:{TXT3}; background:transparent; }}
-        #turbilgi {{ font-size:13px; color:{TXT2}; background:transparent; line-height:1.6; }}
-        #kart {{ background:{CARD}; border:1px solid {BD}; border-radius:8px; }}
-        #kart:hover {{ border:1px solid {BD2}; }}
-        #kartno {{ background:{BLUE}; color:#ffffff; border-radius:9px;
-            font-size:11px; font-weight:700; }}
-        #kartad {{ font-size:12px; font-weight:600; color:{TXT2}; background:transparent; }}
-        #hname {{ font-size:28px; font-weight:700; color:{TXT}; background:transparent; }}
-        #hconf {{ font-size:14px; color:{TXT3}; background:transparent; }}
-        #fire {{ background:rgba(191,32,32,0.08); border:2px solid {RED}; border-radius:5px;
-            color:{RED}; font-size:16px; font-weight:700; letter-spacing:6px; }}
-        #fire:hover {{ background:{RED}; color:#ffffff; }}
-        #fire:checked {{ background:{RED}; color:#ffffff; }}
-        #fire:disabled {{ background:transparent; border:2px solid {BD2}; color:{BD2}; }}
-        #firest {{ font-size:13px; color:{GRN}; font-weight:500; background:transparent; }}
-        #engok {{ background:rgba(21,135,80,0.12); border:1px solid rgba(21,135,80,0.35);
-            border-radius:7px; }}
-        #engname {{ font-size:14px; font-weight:700; color:{GRN}; background:transparent; }}
-        #engsub {{ font-size:12px; color:{TXT3}; background:transparent; }}
-        #angtgl {{ background:{CARD}; border:1px solid {BD}; border-radius:5px; }}
-        #tgll {{ font-size:13px; color:{TXT2}; background:transparent; }}
-        #sbar {{ background:{PANEL}; border-top:1px solid {BD}; }}
-        #sbseg {{ font-size:11px; color:{TXT3}; background:transparent; }}
-        #clk {{ font-family:{FM}; font-size:13px; font-weight:600; color:{TXT2};
-            background:transparent; margin-left:11px; }}
-        """)
+        #ayarbtn {{
+            background: rgba(18, 28, 48, 0.85);
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            border-top: 1px solid rgba(255, 255, 255, 0.30);
+            border-radius: 10px;
+            font-size: 16px;
+        }}
+        #ayarbtn:hover {{
+            background: {MAVI};
+            border-color: {MAVI_ACIK};
+        }}
+        #ayarpanel {{
+            background: rgba(12, 18, 32, 0.97);
+            border: 1px solid rgba(44, 166, 231, 0.35);
+            border-top: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 16px;
+        }}
+        #ayarbaslik {{
+            font-size: 15px;
+            font-weight: 800;
+            color: {TXT};
+            background: transparent;
+            letter-spacing: 0.3px;
+        }}
+        #ayarkapat {{
+            background: rgba(255, 255, 255, 0.08);
+            color: {TXT2};
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 700;
+        }}
+        #ayarkapat:hover {{
+            background: rgba(255, 69, 58, 0.22);
+            border-color: {RED};
+            color: {RED};
+        }}
+        #ayarlbl {{
+            font-size: 13px;
+            font-weight: 600;
+            color: {TXT};
+            background: transparent;
+        }}
+        #ayargrup {{
+            font-size: 10px;
+            font-weight: 800;
+            color: {TXT2};
+            background: transparent;
+            letter-spacing: 1.2px;
+            padding-top: 4px;
+        }}
+        #ayarkaydir, #ayaric {{
+            background: transparent;
+            border: none;
+        }}
+        #ayarkaydir QScrollBar:vertical {{
+            background: transparent;
+            width: 7px;
+            margin: 0;
+        }}
+        #ayarkaydir QScrollBar::handle:vertical {{
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 3.5px;
+            min-height: 28px;
+        }}
+        #ayarkaydir QScrollBar::handle:vertical:hover {{
+            background: {MAVI};
+        }}
+        #ayarkaydir QScrollBar::add-line:vertical, #ayarkaydir QScrollBar::sub-line:vertical {{
+            height: 0;
+        }}
+        #ayarkaydir QScrollBar::add-page:vertical, #ayarkaydir QScrollBar::sub-page:vertical {{
+            background: transparent;
+        }}
+        #ayardeg {{
+            font-size: 12px;
+            font-weight: 700;
+            color: {MAVI_ACIK};
+            background: {MAVI_BG};
+            border: 1px solid rgba(44, 166, 231, 0.35);
+            border-radius: 8px;
+            padding: 2px 10px;
+            font-family: {FM};
+        }}
+        #ayarinfo {{
+            background: rgba(44, 166, 231, 0.18);
+            color: {MAVI_ACIK};
+            border: none;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 800;
+            font-style: italic;
+        }}
+        #ayarinfo:hover {{
+            background: {MAVI};
+            color: #ffffff;
+        }}
+        #ayaralt {{
+            background: rgba(255, 255, 255, 0.06);
+            color: {TXT2};
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 8px;
+            padding: 6px 16px;
+            font-size: 12px;
+            font-weight: 600;
+            min-height: 16px;
+        }}
+        #ayaralt:hover {{
+            background: rgba(44, 166, 231, 0.15);
+            border-color: {MAVI};
+            color: {TXT};
+        }}
+        #ayarkaydet {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {MAVI_ACIK}, stop:1 {MAVI_KOYU});
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-top: 1px solid rgba(255, 255, 255, 0.45);
+            border-radius: 8px;
+            padding: 6px 20px;
+            font-size: 12px;
+            font-weight: 700;
+            min-height: 16px;
+        }}
+        #ayarkaydet:hover {{
+            background: {MAVI_ACIK};
+            color: #050811;
+        }}
+        #panelk {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 rgba(20, 32, 54, 0.82), stop:1 rgba(11, 18, 32, 0.90));
+            border: 1px solid rgba(255, 255, 255, 0.09);
+            border-top: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 14px;
+        }}
+        #ph {{
+            font-size: 10.5px;
+            font-weight: 700;
+            letter-spacing: 1.2px;
+            color: {TXT2};
+            padding-bottom: 6px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+            background: transparent;
+            text-transform: uppercase;
+        }}
+        #turn {{
+            font-size: 20px;
+            font-weight: 700;
+            color: {TXT};
+            background: transparent;
+        }}
+        #asamap {{
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            padding: 3px 10px 5px 10px;
+            border-radius: 12px;
+            background: rgba(255, 214, 10, 0.12);
+            color: {AMB};
+            border: 1px solid rgba(255, 214, 10, 0.35);
+        }}
+        #cit {{
+            font-size: 13px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #kural {{
+            padding: 10px 14px;
+            background: rgba(14, 22, 38, 0.80);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            font-size: 13px;
+            color: {TXT2};
+            line-height: 1.8;
+        }}
+        #bosmsg {{
+            font-size: 14px;
+            color: {TXT3};
+            background: transparent;
+            padding: 28px 0;
+        }}
+        #ipucu {{
+            font-size: 12px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #turbilgi {{
+            font-size: 13px;
+            color: {TXT2};
+            background: transparent;
+            line-height: 1.6;
+        }}
+        #kart {{
+            background: rgba(18, 30, 52, 0.85);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-top: 1px solid rgba(255, 255, 255, 0.18);
+            border-radius: 10px;
+        }}
+        #kart:hover {{
+            border: 1px solid {MAVI_ACIK};
+            background: rgba(26, 44, 76, 0.90);
+        }}
+        #kartno {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {MAVI_ACIK}, stop:1 {MAVI_KOYU});
+            color: #ffffff;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: 700;
+        }}
+        #kartad {{
+            font-size: 12px;
+            font-weight: 600;
+            color: {TXT};
+            background: transparent;
+        }}
+        #hname {{
+            font-size: 26px;
+            font-weight: 800;
+            color: {TXT};
+            background: transparent;
+        }}
+        #hconf {{
+            font-size: 14px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #fire {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff453a, stop:1 #d70015);
+            border: 1px solid rgba(255, 255, 255, 0.35);
+            border-top: 1px solid rgba(255, 255, 255, 0.60);
+            border-radius: 12px;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 4px;
+        }}
+        #fire:hover {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff5b52, stop:1 #e0061a);
+            border-color: rgba(255, 255, 255, 0.50);
+        }}
+        #fire:checked {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff3b30, stop:1 #991b1b);
+            color: #ffffff;
+            border: 2px solid #ffffff;
+        }}
+        #fire:disabled {{
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: rgba(255, 255, 255, 0.30);
+        }}
+        #firest {{
+            font-size: 13px;
+            color: {GRN};
+            font-weight: 600;
+            background: transparent;
+        }}
+        #engok {{
+            background: rgba(48, 209, 88, 0.10);
+            border: 1px solid rgba(48, 209, 88, 0.28);
+            border-radius: 10px;
+        }}
+        #engname {{
+            font-size: 14px;
+            font-weight: 700;
+            color: {GRN};
+            background: transparent;
+        }}
+        #engsub {{
+            font-size: 11px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #angtgl {{
+            background: rgba(12, 20, 36, 0.70);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-top: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 10px;
+        }}
+        #tgll {{
+            font-size: 12px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #sbar {{
+            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                        stop:0 rgba(16, 26, 44, 0.92), stop:1 rgba(8, 14, 26, 0.98));
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+        }}
+        #sbseg {{
+            font-size: 11.5px;
+            color: {TXT2};
+            background: transparent;
+        }}
+        #clk {{
+            font-family: {FM};
+            font-size: 13px;
+            font-weight: 600;
+            color: {TXT};
+            background: transparent;
+            margin-left: 11px;
+        }}
+        """
+        self.content.setStyleSheet(qss)
+        if QApplication.instance():
+            QApplication.instance().setStyleSheet(qss)
 
 
 def main():
     app = QApplication(sys.argv)
-    app.setFont(QFont("Segoe UI", 10))
+    # Apple San Francisco / System UI font
+    font = QFont(".AppleSystemUIFont", 10)
+    if not font.exactMatch():
+        font = QFont("SF Pro Display", 10)
+    if not font.exactMatch():
+        font = QFont("-apple-system", 10)
+    if not font.exactMatch():
+        font = QFont("Helvetica Neue", 10)
+    app.setFont(font)
     w = MainWindow()
     w.showMaximized()   # acilista ekrani tam kapla (yan bosluk kalmasin)
     sys.exit(app.exec())
