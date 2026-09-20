@@ -2,7 +2,7 @@
   "hassasiyet": 0.25,
   "gosterim": 0.25,
   "kararlilik": 120,
-  "cozunurluk": 1280,
+  "cozunurluk": 640,
   "iou": 0.9,
   "ortusme": 0.6,
   "maks_tespit": 300,
@@ -17,7 +17,7 @@
   "onay_esigi": 0.7,
   "onay_tekrari": 3,
   "kamera_fps": 60,
-  "sahi": 1,
+  "sahi": 0,
   "sahi_dilim": 640,
   "sahi_ortusme": 0.2
 }

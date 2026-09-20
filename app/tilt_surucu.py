@@ -68,6 +68,70 @@ DURUM_ASIMI_S = 0.6
 
 KAYNAK = os.environ.get("DERINMAVI_TILT", "off").strip() or "off"
 
+# ESP32-S3'un IKI USB yolu vardir ve hangisine kablo takiliysa BASKA bir COM
+# numarasi cikar — sahada "bir seferinde COM3, bir seferinde COM4" tam olarak budur:
+#   VID 303A = Espressif NATIVE USB  (kartin kendi USB soketi)
+#   VID 1A86 = WCH CH343/CH340       (harici seri cip, UART0)
+# Firmware IKISINI DE dinler (Serial + Serial0), yani ikisi de gecerlidir; sorun
+# yalnizca numarayi elle yazmaktir. `DERINMAVI_TILT=auto` bu isi bitirir.
+ESP_VIDLER = (0x303A, 0x1A86)
+
+
+def otomatik_port_bul(dinleme=0.8, gunluk=None):
+    """STATE3 yayinlayan portu kendisi bulur; bulamazsa None.
+
+    Neden "ESP32 gorunen ilk port" yetmez: ayni kartin iki yolu da ESP32 gibi
+    gorunur, ustelik baska bir ESP32 (or. pan karti) da takili olabilir. Tek
+    kesin olcut KARTIN KONUSTUGU DILDIR — bu yuzden port acilir ve gercekten
+    `STATE3,` satiri yazip yazmadigina bakilir. Yanlis karta komut gondermenin
+    bedeli, yanlis mekanigi hareket ettirmektir.
+    """
+    try:
+        import serial
+        from serial.tools import list_ports
+    except ImportError:
+        return None
+
+    adaylar = list(list_ports.comports())
+    # ESP32 imzali portlar once denenir; digerleri yine de denenir (USB-TTL
+    # donusturuculer baska VID gosterir), yalniz sirasi sonda kalir.
+    adaylar.sort(key=lambda p: 0 if (p.vid in ESP_VIDLER) else 1)
+
+    for p in adaylar:
+        try:
+            # DTR/RTS KAPALI: aksi halde port acilisi karti RESETLER ve firmware
+            # "kol 0'da" varsayar — kol yukaridayken bu, aci referansini bozar.
+            baglanti = serial.Serial(port=None, baudrate=BAUD, timeout=0)
+            baglanti.dtr = False
+            baglanti.rts = False
+            baglanti.port = p.device
+            baglanti.open()
+        except Exception as e:
+            if gunluk is not None:
+                gunluk.append(f"{p.device}: acilamadi ({e})")
+            continue
+        try:
+            baglanti.reset_input_buffer()
+            tampon, bitis = "", time.time() + dinleme
+            while time.time() < bitis:
+                n = baglanti.in_waiting
+                if n:
+                    tampon += baglanti.read(n).decode("ascii", "replace")
+                    if "STATE3," in tampon:
+                        if gunluk is not None:
+                            gunluk.append(f"{p.device}: STATE3 BULUNDU")
+                        return p.device
+                time.sleep(0.02)
+            if gunluk is not None:
+                gunluk.append(f"{p.device}: STATE3 yok "
+                              f"({'sessiz' if not tampon else 'baska bir sey konusuyor'})")
+        finally:
+            try:
+                baglanti.close()
+            except Exception:
+                pass
+    return None
+
 
 def aci_kirp(derece):
     """Kol araligina kirpar. Kart da kendi tarafinda kirpar/reddeder (BAD_ANGLE);
@@ -325,24 +389,35 @@ class TiltSurucu:
             return
         if self.kaynak.lower() == "mock":
             self.mock = MockTiltKart(simdi=self._saat())
-        else:
-            try:
-                import serial          # pyserial — yalniz gercek portta gerekir
-                # DTR/RTS KAPALI ACILIR: bircok ESP32-S3 karti port acilinca bu
-                # hatlardan RESET atar. Reset, kartin darbe sayacini SIFIRLAR ve
-                # firmware "kol fiziksel olarak 0'da" varsayar — kol yukaridayken
-                # bu olursa kartin inandigi aci ile gercek aci kalici olarak ayrisir.
-                # (ws_motor_test/keyboard_control.py:open_port ayni sebeple boyle yapar.)
-                baglanti = serial.Serial(port=None, baudrate=BAUD, timeout=0,
-                                         write_timeout=0.05)
-                baglanti.dtr = False
-                baglanti.rts = False
-                baglanti.port = self.kaynak.upper()
-                baglanti.open()
-                baglanti.reset_input_buffer()
-                self.seri = baglanti
-            except Exception as e:
-                self.hata = f"Tilt portu açılamadı ({self.kaynak}): {e}"
+            return
+        if self.kaynak.lower() == "auto":
+            gunluk = []
+            bulunan = otomatik_port_bul(gunluk=gunluk)
+            if bulunan is None:
+                self.hata = ("Tilt kartı bulunamadı (STATE3 yayını yok). Denenenler: "
+                             + ("; ".join(gunluk) if gunluk else "hiç seri port yok"))
+                return
+            self.kaynak = bulunan       # artik gercek port adi (arayuz bunu gosterir)
+        self._ac_seri()
+
+    def _ac_seri(self):
+        try:
+            import serial              # pyserial — yalniz gercek portta gerekir
+            # DTR/RTS KAPALI ACILIR: bircok ESP32-S3 karti port acilinca bu
+            # hatlardan RESET atar. Reset, kartin darbe sayacini SIFIRLAR ve
+            # firmware "kol fiziksel olarak 0'da" varsayar — kol yukaridayken
+            # bu olursa kartin inandigi aci ile gercek aci kalici olarak ayrisir.
+            # (ws_motor_test/keyboard_control.py:open_port ayni sebeple boyle yapar.)
+            baglanti = serial.Serial(port=None, baudrate=BAUD, timeout=0,
+                                     write_timeout=0.05)
+            baglanti.dtr = False
+            baglanti.rts = False
+            baglanti.port = self.kaynak.upper()
+            baglanti.open()
+            baglanti.reset_input_buffer()
+            self.seri = baglanti
+        except Exception as e:
+            self.hata = f"Tilt portu açılamadı ({self.kaynak}): {e}"
 
     # ---- durum ozellikleri ----
     @property
@@ -727,6 +802,27 @@ if __name__ == "__main__":
     assert not kapali.bagli and kapali.ozet() is None
     assert kapali.git(30.0) is None and kapali.yokla() is None
     kapali.dur(); kapali.kapat()
+
+    # 12. mock kaynagi seri port acmaya CALISMAMALI (otomatik-bulma dali eklenince
+    #     mock, seri acma koduna dusup "port acilamadi" hatasi uretmisti).
+    m = TiltSurucu("mock")
+    assert m.mock_mu and m.seri is None and m.hata is None, m.hata
+
+    # 13. otomatik bulma: hicbir port STATE3 konusmuyorsa ACIKCA sebep yazilmali,
+    #     sessizce "kapali" gibi davranmamali (operator neden calismadigini gorsun).
+    #     NOT: yama BU modulun global adina yapilir. `import tilt_surucu` ile
+    #     yamalamak calismaz — dosya __main__ olarak kostugunda o import IKINCI
+    #     bir modul nesnesi yaratir ve TiltSurucu hala buradaki adi okur.
+    _gercek_bul = otomatik_port_bul
+    try:
+        otomatik_port_bul = lambda dinleme=0.8, gunluk=None: None
+        a = TiltSurucu("auto")
+        assert not a.bagli and a.hata and "bulunamadı" in a.hata, a.hata
+        otomatik_port_bul = lambda dinleme=0.8, gunluk=None: "COM_YOK_99"
+        b = TiltSurucu("auto")
+        assert not b.bagli and b.hata and "açılamadı" in b.hata, b.hata
+    finally:
+        otomatik_port_bul = _gercek_bul
 
     print("tilt_surucu testleri OK — G bicimi, STATE3 cozumu, en-taze-hedef kuyrugu, "
           "canlilik kilidi, kalibrasyon kapisi, kirpma, kart reset tespiti")

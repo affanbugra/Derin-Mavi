@@ -49,23 +49,30 @@ set /p DERINMAVI_ESP="Pan portu: "
 if "%DERINMAVI_ESP%"=="" set "DERINMAVI_ESP=mock"
 echo.
 echo [2/2] TILT (dikey) kartı - ESP32-S3 + HSD57 kol-biyel, "G" komutu
-echo   AYRI BIR PORTTUR. Pan portuyla AYNI yazılmamalı.
-echo   Port adı yazın (örn. COM3)  -^> dikey eksen gerçek karta gider
-echo   Boş bırakıp Enter           -^> kapalı (dikey eksen pan kartında kalır)
+echo   Boş bırakıp Enter  -^> OTOMATIK BUL ^(önerilen^)
+echo   off                -^> kapalı ^(dikey eksen pan kartında kalır^)
+echo   COM3 / COM4        -^> elle port
+echo.
+echo   NOT: Kartın İKİ USB yolu var, kabloyu hangi sokete taktığınıza göre
+echo        COM numarası değişir ^(CH343 ve native USB^). Otomatik bulma
+echo        STATE3 yayınına bakar, numara ezberlemeniz gerekmez.
 echo.
 set "DERINMAVI_TILT="
-set /p DERINMAVI_TILT="Tilt portu: "
-if "%DERINMAVI_TILT%"=="" set "DERINMAVI_TILT=off"
+set /p DERINMAVI_TILT="Tilt portu [otomatik]: "
+if "%DERINMAVI_TILT%"=="" set "DERINMAVI_TILT=auto"
 
 REM Iki eksen ayni porta yazilirsa pyserial ikinci acisi hata verir ve eski
 REM protokol yeni firmware'e "T12.50" yollar - o firmware bu komutu TANIMAZ,
 REM ERR,DISARMED der ve motor HIC DONMEZ. Sessizce olmasin diye burada durdurulur.
-if /i "%DERINMAVI_ESP%"=="%DERINMAVI_TILT%" (
-    echo.
-    echo [HATA] Pan ve tilt portu AYNI yazıldı: %DERINMAVI_ESP%
-    echo        Yalnız tilt kartı bağlıysa pan portunu BOŞ bırakın ^(mock^).
-    pause
-    exit /b 1
+REM (auto/mock/off gercek port adi degildir, karsilastirmaya girmezler.)
+if /i not "%DERINMAVI_ESP%"=="mock" if /i not "%DERINMAVI_TILT%"=="auto" (
+    if /i "%DERINMAVI_ESP%"=="%DERINMAVI_TILT%" (
+        echo.
+        echo [HATA] Pan ve tilt portu AYNI yazıldı: %DERINMAVI_ESP%
+        echo        Yalnız tilt kartı bağlıysa pan portunu BOŞ bırakın ^(mock^).
+        pause
+        exit /b 1
+    )
 )
 echo.
 echo Pan kaynağı : %DERINMAVI_ESP%
