@@ -26,7 +26,9 @@ Zincirin tamami gercek koddur — yalnizca KAMERA ve MEKANIK taklit edilir:
   tespitin kare-kare titremesi. Bu bir ZAMANLAMA olcumu DEGIL, MANTIK ve
   KARARLILIK testidir. Sahadaki Kp/Kd ayari yine olcumle yapilmalidir.
 """
+import json
 import math
+import os
 
 import algi
 import nisan
@@ -130,6 +132,45 @@ class Benzetim:
         return self.iz
 
 
+class GecikmeliBenzetim(Benzetim):
+    """Kamera + cikarim gecikmesini de modelleyen benzetim.
+
+    Gercek zincirde kare YAKALANIR, ~66 ms sonra YOLO sonucu doner; PD o sirada
+    kolun ARTIK BULUNMADIGI bir konuma gore karar verir. Gecikme, yuksek kazancta
+    salinimin ASIL sebebidir — gecikmesiz bir benzetimde kazanc ne kadar
+    yukseltilirse yukseltilsin sistem hep kararli gorunur ve tarama yaniltir.
+
+    Olculdu (2026-09-20, gercek kalibrasyon 2675 darbe/60°):
+        gecikmesiz      : kp 0.90'a kadar asma YOK
+        1 kare (67 ms)  : kp 0.70'ten itibaren asma basliyor
+        2 kare (133 ms) : kp 0.70 + kd 0.06 -> 70 px asma, 3 yon degisimi (SALINIM)
+                          kp 0.90 + kd 0.06 -> 132 px asma
+    Yani kazanc tavanini gecikme belirler, mekanik degil.
+    """
+    GECIKME_KARE = 2        # 133 ms @ 15 FPS — kotumser ama gercekci
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._aci_gecmisi = []
+
+    def _piksel_y(self):
+        self._aci_gecmisi.append(self.kol_aci)
+        i = self.GECIKME_KARE + 1
+        gecikmis = self._aci_gecmisi[-i] if len(self._aci_gecmisi) >= i else self._aci_gecmisi[0]
+        dpp = nisan.derece_per_piksel(KARE_W)
+        return KARE_H * 0.5 + (gecikmis - self.hedef_aci) / dpp
+
+
+def yon_degisimi(iz, esik):
+    """Hatanin olu bolgenin disinda kac kez ISARET DEGISTIRDIGI — salinim olcutu.
+
+    Tek bir asma kotu ayar demek olmayabilir; SALINIM hedefin iki yanina art arda
+    gecmektir ve dwell'i (lazerin hedefte kalma suresi) imkansiz kilar."""
+    isaret = [1 if v > esik else (-1 if v < -esik else 0) for v in iz]
+    return sum(1 for i in range(1, len(isaret))
+               if isaret[i] and isaret[i - 1] and isaret[i] != isaret[i - 1])
+
+
 def olu_bolge_px():
     """O karedeki isabet olcutu (kutuya oranli) — yakinsama esigi budur."""
     return max(nisan.TABAN_OLU_BOLGE_PX,
@@ -153,7 +194,24 @@ def yakinsama_dogrula(iz, esik, ad):
         f"{ad}: salinim -> {[round(v) for v in buyukler[:25]]}"
 
 
+def kayitli_ayarlari_yukle():
+    """ayarlar.json varsa algi.AYAR'a yukler (arayuzun acilista yaptigi is).
+
+    Neden testte de: kazanc tavanini koruyan test (10) GERCEKTEN calisan
+    kazanclari denemeli. Yalnizca kod varsayilanlarini deneseydi, panelden
+    kp'yi salinim bolgesine cekmek testten sessizce gecerdi."""
+    yol = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ayarlar.json")
+    try:
+        with open(yol, encoding="utf-8") as f:
+            algi.ayar_guncelle(**json.load(f))
+        return yol
+    except (OSError, ValueError, TypeError):
+        return None
+
+
 if __name__ == "__main__":
+    _kaynak = kayitli_ayarlari_yukle()
+    print("ayar kaynagi:", _kaynak or "kod varsayilanlari")
     esik = olu_bolge_px()
 
     # 1-3. SABIT HEDEF, kol altta: yukari cikip hedefe YERLESMELI; asma ve salinim yok.
@@ -231,7 +289,40 @@ if __name__ == "__main__":
          "taban_olculen'i savunan gerekce dogrulanamiyorsa test guncellenmeli.")
     assert max(iz7) > esik, f"inanc referansinda asma gorulmedi: {max(iz7):.1f} px"
 
+    # 10. ⭐ KULLANILAN KAZANCLAR GECIKMEYLE BIRLIKTE KARARLI MI?
+    #     Bu test, ayarlar.json'daki (veya varsayilan) kp/kd ile 133 ms gecikmede
+    #     SALINIM olup olmadigini dener — yani kazanc tavanini korur. Biri kp'yi
+    #     "daha hizli olsun" diye 0.7-0.9'a cekerse burasi kirmiziya duser.
+    #     ⚠ Mekanigin GERCEK olcegiyle denenir: kalibrasyonda 60° = 2675 darbe
+    #     olculdu; mock'un varsayilani (6400) daha yavas bir kol demek olurdu ve
+    #     test gercekte olmayan bir guvenlik payi gosterirdi.
+    _eski_ust = T.MockTiltKart.UST_DARBE
+    T.MockTiltKart.UST_DARBE = 2675
+    try:
+        g = GecikmeliBenzetim(hedef_aci=25.0, baslangic_aci=0.0)
+        izg = g.calistir(9.0)
+        dgs = yon_degisimi(izg, esik)
+        assert dgs == 0, (f"kp={algi.AYAR['kp']} kd={algi.AYAR['kd']} ile "
+                          f"{GecikmeliBenzetim.GECIKME_KARE} kare gecikmede SALINIM "
+                          f"({dgs} yon degisimi). Kazanci dusur.")
+        assert max(izg) <= 3 * esik, \
+            f"gecikmeli asma cok buyuk: {max(izg):.1f} px (esik {esik:.1f})"
+        assert abs(izg[-1]) <= esik, f"gecikmeyle yakinsamadi: {izg[-1]:.1f} px"
+
+        # 10a. Hareketli hedefte kalici hata makul mu? (kp cok DUSUKSE burasi patlar —
+        #      0.25'te olculen 72 px idi, yani hedef kadrajda surekli geride kalir.)
+        g2 = GecikmeliBenzetim(hedef_aci=10.0, hedef_hizi=3.0, baslangic_aci=0.0)
+        iz2 = g2.calistir(12.0)
+        kalici = max(abs(v) for v in iz2[-45:])
+        assert kalici < 3.5 * esik, \
+            (f"hareketli hedefte kalici hata {kalici:.0f} px — kazanc cok dusuk "
+             f"(kp={algi.AYAR['kp']}).")
+    finally:
+        T.MockTiltKart.UST_DARBE = _eski_ust
+
     print(f"tilt takip benzetimi OK — yerlesme {abs(iz[-1]):.1f} px / esik {esik:.1f} px, "
           f"asma yok, salinim yok, iki yon, hareketli hedef, 0-{T.ACI_MAX:.0f}° araligi, "
           f"kalibrasyon kapisi, {g_sayisi} komut / {kare_sayisi} kare "
-          f"(inanc referansi karsi deneyi: {max(iz7):.0f} px asma)")
+          f"(inanc referansi karsi deneyi: {max(iz7):.0f} px asma) | "
+          f"gecikmeli (133 ms) kp={algi.AYAR['kp']} kd={algi.AYAR['kd']}: "
+          f"salinim yok, hareketli hata {kalici:.0f} px")

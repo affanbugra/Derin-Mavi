@@ -154,6 +154,95 @@ Benzetimde 121 karede yalnız **15 komut** gitti; kart hiç bayat hedef görmedi
 
 ---
 
+## Manuel basılı-tutma — neden yavaştı, ne değişti
+
+Şikâyet: *"yukarı bastıktan sonra tepkiyi geç veriyor, açılar arasında yavaş hareket ediyor."*
+
+**Kök sebep:** arayüz 50 ms'de bir **2°'lik** yeni hedef gönderiyordu. Firmware her
+hedefe yavaşlayarak yaklaşır (`MotionCore::schedule` → `sqrt(2·ACCEL·kalan)`) ve
+hedefe varınca hızı **sıfırlar**. Yani kol "ilerle-dur-ilerle-dur" yapıyor, tepe
+hıza **hiç** çıkmıyordu.
+
+**Çözüm:** basılı tutulunca karta **tek bir "sınıra kadar git" komutu** verilir;
+tuş bırakılınca `X`. Kart kendi ivme profiliyle tepe hıza çıkar. Sınır ve yasak
+alan komutun **içine** gömülür — böylece kartın nerede duracağını bilmesi için
+PC'nin "şimdi dur" demesine yetişmesi gerekmez (100 ms'lik yoklamada 36°/s = 3-4°
+aşma demekti).
+
+**Gerçek kartta ölçüldü** (0→20°, kalibrasyon 2675 darbe/60°):
+
+| | Süre | Hız |
+|---|---|---|
+| Eski (50 ms'de 2°) | 3.99 s | 5.0 °/s |
+| Yeni (tek uzak hedef) | 1.18 s | **17.0 °/s** |
+
+**3.4 kat**, üstelik duraksamasız. Uzun hareketlerde fark daha büyür (ivmelenme
+payı oransal olarak küçülür); 0→60° teorik ~2.2 s ≈ 28 °/s.
+
+Daha da hızlı istenirse tavan **firmware sabitleridir** — `motion_core.h`'de
+`MAX_SPEED=1600` darbe/s (= 36 °/s) ve `ACCEL=3200`. `ws_motor_test/README_TR.md`
+bunların optimum ayar olmadığını zaten söylüyor. Yükseltmek mekanikte adım kaçırma
+/ sürücü alarmı riski taşır, kademeli ölçülmeli — **bu dalda değiştirilmedi.**
+
+YÜKSELİŞ etiketi artık **ölçülen** açıyı gösterir. Basılı tutarken komut "sınıra
+kadar git" olduğu için hedef 60 yazardı, kol ise yolun ortasında olurdu.
+
+## Kazanç ayarı — tavanı mekanik değil GECİKME belirliyor
+
+`ayarlar.json`'da `kp=0.25, kd=0.0` vardı. Bu değerler eski mimaride (geri
+bildirimsiz, inanç referanslı) yaşanan salınımı bastırmak için düşürülmüştü.
+
+Taranınca görüldü ki **gecikmesiz bir benzetim yanıltıyor**: orada kp 0.90'a kadar
+aşma çıkmıyor. Kamera + çıkarım gecikmesi modellenince tablo değişti
+(gerçek kalibrasyon 2675 darbe/60°, 15 FPS):
+
+| kp / kd | gecikmesiz | 1 kare (67 ms) | 2 kare (133 ms) |
+|---|---|---|---|
+| 0.25 / 0.00 | yerleşme 3.9 s · hareketli hata **72 px** | aynı | aynı |
+| 0.50 / 0.06 | 2.7 s · 31 px | aşma yok | aşma yok · 40 px |
+| **0.60 / 0.06** | **2.6 s · 31 px** | **aşma yok** | **aşma yok · 34 px** |
+| 0.70 / 0.06 | 2.2 s · 25 px | 14 px aşma | **70 px aşma, 3 yön değişimi (SALINIM)** |
+| 0.90 / 0.06 | 2.0 s · 28 px | aşma yok | **132 px aşma** |
+
+Seçilen: **kp = 0.60, kd = 0.06.** Hareketli hedefteki kalıcı hata 72 → 34 px
+(**2.1 kat**), 133 ms gecikmede salınım yok.
+
+`kd` yüksek kp'de işi **kötüleştiriyor** (türev, gecikmiş hatayı büyütür) — 0.70'te
+kd=0 kararlı, kd=0.06 salınıyor. Kazancı yükseltmek isteyen bunu bilmeli.
+
+Bu tavan artık bir testle korunuyor: `tilt_takip_testi.py` test 10, `ayarlar.json`'ı
+okuyup 133 ms gecikmeyle salınım arar. kp 0.90'a çekilince kırmızıya düştüğü
+doğrulandı.
+
+## Tespit ayarları — düzeltilenler
+
+| Ayar | Eski | Yeni | Neden |
+|---|---|---|---|
+| `sahi` | 1 | **0** | SAHI açıkken `_analiz_sahi` çalışır ve kendi notuyla *"ByteTrack takibi DEVRE DIŞI: nesneler ID almaz"* — ID yoksa hedef kilidi de yok, **takip çalışamaz** |
+| `cozunurluk` | 1280 | **640** | Model 640'ta eğitilmiş; CLAUDE.md §6/12 bunu 3 FPS sorununun sebebi olarak kaydetmiş |
+| `iou` | 0.90 | **0.70** | NMS eşiği; 0.90'da çakışan kutular pratikte hiç elenmiyordu |
+| `kararlilik` | 120 | **30** | ByteTrack `track_buffer`; 60 FPS'te 120 kare = ölü takipler ~2 sn ekranda |
+| `kamera_fps` | 60 | 60 (**değişmedi**) | OBSBOT Meet 2 gerçekten 60 veriyor — ölçüldü |
+
+Eski dosya `app/ayarlar.json.yedek`'te.
+
+## Kamera — OBSBOT Meet 2
+
+Ölçüldü (DirectShow, index 1):
+
+| Format | Çözünürlük | Ölçülen FPS |
+|---|---|---|
+| MJPG | 1920×1080 | 59.6 |
+| MJPG | **1280×720** | **60.2** |
+| MJPG | 640×480 | 30.1 |
+| YUY2 | 1280×720 | 60.0 |
+
+Uygulamanın kendi kamera yolu (`algi.open_camera`) kamerayı **1280×720 MJPG @ 60 FPS**
+açıyor — yani ayar zaten doğru, değiştirilmedi. Açılış ~4 s sürüyor (DSHOW taraması).
+
+⚠ Kodda zaten bir not var: OBSBOT **MSMF backend'inde 21 s asılı kalıyor**. Tarama
+DSHOW'u önce denediği için sorun çıkmıyor; backend sırası değiştirilmemeli.
+
 ## Güvenlik — eskiden farklı olan davranışlar
 
 | Konu | Davranış |

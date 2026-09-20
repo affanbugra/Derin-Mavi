@@ -1811,6 +1811,9 @@ class MainWindow(QMainWindow):
         # DEGIL, guvenli bir varsayilan gelir — daha yukarisi ⚙ panelinden acilir.
         self.max_tilt_limit = float(P.TILT_CALISMA_VARSAYILAN)
         self.aci_adim = 5.0           # D-pad adim hassasiyeti (derece)
+        # Dikey eksende basili-tutma su an karta birakilmis mi? (bkz.
+        # _tilt_surekli_baslat). Yalniz ayri tilt karti varken True olur.
+        self._tilt_surekli = False
 
         self.pan_yasak_aktif = False  # harekete yasak alan (azimut)
         self.pan_yasak_min = 120.0
@@ -2102,6 +2105,11 @@ class MainWindow(QMainWindow):
         self._basili_yonler.discard(direction)
         if not self._basili_yonler:
             self._tekrar_durdur()
+        elif self.YON_TABLO[direction][2]:
+            # Dikey tus birakildi ama yatay hala basili: yalniz dikeyin surekli
+            # hareketi biter. Bunu atlarsak "yukari"yi birakip "saga" basili
+            # tutan operator, kolu sinira kadar tirmanmaya devam ederken gorurdu.
+            self._tilt_surekli_bitir()
 
     # ---- USB GAMEPAD ----
     GP_TARAMA_TIK = 40      # cihaz yokken kac tikta bir yeniden taransin (~2 sn)
@@ -2168,10 +2176,81 @@ class MainWindow(QMainWindow):
             adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt
             self._aci_hareket(d.pan * adim, d.tilt * adim)
 
+    def _tilt_surekli_mi(self):
+        """Dikeyde basili-tutma, kartin KENDI ivme profiliyle mi yurusun?
+
+        Yalnizca dikey eksen ayri kartta (ESP32-S3 + HSD57) ve kart hazirken.
+        Eski donanimda False doner ve davranis birebir eskisi gibi kalir."""
+        k = getattr(self, "kontrol", None)
+        return bool(k and k.tilt_ayri and k.tilt.hazir)
+
+    def _tilt_surekli_hedef(self, yon):
+        """O yonde gidilebilecek EN UZAK guvenli aci.
+
+        Sinir ve yasak alan komutun KENDISINE gomulur; boylece kart nerede
+        duracagini bilir ve PC'nin "simdi dur" demesine yetismesi gerekmez.
+        Yoklama 100 ms'de bir yapiliyor ve kol 36 derece/sn'ye cikabiliyor —
+        durdurmayi yoklamaya birakmak 3-4 derecelik bir asma demekti."""
+        hedef = self.max_tilt_limit if yon > 0 else 0.0
+        if self.tilt_yasak_aktif:
+            simdi = self.tilt_aci
+            if yon > 0 and simdi < self.tilt_yasak_min <= hedef:
+                hedef = max(simdi, self.tilt_yasak_min - 0.1)
+            elif yon < 0 and simdi > self.tilt_yasak_max >= hedef:
+                hedef = min(simdi, self.tilt_yasak_max + 0.1)
+        return hedef
+
+    def _tilt_surekli_baslat(self, yon):
+        """Dikeyde basili-tutma: karta TEK bir 'sinira kadar git' komutu verir.
+
+        NEDEN 50 ms'de bir kucuk hedef DEGIL: firmware her hedefe yavaslayarak
+        yaklasir (MotionCore::schedule -> sqrt(2*ACCEL*kalan)) ve hedefe varinca
+        hizi SIFIRLAR. Tik tik 2 derecelik hedef gondermek kolu "ilerle-dur-
+        ilerle-dur" yapmaya zorlar, tepe hiza HIC cikilmaz.
+        Gercek kalibrasyonla olculdu (2675 darbe / 60 derece = 44.6 darbe/derece,
+        ACCEL=3200, MAX_SPEED=1600):
+            50 ms'de bir 2 derece  -> her adim 0.24 sn, efektif ~5 derece/sn
+            tek uzak hedef         -> tepe hiz 1600 darbe/sn = ~36 derece/sn
+        Yedi kat fark ve hareket puruzsuz. Tus birakilinca `_tilt_surekli_bitir`.
+
+        Hareketin TEK KAPISI korunur: komut yine `_aci_hareket`'ten gecer, yani
+        E-Stop / yasak alan / aci limiti aynen uygulanir."""
+        taban = self.kontrol.tilt_olculen
+        if taban is None:
+            return False
+        hedef = self._tilt_surekli_hedef(yon)
+        if abs(hedef - taban) < 0.1:
+            return False               # o yonde gidecek yer yok (sinirda)
+        if not self._aci_hareket(0.0, hedef - taban, taban_olculen=True):
+            return False
+        self._tilt_surekli = True
+        return True
+
+    def _tilt_surekli_bitir(self):
+        """Tus birakildi / hareket kesildi: kolu durdur ve ekrani gercege cek."""
+        if not getattr(self, "_tilt_surekli", False):
+            return
+        self._tilt_surekli = False
+        k = getattr(self, "kontrol", None)
+        if not (k and k.tilt_ayri):
+            return
+        self._esp_goster(k.tilt_dur())
+        olculen = k.tilt_olculen
+        if olculen is not None:
+            # Arayuzun inanci kolun DURDUGU yere cekilir; yoksa bir sonraki
+            # manuel dokunus uzak hedeften hesaplanirdi.
+            self.tilt_aci = olculen
+            self.tilt_val_lbl.setText(f"{olculen:.1f}°")
+
     def _tekrar_baslat(self):
-        if self._basili_yonler:
-            self._son_tekrar_t = time.time()
-            self._tekrar_timer.start()
+        if not self._basili_yonler:
+            return
+        self._son_tekrar_t = time.time()
+        if self._tilt_surekli_mi():
+            ktilt = sum(self.YON_TABLO[y][2] for y in self._basili_yonler)
+            if ktilt:
+                self._tilt_surekli_baslat(1.0 if ktilt > 0 else -1.0)
+        self._tekrar_timer.start()
 
     def _tekrar_tik(self):
         """Basili tutulan yon(ler) icin bir adim.
@@ -2193,6 +2272,13 @@ class MainWindow(QMainWindow):
             _, p, t = self.YON_TABLO[yon]
             kpan += p
             ktilt += t
+        if getattr(self, "_tilt_surekli", False):
+            # Dikey ekseni kart kendi suruyor (tek uzak hedef, bkz.
+            # _tilt_surekli_baslat). Buradan tik tik hedef gondermek o hareketi
+            # bolerdi: her yeni hedef kolu yavaslatip durdururdu.
+            ktilt = 0.0
+            if not kpan:
+                return
         if (kpan or ktilt) and not self._aci_hareket(kpan * adim, ktilt * adim):
             self._tekrar_durdur()                      # E-Stop / yasak alan: tekrari kes
 
@@ -2200,6 +2286,10 @@ class MainWindow(QMainWindow):
         self._tekrar_gecikme.stop()
         self._tekrar_timer.stop()
         self._basili_yonler.clear()
+        # Kart kendi suruyorduysa DURDURULMALI: firmware'in hedefi sinirdir,
+        # "tus birakildi" diye bir kavrami yoktur — soylenmezse kol sinira
+        # kadar gitmeye devam eder.
+        self._tilt_surekli_bitir()
 
     def _tuslari_birak(self):
         """Tum yon tuslarini birakilmis say (tekrari kes + basili stilleri sifirla)."""
@@ -2964,6 +3054,13 @@ class MainWindow(QMainWindow):
             t_renk = {"iyi": GRN, "uyari": AMB}.get(t.get("renk"), RED)
             olculen = d.get("tilt_olculen")
             olculen_s = f'{olculen:.1f}°' if olculen is not None else '—'
+            # YÜKSELİŞ etiketi artik OLCULEN aciyi gosterir. Bu kart konumunu
+            # bildirdigi icin mumkun; eski kartta gosterilen deger "hedef"ti ve
+            # kol yetisemediginde ekran gercegi soylemiyordu. Ozellikle basili
+            # tutarken onemli: komut "sinira kadar git" oldugu icin hedef 60
+            # yazardi, kol ise yolun ortasinda olurdu.
+            if olculen is not None and hasattr(self, "tilt_val_lbl"):
+                self.tilt_val_lbl.setText(f"{olculen:.1f}°")
             kaynak_s = " · mock" if t.get("mock") else f' · {t.get("kaynak", "")}'
             self._ci("Tilt Kartı", t_renk,
                      f'· {t.get("ad", "—")} · ölçülen {olculen_s} '

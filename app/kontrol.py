@@ -265,6 +265,22 @@ class Kontrol:
             return self.durum
         return self._gonder(*satirlar)
 
+    def tilt_dur(self):
+        """Dikey ekseni OLDUGU YERDE durdurur ve hedefi gercege geri ceker.
+
+        Basili-tutma birakildiginda cagrilir. Surekli hareket, karta "sinira kadar
+        git" diye TEK bir uzak hedef verir; tus birakildiginda kol yolun ortasinda
+        durur. `tilt_hedef` o uzak degerde kalirsa arayuz kolun gercekte olmadigi
+        bir aciyi gosterir ve bir sonraki manuel dokunus oradan hesaplanir —
+        yani her basili-tutma ekrani gercekten biraz daha koparirdi."""
+        if not self.tilt_ayri:
+            return self.durum
+        self.tilt.dur()
+        olculen = self.tilt.aci
+        if olculen is not None:
+            self.tilt_hedef = olculen
+        return self.durum
+
     def ates(self, ac: bool):
         # NOT: eskiden bir `mod` (Manuel/Otonom) argumani vardi — karttaki kod mod
         # kavramini bilmiyor, komutlar her iki modda birebir ayni. Olu parametre silindi.
