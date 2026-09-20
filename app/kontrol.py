@@ -9,6 +9,21 @@ Kaynak secimi (donanim-bagimsiz, CLAUDE.md ilke 7):
     DERINMAVI_ESP=COM5   -> gercek seri port (pyserial; donanim gelince)
     DERINMAVI_ESP=off    -> kontrol kapali (yalniz goruntu isleme)
 
+DIKEY EKSEN (tilt) AYRI BIR KARTA VERILEBILIR — `DERINMAVI_TILT` ile:
+    DERINMAVI_TILT=off   -> tilt eski kartta kalir ("T<derece>"), varsayilan
+    DERINMAVI_TILT=mock  -> sahte ESP32-S3/HSD57 karti (donanimsiz test)
+    DERINMAVI_TILT=COM3  -> gercek ESP32-S3 + HSD57 karti (bkz. tilt_surucu.py)
+
+Neden: tilt ekseni artik KOL-BIYEL mekanizmasiyla, kapali cevrim HSD57 surucu ve
+ayri bir ESP32-S3 ile suruluyor. O kart mutlak aciyi "G<derece>" ile alir, 0..60
+arasinda calisir ve KONUMUNU GERI BILDIRIR (STATE3). Pan tarafi degismez.
+
+YONLENDIRME NEREDE: yalniz `aci()` icinde. Arayuz hicbir sey bilmez — hareketin
+tek kapisi (arayuz_qt._aci_hareket) yine buraya, buradan da dogru karta gider.
+Ekseni ikiye bolen ikinci bir yol acilsaydi (arayuz bazen suruculeri dogrudan
+cagirsaydi) E-Stop/yasak alan/limit kontrollerinden KACAN bir hareket yolu
+olusurdu — bu mimaride hareketin tek kapisi olmasinin sebebi tam olarak budur.
+
 Kullanim (arayuz):
     k = Kontrol()
     k.hiz_ayarla(P.H_HIZLI)     # motor hiz duzeyi (1=Yavas 2=Normal 3=Hizli)
@@ -28,14 +43,18 @@ bildirimi kazanirsa tek degisecek yer burasi.
 import os
 
 import protokol as P
+import tilt_surucu as T
 from mock_esp32 import MockESP32
 
 KAYNAK = os.environ.get("DERINMAVI_ESP", "mock").strip() or "mock"
 
 
 class Kontrol:
-    def __init__(self, kaynak=None):
+    def __init__(self, kaynak=None, tilt_kaynak=None):
         self.kaynak = (kaynak or KAYNAK).lower()
+        # DIKEY EKSEN SURUCUSU (ayri kart). "off" ise tilt eski kartta kalir ve
+        # bu nesne hicbir seyi degistirmez — mevcut davranis birebir korunur.
+        self.tilt = T.TiltSurucu(tilt_kaynak)
         self.mock = None
         self.seri = None
         self.hata = None
@@ -76,11 +95,35 @@ class Kontrol:
 
     @property
     def bagli(self):
-        return self.mock is not None or self.seri is not None
+        # Tilt ayri kartta ise pan karti olmasa da (DERINMAVI_ESP=off) sistem
+        # "bagli"dir: arayuzun 250 ms'lik yoklama dongusu bu bayraga bakar ve o
+        # dongu durursa tilt kartinin CANLILIGI kesilir, kart kendini kilitler.
+        return self.mock is not None or self.seri is not None or self.tilt.bagli
 
     @property
     def mock_mu(self):
         return self.mock is not None
+
+    @property
+    def tilt_ayri(self):
+        """Dikey eksen ayri kartta mi? (yonlendirmenin tek kosulu)"""
+        return self.tilt.bagli
+
+    @property
+    def tilt_tavan(self):
+        """Dikey eksenin FIZIKSEL tavani. Kol-biyel mekanizmasinda 60, eski
+        dogrudan tahrikte P.TILT_MAX. Arayuzun calisma limiti bunu asmamali."""
+        return T.ACI_MAX if self.tilt_ayri else P.TILT_MAX
+
+    @property
+    def tilt_olculen(self):
+        """Kartin BILDIRDIGI kol acisi (derece) — yoksa None.
+
+        kontrol.py'nin bas yorumundaki "kart konum geri bildirimi kazanirsa tek
+        degisecek yer burasi" notu: yeni tilt karti kazandi. Arayuz dikey aci
+        referansini buradan tazeler, boylece kaybolan/geciken komut kalici
+        sapmaya donusmez. Eski kart icin None doner ve davranis degismez."""
+        return self.tilt.aci if self.tilt_ayri else None
 
     @property
     def durum(self):
@@ -97,6 +140,12 @@ class Kontrol:
                 "lazer": self.lazer_acik, "lazer_guc": self.lazer_guc,
                 "estop": self.estop_aktif,
                 "hiz": self.hiz, "hiz_ad": P.HIZ_AD[self.hiz],
+                # Dikey eksen ayri karttaysa OLCULEN aci da verilir. Arayuz
+                # "hedef" ile "olculen"i ayri yazmali: ikisi ayni sanilirsa kartin
+                # yetisemedigi durum gorunmez olur.
+                "tilt_ayri": self.tilt_ayri,
+                "tilt_olculen": self.tilt_olculen,
+                "tilt_ozet": self.tilt.ozet(),
                 "esp_satir": self.satirlar[-1] if self.satirlar else ""}
 
     # ---- alt seviye: satir gonder / oku ----
@@ -113,7 +162,16 @@ class Kontrol:
             # gercekten ayrisirdi ve ekrandaki aci yalan soylerdi.
             konum = P.satir_konum(s)
             if konum is not None:
-                self.pan_hedef, self.tilt_hedef = konum
+                # ⚠ Dikey eksen AYRI KARTTAYSA eski kartin bildirdigi tilt bizi
+                # ILGILENDIRMEZ: o kartin tilt motoru bu mekanizmada bagli degil,
+                # dolayisiyla hep 0 yazar ve kolun gercek acisini SIFIRLAR
+                # (ekranda kol 34 derecedeyken "0" gorunurdu). Yalniz pan alinir.
+                if self.tilt_ayri:
+                    self.pan_hedef = konum[0]
+                    olculen = self.tilt.aci
+                    konum = (konum[0], olculen if olculen is not None else self.tilt_hedef)
+                else:
+                    self.pan_hedef, self.tilt_hedef = konum
                 self.estop_konum = konum        # arayuz ekrani buna gore duzeltir
         kart_tilt_max = P.satir_tilt_max(s)
         if kart_tilt_max is not None and abs(kart_tilt_max - P.TILT_MAX) > 0.01:
@@ -150,7 +208,24 @@ class Kontrol:
         """Karttan gelen YENI satirlari dondurur (bloklamaz; okunanlar kuyruktan duser).
 
         Kart her komuta metin yankilar; okunmazsa hem seri tampon dolar hem de seri
-        monitorden elle verilen STOP gibi olaylardan haberimiz olmaz."""
+        monitorden elle verilen STOP gibi olaylardan haberimiz olmaz.
+
+        TILT KARTININ NABZI DA BURADA. Bu dongu (arayuzde 250 ms'lik esp_timer)
+        durursa tilt karti 350 ms icinde KENDINI KILITLER — uygulama donarsa/kapanirsa
+        kol komut almaya devam etmesin diye. Yani nabiz ayri bir zamanlayiciya
+        tasinmamali: okuma dongusuyle ayni kaderi paylasmasi bilincli bir tercihtir."""
+        if self.tilt.bagli:
+            self.tilt.yokla()
+            for s in self.tilt.yeni_satirlar():
+                self._kart_yaziyor(f"TILT: {s}")
+            if self.tilt.hata:
+                self.hata, self.tilt.hata = self.tilt.hata, None
+            if self.tilt.kart_resetlendi:
+                # Kart acilista "kol fiziksel olarak 0'da" varsayar. Kol yukaridayken
+                # reset olduysa bildirdigi aci artik GERCEK degildir; arayuz uyarir.
+                self.tilt.kart_resetlendi = False
+                self.kart_resetlendi = True
+                self.tilt_hedef = self.tilt.aci or 0.0
         if self.seri is not None:
             try:
                 while self.seri.in_waiting:
@@ -165,15 +240,27 @@ class Kontrol:
     # ---- yuksek seviye API ----
     def aci(self, pan_der, tilt_der):
         """MUTLAK hedef aci. pan SARMASIZ (birikimli) verilmeli — bkz. protokol.py.
-        Yalnizca DEGISEN eksen gonderilir: hatta gereksiz komut dolastirmayiz."""
+        Yalnizca DEGISEN eksen gonderilir: hatta gereksiz komut dolastirmayiz.
+
+        TILT AYRI KARTTAYSA dikey eksen oraya yonlendirilir (tilt_surucu). Eski
+        karta "T" gitmez: iki kart ayni anda ayni ekseni surerse mekanik ikisinin
+        ortasinda bir yerde kalir."""
         satirlar = []
         if abs(pan_der - self.pan_hedef) > 0.005:
             satirlar.append(P.pan(pan_der))
             self.pan_hedef = pan_der
-        tilt_der = P.tilt_kirp(tilt_der)
-        if abs(tilt_der - self.tilt_hedef) > 0.005:
-            satirlar.append(P.tilt(tilt_der))
-            self.tilt_hedef = tilt_der
+        if self.tilt_ayri:
+            tilt_der = T.aci_kirp(tilt_der)         # kol-biyel araligi (0..60)
+            if abs(tilt_der - self.tilt_hedef) > 0.005:
+                self.tilt_hedef = tilt_der
+                # Kart mesgulse surucu PC tarafinda bekletir ve EN TAZE hedefi
+                # yollar (bkz. tilt_surucu: tek bekleme yuvasi uyarisi).
+                self.tilt.git(tilt_der)
+        else:
+            tilt_der = P.tilt_kirp(tilt_der)
+            if abs(tilt_der - self.tilt_hedef) > 0.005:
+                satirlar.append(P.tilt(tilt_der))
+                self.tilt_hedef = tilt_der
         if not satirlar:
             return self.durum
         return self._gonder(*satirlar)
@@ -203,13 +290,28 @@ class Kontrol:
         self.estop_aktif = bool(aktif)
         if aktif:
             self.lazer_acik = False        # kart da keser; ozet onunla ayni kalsin
-            self.tilt_hedef = 0.0          # kart tilt'i park konumuna indiriyor
+            if self.tilt_ayri:
+                # ⚠ YENI TILT KARTINDA DAVRANIS FARKLI: kol OLDUGU YERDE DURUR,
+                # 0'a PARK ETMEZ. Acil durdurma yeni bir hareket BASLATMAMALIDIR;
+                # eski karttaki park davranisi lazerli namlunun yukarida asili
+                # kalmamasi icindi, ama bu mekanizmada 0'a inmek 60 dereceden
+                # asagi dogru komutlu bir hareket demektir — acil durdurmada
+                # istenmeyen sey tam olarak budur.
+                # ⚠ TAKIMA SORU: lazer bu kola binecekse park davranisi yeniden
+                # degerlendirilmeli (kol yukarida kalir). Karar takimin.
+                self.tilt.dur()
+                self.tilt_hedef = self.tilt.aci if self.tilt.aci is not None else self.tilt_hedef
+            else:
+                self.tilt_hedef = 0.0      # eski kart tilt'i park konumuna indiriyor
         return self._gonder(P.DUR if aktif else P.DEVAM)
 
     def home(self):
         """Merkeze al (0°, 0°). ESP'de limit switch homing'i YOK — bu yalnizca
         'bilinen baslangica don' demektir; gercek homing kart tarafina eklenecek."""
         self.pan_hedef = self.tilt_hedef = 0.0
+        if self.tilt_ayri:
+            self.tilt.git(0.0)             # kol alt dayamaya (0 derece) iner
+            return self._gonder(P.pan(0.0))
         return self._gonder(P.pan(0.0), P.tilt(0.0))
 
     def guc_ayarla(self, yuzde):
@@ -226,6 +328,10 @@ class Kontrol:
         return self._gonder(*P.hiz(self.hiz))
 
     def kapat(self):
+        # Tilt karti KALICI olarak kapatilir (D): uygulama kapanirken kol komut
+        # kabul eder halde kalmamali. Kart zaten canlilik kesilince kilitlenir,
+        # ama acikca soylemek 350 ms'lik boslugu da kapatir.
+        self.tilt.kapat(kalici=True)
         if self.seri is not None:
             try:
                 self.seri.close()
@@ -277,4 +383,76 @@ if __name__ == "__main__":
 
     # kart metni ozete dusuyor mu (alt cubuk bunu gosterir)
     assert k.durum["esp_satir"], k.satirlar
-    print("kontrol testleri OK — mutlak aci, ates/estop, hiz duzeyi, kart metni")
+
+    # tilt ayri kart KAPALIYKEN (varsayilan) davranis birebir eskisi gibi olmali
+    assert not k.tilt_ayri and k.tilt_olculen is None
+    assert k.tilt_tavan == P.TILT_MAX
+
+    # ---------------------------------------------------------------
+    #  DIKEY EKSEN AYRI KARTTA (ESP32-S3 + HSD57, kol-biyel mekanizmasi)
+    # ---------------------------------------------------------------
+    k2 = Kontrol("mock", tilt_kaynak="mock")
+    saat = [5000.0]
+    k2.tilt._saat = lambda: saat[0]                 # testte gercek zamani beklemeyelim
+    k2.tilt.mock.t = k2.tilt.mock.son_canli = saat[0]
+
+    def tilt_tik(sure=0.25):
+        saat[0] += sure
+        k2.oku()                                    # arayuzdeki 250 ms'lik yoklama
+
+    tilt_tik(); tilt_tik()
+    assert k2.tilt_ayri and k2.tilt.hazir, k2.tilt.ozet()
+    assert k2.tilt_tavan == T.ACI_MAX == 60.0       # kol-biyel tavani, 180 DEGIL
+
+    # 1. ⭐ YONLENDIRME: tilt ESKI KARTA GITMEZ, yeni karta gider. Iki kart ayni
+    #    ekseni surerse mekanik ikisinin ortasinda kalir.
+    eski_tilt = k2.mock.tilt_hedef
+    k2.aci(45.0, 12.0)
+    assert k2.mock.pan_hedef == 45.0, "pan eski kartta kalmaliydi"
+    assert k2.mock.tilt_hedef == eski_tilt, "tilt eski karta da gitti"
+    assert not any(s.startswith("T") for s in k2.mock.kayit), k2.mock.kayit
+    for _ in range(40):
+        tilt_tik()
+        if not k2.tilt.hareket and k2.tilt._bekleyen_hedef is None:
+            break
+    assert abs(k2.tilt_olculen - 12.0) < 0.5, k2.tilt_olculen
+
+    # 2. Kirpma kol araligina gore yapilir (P.TILT_MAX=180 degil, 60)
+    k2.aci(45.0, 500.0)
+    assert k2.tilt_hedef == 60.0, k2.tilt_hedef
+
+    # 3. E-STOP: kol OLDUGU YERDE durur, 0'a park ETMEZ (acil durdurma yeni bir
+    #    hareket baslatmamali) ve ozet gercekten durdugu yeri gosterir.
+    for _ in range(6):
+        tilt_tik()
+    durdugu = k2.tilt_olculen
+    assert durdugu > 12.0, "kol 60'a dogru ilerlemis olmaliydi"
+    d = k2.estop(True)
+    assert d["durum_ad"] == "E-STOP" and d["tilt"] != 0.0, d
+    assert abs(d["tilt"] - durdugu) < 0.01, (d["tilt"], durdugu)
+    tilt_tik()
+    assert not k2.tilt.hareket, "E-Stop hareketi kesmeliydi"
+    k2.estop(False)
+
+    # 4. Ozet: HEDEF ile OLCULEN ayri ayri verilir (kartin yetisemedigi gorunsun)
+    d = k2.durum
+    assert d["tilt_ayri"] and d["tilt_olculen"] is not None
+    assert d["tilt_ozet"]["kalibre"] and d["tilt_ozet"]["ad"] in ("hazır", "hareket")
+
+    # 5. KALIBRE DEGILSE hicbir hareket gecmez (mekanigi korur)
+    k3 = Kontrol("mock", tilt_kaynak="mock")
+    saat3 = [6000.0]
+    k3.tilt._saat = lambda: saat3[0]
+    k3.tilt.mock.t = k3.tilt.mock.son_canli = saat3[0]
+    k3.tilt.mock.kalibre = False
+    for _ in range(3):
+        saat3[0] += 0.25
+        k3.oku()
+    assert not k3.tilt.kalibre and not k3.tilt.hazir
+    k3.aci(0.0, 30.0)
+    saat3[0] += 0.25
+    k3.oku()
+    assert not any(s.startswith("G") for s in k3.tilt.mock.kayit), k3.tilt.mock.kayit
+
+    print("kontrol testleri OK — mutlak aci, ates/estop, hiz duzeyi, kart metni, "
+          "tilt yonlendirmesi (ayri kart), kol araligi, E-Stop'ta yerinde durma")

@@ -84,7 +84,13 @@ Hiçbiri zorunlu değildir; hepsinin makul otomatik varsayılanı vardır.
 | `DERINMAVI_CAM` | Kamera kaynağını sabitler (yoksa otomatik tarama) | `0`, `video.mp4`, `rtsp://...` |
 | `DERINMAVI_MODEL` | Belirli model dosyası / ONNX seçer | `onnx`, `C:\yol\best.pt` |
 | `DERINMAVI_ESP` | Kontrolcü hedefi | `mock` (varsayılan), `COM5`, `off` |
+| `DERINMAVI_TILT` | **Dikey eksen ayrı kartta** (ESP32-S3 + HSD57 kol-biyel) | `off` (varsayılan), `mock`, `COM3` |
 | `DERINMAVI_FOCAL` | Mesafe kalibrasyon odak (piksel) | `900` |
+
+> `DERINMAVI_TILT` verilmezse hiçbir davranış değişmez; tilt eski kartta kalır.
+> Verilirse dikey eksen 0–60° kol-biyel mekanizmasına yönlenir ve **konum geri
+> bildirimli** çalışır. Kurulum, kalibrasyon ve tasarım kararları:
+> **[TILT_TAKIP.md](TILT_TAKIP.md)**.
 
 ---
 
@@ -101,10 +107,12 @@ Derin Mavi/
 │   ├── algi.py             #   Algı çekirdeği: kamera + YOLO + karar (tek kaynak)
 │   ├── nisan.py            #   Nişan matematiği: piksel hatası → gimbal açı komutu
 │   ├── renk_analizi.py     #   HSV ile dost/düşman (renk tarafı)
-│   ├── kontrol.py          #   Yüksek seviye kontrol API'si
+│   ├── kontrol.py          #   Yüksek seviye kontrol API'si (eksen yönlendirmesi burada)
 │   ├── protokol.py         #   ESP32 satır komutları + hız düzeyi (tek kaynak)
+│   ├── tilt_surucu.py      #   DİKEY EKSEN: ESP32-S3 + HSD57 kartı (G/STATE3) + sahte kart
 │   ├── mock_esp32.py       #   Sahte ESP32: 2 step motor + lazer (donanımsız test)
 │   ├── kapi_testleri.py    #   Güvenlik kapıları testi (E-Stop / ateş / yasak alan)
+│   ├── tilt_takip_testi.py #   Dikey takip kapalı çevrim benzetimi (donanımsız)
 │   └── Grafik/             #   Logo + arayüz ikonları
 ├── esp32/                  # Kart tarafı firmware (Arduino IDE / AccelStepper)
 │   └── derin_mavi_esp32/   #   Arduino kuralı: klasör adı = .ino adı
@@ -218,6 +226,7 @@ test edilmiştir.
   python app/protokol.py && python app/renk_analizi.py && python app/mock_esp32.py
   python app/kontrol.py && python app/nisan.py && python app/algi.py
   python app/kapi_testleri.py     # E-Stop / ateş / yasak alan güvenlik kapıları
+  python app/tilt_surucu.py && python app/tilt_takip_testi.py   # dikey eksen
   ```
   Her modül kendi kendini test eder; `kapi_testleri.py` ise şartnamenin can alıcı
   davranışlarını (E-Stop hareketi keser, yasak açıda ateş verilmez) pencere açmadan dener.

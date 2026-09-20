@@ -897,6 +897,10 @@ class MainWindow(QMainWindow):
             self._ci("ESP32", AMB if self.kontrol.mock_mu else GRN, etiket)
             self._ci("Seri Port", AMB if self.kontrol.mock_mu else GRN, "· 115200 baud")
             self._hiz_sec(self.hiz_seviye)   # acilista karti ekrandakiyle ayni hiza al
+            # DIKEY EKSEN AYRI KARTTAYSA (ESP32-S3 + HSD57, kol-biyel): mekanik
+            # tavan 180 degil 60'tir; kaydiricilar ve yasak alan sinirlari buna
+            # cekilir. Eski donanimda bu cagri hicbir seyi degistirmez.
+            self._tilt_tavan_uygula()
             # ESP32 durum yoklamasi: motorlar hedefe YURURKEN konum, lazer ve (varsa)
             # DONANIMSAL E-Stop yalnizca boyle gorulur — komut gonderilmedigi surece
             # arayuz kartin durumunu ogrenemez. Bos komut hicbir seyi degistirmez.
@@ -2211,6 +2215,29 @@ class MainWindow(QMainWindow):
         return bool(getattr(self, "atis_yasak_aktif", False)
                     and self.atis_pan_min <= self.pan_aci <= self.atis_pan_max)
 
+    def _tilt_tavan_uygula(self):
+        """Dikey eksenin MEKANIK tavanini kontrol katmanindan ogrenip arayuze uygular.
+
+        Kol-biyel mekanizmasinda (ESP32-S3 + HSD57) kol 0..60 derece arasinda
+        calisir; eski dogrudan tahrikteki 180 derece bu donanimda FIZIKSEL OLARAK
+        YOKTUR. Kaydirici 90'a cekilebilseydi kart 60'ta kirpardi ve gimbal
+        sebebi gorunmeden takili kalirdi — protokol.py'deki ayni hatanin (07.08,
+        ekran 120 / kart 90) tekrari olurdu. Tavan tek kaynaktan (kontrol.tilt_tavan)
+        turer; eski donanimda bu fonksiyon HICBIR SEYI DEGISTIRMEZ."""
+        tavan = float(getattr(self.kontrol, "tilt_tavan", P.TILT_MAX))
+        if tavan >= P.TILT_MAX:
+            return
+        self.max_tilt_limit = min(self.max_tilt_limit, tavan)
+        self.tilt_yasak_max = min(self.tilt_yasak_max, tavan)
+        sl = getattr(self, "ap_tilt_sl", None)
+        if sl is not None:
+            sl.setMaximum(int(tavan))
+            sl.setValue(int(self.max_tilt_limit))      # _ap_tilt_degisti'yi tetikler
+        for spin in (getattr(self, "ap_tmin_spin", None), getattr(self, "ap_tmax_spin", None)):
+            if spin is not None:
+                spin.setMaximum(int(tavan))
+        self._ap_tilt_degisti(int(self.max_tilt_limit))
+
     def _ap_tilt_degisti(self, val):
         self.max_tilt_limit = float(val)
         self.ap_tilt_deg.setText(f"{val}°")
@@ -2262,7 +2289,10 @@ class MainWindow(QMainWindow):
             self.atis_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
 
     def _ap_varsayilana_don(self):
-        tavan = int(P.TILT_CALISMA_VARSAYILAN)   # sabit 60 yaziliydi: tavan degisince kalirdi
+        # Sabit 60 yaziliydi: tavan degisince kalirdi. Ayrica kaydiricinin GERCEK
+        # tavanini asamaz — kol-biyel donaniminda mekanik tavan 60'tir ve varsayilana
+        # donmek onu 90'a cikarmamalidir (bkz. _tilt_tavan_uygula).
+        tavan = min(int(P.TILT_CALISMA_VARSAYILAN), self.ap_tilt_sl.maximum())
         self.ap_tilt_sl.setValue(tavan)
         self.ap_pan_cb.setChecked(False)
         self.ap_pmin_spin.setValue(120)
@@ -2276,7 +2306,7 @@ class MainWindow(QMainWindow):
         self._ap_tilt_degisti(tavan)
         self._ap_yasak_degisti()
 
-    def _aci_hareket(self, d_pan, d_tilt):
+    def _aci_hareket(self, d_pan, d_tilt, taban_olculen=False):
         """Pan/Tilt acisini degistirir, yasak bolgeleri kontrol eder ve ESP32 komutunu gonderir.
 
         HAREKETIN TEK KAPISI. E-Stop, yasak alan ve tilt limiti burada uygulanir;
@@ -2300,7 +2330,32 @@ class MainWindow(QMainWindow):
 
         yeni_pan_ham = self.pan_ham + d_pan
         yeni_pan = yeni_pan_ham % 360.0
-        yeni_tilt = max(0.0, min(self.max_tilt_limit, self.tilt_aci + d_tilt))
+
+        # DIKEY EKSENIN REFERANSI — `taban_olculen` yalnizca OTONOM TAKIPTE acilir.
+        #
+        # Eski kart konum bildirmiyordu, bu yuzden delta hep YAZILIMIN INANDIGI
+        # aciya (self.tilt_aci) eklenirdi. Yeni tilt karti (ESP32-S3 + HSD57, bkz.
+        # tilt_surucu.py) konumunu BILDIRIYOR ve bu, otonom takipte kapali cevrimi
+        # gercekten kapatir:
+        #
+        #   d_tilt, kameranin GORDUGU piksel hatasindan turer — yani kolun GERCEK
+        #   konumuna gore olculmus bir hatadir. Onu yazilimin inancina eklemek iki
+        #   farkli referansi toplamak demektir: kart komuta yetisemedigi anda
+        #   (kol-biyel yavas, firmware tek hedefi bitirip digerine geciyor) inanc
+        #   gercegin onune gecer ve her kare bir oncekinin ustune biner — namlu
+        #   hedefi asar, sonra geri salinir. Olculen aciya eklenince komut
+        #   "su an bulundugum yer + gordugum hata" olur; kaybolan/geciken komut
+        #   kalici sapma birakmaz.
+        #
+        # MANUELDE inanc referansi KORUNUR (taban_olculen=False): operator yon
+        # tusuna ucuncu kez bastiginda kol henuz hareket halindeyse bile "3 adim
+        # yukari" beklenir; olculene gore hesaplamak o basislari yutardi.
+        tilt_taban = self.tilt_aci
+        if taban_olculen:
+            olculen = getattr(getattr(self, "kontrol", None), "tilt_olculen", None)
+            if olculen is not None:
+                tilt_taban = olculen
+        yeni_tilt = max(0.0, min(self.max_tilt_limit, tilt_taban + d_tilt))
 
         # Harekete yasak aci kontrolu
         yasak_mi = False
@@ -2374,7 +2429,10 @@ class MainWindow(QMainWindow):
             d_yaw = max(-tavan, min(tavan, d_yaw))
             d_pitch = max(-tavan, min(tavan, d_pitch))
         self._nisan_son_t = simdi
-        if self._aci_hareket(d_yaw, d_pitch):
+        # taban_olculen=True: dikey eksende komut, kartin BILDIRDIGI aciya gore
+        # kurulur (bkz. _aci_hareket). Kart bildirmiyorsa (eski donanim) eski
+        # davranis aynen surer.
+        if self._aci_hareket(d_yaw, d_pitch, taban_olculen=True):
             mesafe = max(abs(d_yaw), abs(d_pitch))
             # Ucgen ivme profili (tepe hiza hic ulasilmadigi varsayimi — kisa
             # duzeltmelerde gecerli): TAM tamamlanma t = 2*sqrt(mesafe/ivme); yalniz
@@ -2564,8 +2622,13 @@ class MainWindow(QMainWindow):
         # ayrac, iki segment arasinda esit bosluklu, bagimsiz bir eleman.
         self.ci = {}
         segmentler = []
+        # "Tilt Kartı" segmenti dikey eksen AYRI KARTTAYKEN doldurulur (bkz.
+        # _esp_goster); eski donanimda "bağlı değil" olarak kalir ve kimseyi
+        # yaniltmaz. Segment burada kosulsuz yaratilir cunku alt cubuk, kontrol
+        # katmani kurulmadan ONCE insa edilir.
         for ad, alt in (("Kamera", "· aranıyor"), ("Lazer", "· bağlı değil"),
-                        ("ESP32", "· bağlı değil"), ("Seri Port", "· bekleniyor"),
+                        ("ESP32", "· bağlı değil"), ("Tilt Kartı", "· kapalı"),
+                        ("Seri Port", "· bekleniyor"),
                         ("Gamepad", "· aranıyor")):
             cont, dot, lbl = self._sb_seg(f'{ad}<small style="color:{TXT3}">&nbsp;{alt}</small>',
                                           dot_renk=BD2)
@@ -2877,6 +2940,18 @@ class MainWindow(QMainWindow):
         self._ci("ESP32", renk,
                  f'· {d["durum_ad"]} · hedef yatay {d["pan"]:.1f}° dikey {d["tilt"]:.1f}°'
                  f' · {d["hiz_ad"]}{ek}')
+        # DIKEY EKSEN KARTI (varsa) AYRI GOSTERILIR — ve HEDEF ile OLCULEN ayri
+        # yazilir. Ikisini tek sayiya indirgemek, kartin komuta yetisemedigi ani
+        # gorunmez yapardi: ekran "30°" derken kol 12°'de olabilir.
+        if d.get("tilt_ayri"):
+            t = d["tilt_ozet"] or {}
+            t_renk = {"iyi": GRN, "uyari": AMB}.get(t.get("renk"), RED)
+            olculen = d.get("tilt_olculen")
+            olculen_s = f'{olculen:.1f}°' if olculen is not None else '—'
+            kaynak_s = " · mock" if t.get("mock") else f' · {t.get("kaynak", "")}'
+            self._ci("Tilt Kartı", t_renk,
+                     f'· {t.get("ad", "—")} · ölçülen {olculen_s} '
+                     f'/ hedef {d["tilt"]:.1f}°{kaynak_s}')
         self._ci("Lazer", RED if d["lazer"] else BD2,
                  f'· AKTİF %{d["lazer_guc"]}' if d["lazer"] else f'· kapalı · %{d["lazer_guc"]}')
         self._lazer_bilgi_yaz()          # LAZER kartinin basligi da ates durumunu gostersin
@@ -2929,10 +3004,22 @@ class MainWindow(QMainWindow):
                 self.pan_val_lbl.setText("0.0°")
                 self.tilt_val_lbl.setText("0.0°")
             self._ates_kes("ESP32 yeniden başladı")
-            self.sb_msg.setText(
-                f'<span style="color:{AMB}">●</span>&nbsp;'
-                f'<b>ESP32 YENİDEN BAŞLADI</b> — besleme kesilmiş olabilir. '
-                f'Açı referansı sıfırlandı, gimbal konumunu doğrulayın.')
+            # Dikey eksen ayri karttaysa uyari daha ciddidir: o firmware her
+            # acilista "kol fiziksel olarak en asagidaki 0 konumunda" VARSAYAR.
+            # Kol yukaridayken reset olduysa kartin bildirdigi aci artik gercek
+            # degildir ve bunun disaridan hicbir belirtisi yoktur — operator kolu
+            # gercekten 0'a indirmeden takibe devam etmemelidir.
+            if getattr(self.kontrol, "tilt_ayri", False):
+                self.sb_msg.setText(
+                    f'<span style="color:{RED}">●</span>&nbsp;'
+                    f'<b>TİLT KARTI YENİDEN BAŞLADI</b> — kart, kolun 0° konumunda '
+                    f'olduğunu VARSAYIYOR. Kol yukarıdaysa gösterilen açı YANLIŞTIR: '
+                    f'kolu fiziksel olarak en alta indirip doğrulayın.')
+            else:
+                self.sb_msg.setText(
+                    f'<span style="color:{AMB}">●</span>&nbsp;'
+                    f'<b>ESP32 YENİDEN BAŞLADI</b> — besleme kesilmiş olabilir. '
+                    f'Açı referansı sıfırlandı, gimbal konumunu doğrulayın.')
         if yeni:
             self.sb_msg.setText(f'<span style="color:{TXT3}">ESP32:</span>&nbsp;{yeni[-1]}')
         self._esp_goster(self.kontrol.durum)
