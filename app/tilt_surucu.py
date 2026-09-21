@@ -318,6 +318,13 @@ class MockTiltKart:
             if self.acik:
                 self.son_canli = simdi
             return None                     # firmware H'ye yanit YAZMAZ
+        if s == "R":
+            # Firmware: hareket halindeyse reddet; degilse sayac 0, kalibrasyon korunur.
+            if self.pos != self.hedef:
+                return "ERR,R,STOP_FIRST"
+            self.pos = self.hedef = 0
+            self.bekleyen = None
+            return "OK,R"
         if s.startswith("Z"):
             # Firmware'de Z, silahlandirma kapisinin ONUNDEDIR (V gibi).
             if self.pos != self.hedef:
@@ -678,6 +685,11 @@ class TiltSurucu:
             # ESKI FIRMWARE: "Z" komutu yok. Hiz kademesi calismaz ama hareketin
             # geri kalani calisir (G/E/H/X/D eski surumde de var). Bir kez soylenir
             # ve bir daha DENENMEZ — yoksa her kademe degisiminde ayni hata dusuerdi.
+            if s.startswith("ERR,R,") and sebep == "UNKNOWN_COMMAND":
+                self.hata = ("Karttaki firmware sıfırlamayı (R) tanımıyor — eski sürüm. "
+                             "Kol en alttayken ESP'nin USB'sini çekip tak; ya da "
+                             "ws_motor_test/esp32_ws_test'i yeniden yükle.")
+                return
             if s.startswith("ERR,Z") and sebep == "UNKNOWN_COMMAND":
                 self.hiz_desteklenmiyor = True
                 self._gonderilen_hiz = None
@@ -790,6 +802,24 @@ class TiltSurucu:
         self._gonderim_t = self._saat()
         self._yaz(git(hedef))
         return hedef
+
+    def sifirla(self):
+        """R: "kol SU AN fiziksel olarak en altta" — kartin darbe sayacini 0 yapar.
+
+        Kalibrasyon tablosu SILINMEZ. Neden gerekli: kart kolun yerini OLCMEZ,
+        gonderdigi darbeleri sayar. Motor beslemesi kesilince kol yer cekimiyle
+        duser ama USB'den beslenen ESP32 eski sayida kalir. Sahada: kol en
+        alttayken kart 20 derece diyordu ve her komut kolu alt dayamaya bastirdi.
+
+        YALNIZ kol gercekten en alttayken cagrilmali — yanlis anda cagrilirsa
+        referansi bu sefer ters yonde bozar."""
+        if not self.bagli:
+            return False
+        self._bekleyen_hedef = None
+        self._gonderilen_hedef = None
+        # Sayac 0'a donecek; bu bir KART RESETI degildir, reset dedektoru susturulur.
+        self._son_pos = 0
+        return self._yaz("R\n")
 
     def dur(self):
         """Hareketi kes ve bekleyen hedefi iptal et (E-Stop / hedef kaybi)."""
@@ -1082,6 +1112,31 @@ if __name__ == "__main__":
     for _ in range(10):
         d.git(40.0)                      # ayni an, STATE3 araya girmeden
     assert len([k for k in d.mock.kayit if k.startswith("G")]) == n0 + 1, d.mock.kayit[-5:]
+
+    # 16. ⭐ SIFIRLAMA (R). Sahada: kol en alttayken kart 20 derece sandi (motor
+    #     beslemesi kesilince kol dustu, USB'den beslenen ESP32 eski sayida kaldi).
+    saat[0] += 1.0
+    z = TiltSurucu("mock", _saat=lambda: saat[0])
+    for _ in range(3):
+        saat[0] += 0.25; z.yokla()
+    z.mock.pos = z.mock.hedef = z.mock._darbe(20.0)        # kart 20 saniyor
+    saat[0] += 0.25; z.yokla()
+    assert abs(z.aci - 20.0) < 0.1, z.aci
+    assert z.sifirla()
+    saat[0] += 0.25; z.yokla()
+    assert abs(z.aci) < 1e-9, f"sifirlama olmadi: {z.aci}"
+    assert z.kalibre, "sifirlama kalibrasyonu SILMEMELI"
+    assert not z.kart_resetlendi, "bilincli sifirlama 'kart resetlendi' sanildi"
+    # kilitliyken (acik=0) sifirlama da reset sanilmamali
+    z.mock.pos = z.mock.hedef = z.mock._darbe(15.0); z.mock.acik = False
+    saat[0] += 0.25; z._oku()
+    z.sifirla(); saat[0] += 0.25; z._oku()
+    assert not z.kart_resetlendi, "kilitliyken sifirlama 'kart resetlendi' sanildi"
+    # hareket halindeyken reddedilir
+    saat[0] += 0.25; z.yokla(); saat[0] += 0.25; z.yokla()
+    z.git(40.0); saat[0] += 0.12; z.yokla()
+    z.sifirla(); saat[0] += 0.05; z._oku()
+    assert z.aci > 0.5, "hareket ortasinda sifirlama kabul edildi"
 
     # 12. mock kaynagi seri port acmaya CALISMAMALI (otomatik-bulma dali eklenince
     #     mock, seri acma koduna dusup "port acilamadi" hatasi uretmisti).

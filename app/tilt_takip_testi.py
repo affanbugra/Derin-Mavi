@@ -52,12 +52,11 @@ class Benzetim:
     """Kamera + mekanik modeli etrafinda gercek kontrol zincirini dondurur."""
 
     def __init__(self, hedef_aci, hedef_hizi=0.0, baslangic_aci=0.0,
-                 hiz_seviye=P.H_NORMAL, mekanizma=None, egri=None):
+                 hiz_seviye=P.H_NORMAL, mekanizma=None):
         """mekanizma: komut acisi -> KAMERA acisi fonksiyonu (None = birebir).
-        egri     : tilt_egri.KameraEgrisi — verilirse `_nisan_geldi` aynasi,
-                   arayuzdeki gibi istegi egri uzerinden komuta cevirir."""
+        Kamera ile komut arasindaki donus orani 1 degilse dongu kazanci fiilen
+        o oranla carpilir; bunu denemek icin verilir."""
         self.mekanizma = mekanizma
-        self.egri = egri
         self.saat = 0.0
         self.hedef_aci = float(hedef_aci)       # hedefin GERCEK yukselis acisi
         self.hedef_hizi = float(hedef_hizi)     # derece/sn (hareketli hedef)
@@ -85,7 +84,7 @@ class Benzetim:
     @property
     def kamera_aci(self):
         """KAMERANIN gercek acisi. Kol-biyelde komut acisindan farklidir ve
-        dogrusal degildir (bkz. tilt_egri.py); hedef_aci da bu olcektedir."""
+        dogrusal olmayabilir; hedef_aci da bu olcektedir."""
         return self.mekanizma(self.kol_aci) if self.mekanizma else self.kol_aci
 
     def _piksel_y(self):
@@ -114,10 +113,6 @@ class Benzetim:
             d_pitch = max(-tavan, min(tavan, d_pitch))
         self._nisan_son_t = self.saat
         mesafe = abs(d_pitch)                  # mesgul kapisi KAMERA derecesiyle
-
-        # Egri varsa istek, o bolgedeki egime gore KOMUT deltasina cevrilir
-        if self.egri is not None and self.k.tilt_olculen is not None:
-            d_pitch = self.egri.komut_duzeltmesi(self.k.tilt_olculen, d_pitch)
 
         # _aci_hareket'in dikey kismi: taban OLCULEN acidir (otonom takip)
         taban = self.k.tilt_olculen
@@ -337,68 +332,6 @@ if __name__ == "__main__":
         assert kalici < 3.5 * esik, \
             (f"hareketli hedefte kalici hata {kalici:.0f} px — kazanc cok dusuk "
              f"(kp={algi.AYAR['kp']}).")
-    finally:
-        T.MockTiltKart.UST_DARBE = _eski_ust
-
-    # 11. ⭐⭐ KOL-BIYEL MEKANIZMASI: SAHADAKI ARIZA VE COZUMU (2026-09-21)
-    #     Mekanizma, gercek kartta kamerayla OLCULEN egriyle modellenir: ~8 derecenin
-    #     altinda kamera TERS doner, 6-10 arasi olu nokta, oran bolgeden bolgeye 3 kat
-    #     degisir (bkz. tilt_egri.py). Sahada: nisan noktasi hedefin altinda kaldi,
-    #     namlu indi, kol ters bolgeye girdi ve alt uca kacti.
-    import tilt_egri as TE
-    egri_olc = TE.KameraEgrisi.yukle() or TE.KameraEgrisi(
-        [(2, 0.0, 1.0), (6, -2.40, 0.43), (10, -2.71, 0.88), (14, -2.16, 0.88),
-         (18, -1.20, 0.83), (22, 0.17, 0.66), (26, 1.81, 0.66), (30, 3.61, 0.56),
-         (34, 5.07, 0.67), (38, 6.48, 0.56), (42, 7.77, 0.52), (46, 8.59, 0.83),
-         (50, 9.51, 0.67), (54, 15.27, 0.03), (58, 15.27, 0.02)])
-    mekanizma = egri_olc.kamera
-    lo, hi = egri_olc.gecerli_aralik
-    T.MockTiltKart.UST_DARBE = 2675
-    try:
-        # 11a. ARIZAYI YENIDEN URET: hedef, gecerli bolgenin erisemeyecegi kadar
-        #      asagida (nisan noktasi kutunun altinda kalinca sahada olan buydu).
-        #      Egri OLMADAN kontrolcu kolu ters bolgeye iter, kol alt uca kacar.
-        #      Hedef kamera acisi, gecerli bolgenin erisebildigi en dusuk degerin
-        #      (lo'daki kamera acisi) biraz altinda secilir.
-        erisilemez = egri_olc.kamera(lo) - 1.5
-        ariza = Benzetim(hedef_aci=erisilemez, baslangic_aci=24.0, mekanizma=mekanizma)
-        ariza.calistir(12.0)
-        assert ariza.kol_aci < 4.0, \
-            (f"arizayi yeniden uretemedik: kol {ariza.kol_aci:.1f} derecede kaldi "
-             f"— benzetim artik sahadaki davranisi modellemiyor")
-
-        # 11b. ⭐ DUZELTME: ayni durumda egri, kolu gecerli bolgenin alt ucunda
-        #      TUTAR; olu/ters bolgeye hic sokmaz.
-        duzgun = Benzetim(hedef_aci=erisilemez, baslangic_aci=24.0,
-                          mekanizma=mekanizma, egri=egri_olc)
-        duzgun.calistir(12.0)
-        assert duzgun.kol_aci >= lo - 0.5, \
-            f"egri kolu olu bolgeden koruyamadi: {duzgun.kol_aci:.1f} < {lo}"
-
-        # 11c. KURTARMA: kol ters bolgede takili (sahadaki arizadan sonraki hal).
-        #      Erisilebilir bir hedef verilince egri once kolu gecerli bolgeye
-        #      ceker, sonra hedefe yerlestirir.
-        hedef_kamera = egri_olc.kamera(34.0)
-        kurtar = Benzetim(hedef_aci=hedef_kamera, baslangic_aci=3.0,
-                          mekanizma=mekanizma, egri=egri_olc)
-        izk = kurtar.calistir(12.0)
-        assert abs(izk[-1]) <= esik, f"ters bolgeden kurtarilamadi: {izk[-1]:.1f} px"
-        assert abs(kurtar.kol_aci - 34.0) < 2.0, kurtar.kol_aci
-
-        # 11d. DOGRUSALLASTIRMA: egimin dusuk (0.14) ve yuksek (0.45) oldugu iki
-        #      bolgede ayni kamera mesafesini kapatma suresi YAKIN olmali. Egri
-        #      olmadan zayif bolge ~3 kat yavas kalirdi.
-        def yerlesme_suresi(bas, hed, egri):
-            b = Benzetim(hedef_aci=egri_olc.kamera(hed), baslangic_aci=bas,
-                         mekanizma=mekanizma, egri=egri)
-            iz_ = b.calistir(15.0)
-            return next((i * KARE_SURESI for i in range(len(iz_))
-                         if all(abs(v) <= esik for v in iz_[i:])), None)
-        zayif_egrisiz = yerlesme_suresi(11.0, 17.0, None)
-        zayif_egrili = yerlesme_suresi(11.0, 17.0, egri_olc)
-        assert zayif_egrili is not None, "egriyle zayif bolgede yerlesmedi"
-        assert zayif_egrisiz is None or zayif_egrili < zayif_egrisiz, \
-            (zayif_egrili, zayif_egrisiz)
     finally:
         T.MockTiltKart.UST_DARBE = _eski_ust
 

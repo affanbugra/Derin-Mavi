@@ -1075,31 +1075,30 @@ mekanizması, firmware `ws_motor_test/esp32_ws_test` (repo dışı). Protokol `G
 (konum **geri bildirimli**). `DERINMAVI_TILT=auto|COMx|mock|off`; yönlendirme tek noktada
 `kontrol.aci()`. Ayrıntı ve ölçümler: [TILT_TAKIP.md](TILT_TAKIP.md).
 
-**[KESİN — kamerayla ölçüldü] Mekanizma doğrusal değil ve altta ÖLÜ NOKTADAN geçiyor.**
-Kalibrasyon (0–60°) "kol açısı"dır, kamera açısı değildir. `tilt_yon_testi.py egri` ile iki
-kez ölçüldü, tekrarlanabilir (±0.1°):
+**⚠ SIFIR REFERANSI — ESP32 kolun yerini ÖLÇMEZ.** Gönderdiği darbeleri sayar. Motor
+beslemesi kesilince kol yer çekimiyle düşer, USB'den beslenen ESP32 eski sayıda kalır
+(sahada: kol en alttayken kart 20° sandı; sonraki her komut kolu alt dayamaya bastırdı).
+Çözüm firmware'de `R` komutu ("kol şu an en altta", kalibrasyonu silmez), arayüzde açı
+ayarları panelinde **"Kol en altta — tilt sayacını sıfırla"**, komut satırında
+`python app/tilt_tani.py auto --sifirla`. Kalıcı çözüm limit switch ile homing.
 
-| Komut | Kamera°/komut° | |
-|---|---|---|
-| 2–6° | **−0.60** | **TERS** — kol yukarı, kamera aşağı |
-| 6–10° | −0.08 | ölü nokta |
-| 10–18° | 0.13–0.24 | zayıf |
-| 18–42° | 0.32–0.45 | verimli |
-| 42–50° | ~0.22 | zayıf |
+**⚠ DÜZELTME (21.09): "ölü nokta / ters bölge" bulgusu YANLIŞTI.** Aynı gün kamerayla
+yapılan ilk ölçüm, 2–10° komutta kameranın ters döndüğünü "gösterdi" ve buna göre bir
+eğri kompanzasyonu yazıldı. Sonra kartın sıfırının ~13–20° kaymış olduğu anlaşıldı:
+o bölgedeki komutlar kolu **dayanağa bastırıyordu.** Doğru sıfırla tekrar ölçülünce
+ters bölge **yok** — 0°'dan yukarı kamera hep aynı yönde döner. Eğri özelliği tamamen
+kaldırıldı; kullanıcının 0–60° kalibrasyonu zaten namlu açısına göredir.
+Görüntü kaydırmayla (faz korelasyonu) açı ölçmenin iki tuzağı görüldü: (1) desensiz
+yüzeyde (düz duvar/tavan) kayma 0 okunur; (2) derece çevirisi FOV ayarına bağlıdır.
+Toplam dönüş bu yöntemle ~23° okundu, fotoğraflar ise masadan tavan köşesine giden çok
+daha büyük bir dönüş gösterdi — **fiziksel açı için bu yöntem güvenilir değil.** Döngü
+kazancı için anlamlıdır: dokulu bölgede ölçülen oran (~0.45–0.75) PD kazancının fiilen
+çarpıldığı değerdir.
 
-10–50° komut aralığında kamera toplam yalnız **~12°** döner. Eğri `app/tilt_egri.json`'da;
-mekanizma/kamera montajı/kalibrasyon değişirse **yeniden ölçülmeli.**
-
-**Sahadaki arıza (21.09) ve kök sebebi:** otonomda "hedef merkezin üstündeyken namlu aşağı
-indi, kol alt uca dayandı, kısa süre sonra kart sustu". Yön işareti **doğru** çıktı (ölçüldü).
-Sebep iki şeyin birleşimi: (1) nişan noktası balon için kutunun **0.9 boy altında** —
-balonsuz takipte hedef merkezin üstündeyken bile namlu iner; (2) aşağı inen kol ters
-bölgeye girince her düzeltme hatayı büyütür, kol uca kaçar. Benzetimde birebir üretildi
-(`tilt_takip_testi` test 11a: kol 24° → 0°).
-
-**Çözüm:** `tilt_egri.KameraEgrisi` — otonom istek o bölgenin eğimine göre komuta çevrilir
-(döngü kazancı her bölgede aynı) ve kol **yalnız geçerli aralıkta (10–50°)** tutulur,
-dışarıdaysa ilk komut geri çeker. Aynı arıza senaryosunda kol 10°'de durur. Nişan için
+**Sahadaki "namlu aşağı indi" arızası:** yön işareti **doğru** (ölçüldü). Sebep nişan
+noktasının balon için kutu merkezinin **0.9 boy altında** olması: balonsuz takipte hedef
+merkezin üstündeyken bile namlu iner. Büyük (yakın) kutuda bu nokta kadrajın altına
+düşer ve kol uca kaçar; kaymış sıfır referansı kolu dayanağa bastırır. Çözüm
 `nisan_govde` ayarı (⚙ "Gövdeye nişan"): balonsuz takipte kutu merkezi.
 
 **Kart kilitlenmesi — sebebi HÂLÂ BİLİNMİYOR.** Kart tamamen sustu (STATE3 yok, USB reset'e

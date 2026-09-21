@@ -92,7 +92,7 @@ def tarama(araliklar=((5, 13), (25, 33), (45, 53))):
     return sonuc
 
 
-def egri(bas=2.0, son=58.0, adim=4.0, tekrar=2):
+def egri(bas=0.0, son=60.0, adim=4.0, tekrar=2, foto_dizin=None, foto_her=12.0):
     """Komut acisi -> KAMERA acisi egrisini kucuk adimlarla cikarir.
 
     Kucuk adim: faz korelasyonu ancak iki kare yeterince ORTUSURSE guvenilir.
@@ -114,6 +114,23 @@ def egri(bas=2.0, son=58.0, adim=4.0, tekrar=2):
     onceki_k = ortalama_kare(cap)
     kamera = 0.0
     noktalar.append((onceki_a, 0.0, 1.0))
+
+    def foto(aci):
+        """Gozle dogrulama icin: sayilarin soyledigi donus goruntude de var mi?"""
+        if foto_dizin is None:
+            return
+        import os
+        os.makedirs(foto_dizin, exist_ok=True)
+        for _ in range(3):
+            cap.read()
+        ok, k = cap.read()
+        if ok:
+            k = cv2.resize(k, (640, 360))
+            cv2.putText(k, f"komut {aci:.0f} derece", (10, 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 255), 2)
+            cv2.imwrite(os.path.join(foto_dizin, f"tilt_{aci:04.1f}.jpg"), k)
+    foto(onceki_a)
+    son_foto = onceki_a
     while a + adim <= son + 1e-9:
         a += adim
         kaymalar, guvenler = [], []
@@ -129,6 +146,8 @@ def egri(bas=2.0, son=58.0, adim=4.0, tekrar=2):
         print(f"  komut {onceki_a:5.1f} -> {b:5.1f}: dy {dy:+6.1f} px -> kamera {kamera:6.2f} "
               f"derece  (yerel oran {dy*dpp/(b-onceki_a):+.2f}, guven {min(guvenler):.2f})")
         onceki_a, onceki_k = b, k
+        if b - son_foto >= foto_her - 1e-6:
+            foto(b); son_foto = b
     git_bekle(s, 20.0)
     s.kapat(kalici=True); cap.release()
     return noktalar

@@ -10,6 +10,7 @@ Kullanim:
     python app/tilt_tani.py COM3            # baglan ve tesihis et (MOTOR DONMEZ)
     python app/tilt_tani.py COM3 --git 10   # 10 dereceye git (⚠ MOTOR DONER)
     python app/tilt_tani.py mock            # araci kendi kendine dene
+    python app/tilt_tani.py auto --sifirla  # KOL EN ALTTAYKEN: sayaci 0 kabul ettir
 
 ⚠ --git verilmeden MOTOR DONDURULMEZ. Once kolun onunde kimse/engel olmadigini
   dogrula; kol 0..60 derece arasinda hareket eder.
@@ -145,6 +146,20 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     kaynak = args[0]
+    if "--sifirla" in args:
+        # Kol fiziksel olarak en alttayken: kartin sayacini 0 kabul ettir (R).
+        s = T.TiltSurucu(kaynak)
+        t0 = time.time()
+        while time.time() - t0 < 1.0:
+            s.yokla(); time.sleep(0.02)
+        print(f"sifirlamadan once kartin sandigi aci: {s.aci}")
+        s.sifirla()
+        t0 = time.time()
+        while time.time() - t0 < 0.6:
+            s.yokla(); time.sleep(0.02)
+        print(f"sifirlamadan sonra: {s.aci}  | {s.hata or 'OK'}")
+        s.kapat(kalici=True)
+        raise SystemExit(0)
     hedef = None
     if "--git" in args:
         i = args.index("--git")

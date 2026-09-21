@@ -2035,6 +2035,17 @@ class MainWindow(QMainWindow):
 
         apv.addStretch(1)
 
+        # TILT SIFIRLAMA — yalniz ayri tilt kartinda anlamli (bkz. _tilt_sifirla).
+        self.ap_tilt_sifir_btn = QPushButton("Kol en altta — tilt sayacını sıfırla")
+        self.ap_tilt_sifir_btn.setObjectName("ayaralt")
+        self.ap_tilt_sifir_btn.setCursor(Qt.PointingHandCursor)
+        self.ap_tilt_sifir_btn.setToolTip(
+            "ESP32 kolun yerini ölçmez, gönderdiği darbeleri sayar. Motor beslemesi "
+            "kesilip kol düşerse ESP32 eski açıda kalır. Kol GERÇEKTEN en alttayken "
+            "basın; kalibrasyon silinmez.")
+        self.ap_tilt_sifir_btn.clicked.connect(self._tilt_sifirla)
+        apv.addWidget(self.ap_tilt_sifir_btn)
+
         alt = QHBoxLayout()
         self.ap_rst_btn = QPushButton("Varsayılan")
         self.ap_rst_btn.setObjectName("ayaralt")
@@ -2192,6 +2203,34 @@ class MainWindow(QMainWindow):
         if d.hareket_var:
             adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt
             self._aci_hareket(d.pan * adim, d.tilt * adim)
+
+    def _tilt_sifirla(self):
+        """"Kol en altta" — tilt kartinin darbe sayacini 0 kabul ettirir (R komutu).
+
+        NEDEN: ESP32 kolun yerini OLCMEZ, gonderdigi darbeleri sayar. Motor beslemesi
+        kesilince kol yer cekimiyle duser ama USB'den beslenen ESP32 eski sayida
+        kalir. Sahada: kol en alttayken kart 20 derece sandi; sonraki her komut
+        kolu alt dayamaya bastirdi ve sinirlar kaydi.
+        Yanlis anda basilirsa referansi bu kez TERS yonde bozar — bu yuzden sorar."""
+        k = getattr(self, "kontrol", None)
+        if not (k and k.tilt_ayri):
+            self.sb_msg.setText("Tilt kartı bağlı değil — sıfırlanacak bir şey yok.")
+            return
+        from PySide6.QtWidgets import QMessageBox
+        cevap = QMessageBox.question(
+            self, "Tilt sayacını sıfırla",
+            "Kol ŞU AN fiziksel olarak EN ALTTA mı?\n\n"
+            "Evet derseniz ESP32 bu konumu 0° kabul eder. Kol yukarıdayken sıfırlamak "
+            "bütün açıları kaydırır.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if cevap != QMessageBox.Yes:
+            return
+        self._tuslari_birak()               # basili tutma/surekli hareket kesilsin
+        if k.tilt_sifirla():
+            self.tilt_aci = 0.0
+            self.tilt_val_lbl.setText("0.0°")
+            self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;'
+                                f'Tilt sayacı sıfırlandı — kol en altta = 0°.')
 
     def _tilt_surekli_mi(self):
         """Dikeyde basili-tutma, kartin KENDI ivme profiliyle mi yurusun?
@@ -2569,23 +2608,7 @@ class MainWindow(QMainWindow):
             d_yaw = max(-tavan, min(tavan, d_yaw))
             d_pitch = max(-tavan, min(tavan, d_pitch))
         self._nisan_son_t = simdi
-        # Mesgul kapisi KAMERA derecesiyle hesaplanir (asagida): kol-biyelde komut
-        # derecesi kameranin gercekte ne kadar dondugunu soylemez.
         mesafe = max(abs(d_yaw), abs(d_pitch))
-
-        # KOL-BIYEL EGRISI (tilt_egri.py). PD "kamerayi d_pitch derece cevir" der;
-        # tilt karti ise KOMUT acisi konusur ve ikisi arasindaki oran bolgeden
-        # bolgeye 3 kat degisir, ~8 derecenin altinda ISARET TERSINE DONER.
-        # Sahada otonom takip tam bu yuzden bozuldu: kol ters bolgeye girdi, her
-        # duzeltme hatayi buyuttu, kol alt uca kacti. Egri, istegi o bolgedeki
-        # egime gore dogru komuta cevirir ve kolu yalniz GECERLI ARALIKTA tutar
-        # (disaridaysa ilk komut onu iceri ceker). Egri dosyasi yoksa eski
-        # davranis surer — o durumda kalibrasyon: `python app/tilt_yon_testi.py egri`.
-        k = getattr(self, "kontrol", None)
-        egri = getattr(k, "tilt_egri", None) if (k and k.tilt_ayri) else None
-        olculen = k.tilt_olculen if egri is not None else None
-        if egri is not None and olculen is not None:
-            d_pitch = egri.komut_duzeltmesi(olculen, d_pitch)
 
         # taban_olculen=True: dikey eksende komut, kartin BILDIRDIGI aciya gore
         # kurulur (bkz. _aci_hareket). Kart bildirmiyorsa (eski donanim) eski
