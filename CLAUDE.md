@@ -778,6 +778,21 @@ bir güvenlik payıyla seçildi. Gerçek donanımda hâlâ yavaşsa **bir sonrak
   - Yarışma günü daha güçlü laptop bulunursa tak-çalıştır olacak şekilde kod donanım-bağımsız yazılır.
 - **[x] İmha:** LaserTree 80W lazer (yurt dışından geldi, onaylı).
 - **[x] Platform:** Yarışmaya laptop ile gidilecek.
+- **[ ] E-STOP'TA TİLT PARK ETSİN Mİ? (güvenlik kararı — ekip vermeli, 21.09.2026)**
+  `kontrol.py` §5.1 kararına göre tilt'i **0° park** konumuna indiriyor; ama
+  `kapi_testleri.test_estopta_iki_eksen_de_oldugu_yerde_donar` ve `mock_esp32.py`
+  testi **her iki eksenin de olduğu yerde donmasını** bekliyor → bu iki test
+  KIRMIZI. Testler yeni niyete göre yazılmış, kod eski davranışta. Şartname
+  Yetenek 3 "hareket ederken E-Stop → sistem durur" diyor ve park etmek de bir
+  harekettir (§5.1'deki ⚠ nota bak). **Karar verilmeden kodu teste ya da testi
+  koda uydurmayın.**
+- **[ ] Dikey eksen dişli oranı:** `protokol.py` testi `TILT_STEP_DER = 17.778`
+  (1:1) bekliyor, sabit **8.889**'a çekilmiş (yani 2:1 girilmiş). Gerçek oran
+  ölçümle doğrulanmadan test düzeltilmemeli — yanlışsa tüm tilt açıları yanlış
+  olur (§5.1).
+- **[ ] Arayüzün görsel doğrulaması yarım:** Apple tasarım sisteminin son
+  rötuşları (kaydırıcı oluk marjı, otonom panel boşluğu, alt çubuk model yazısı)
+  yalnızca kod düzeyinde yapıldı; gerçek ekranda karşılaştırılmadı (§12.4).
 - **[ ] Aktüatör/kontrolcü fiziksel durumu:** NEMA23 + ESP32 alındı mı? Araç mekanikçe
   sıfırdan yapılacağından yazılım donanım-bağımsız (mock UART) ilerleyebilir.
 
