@@ -19,5 +19,6 @@
   "kamera_fps": 60,
   "sahi": 0,
   "sahi_dilim": 640,
-  "sahi_ortusme": 0.2
+  "sahi_ortusme": 0.2,
+  "nisan_govde": 1
 }

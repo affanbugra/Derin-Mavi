@@ -130,6 +130,11 @@ VARSAYILAN_AYAR = {
     # oranda kuculdugu icin oransal ofset 5/10/15 m'de KENDILIGINDEN dogru kalir;
     # sabit aci 15 m'de lazeri balonun cok altina, bosluga gonderirdi.
     "balon_ofset": 0.40,
+    # 1 = nisan noktasi hedef kutusunun MERKEZI (balon yokken arac takibi);
+    # 0 = balon (kutunun altina balon_ofset kadar). Saha: balonsuz takip denemesinde
+    # nisan noktasi kutunun 0.9 boy ALTINDA kaldigi icin hedef merkezin ustundeyken
+    # namlu ASAGI indi. Yarisma balon ister; varsayilan bu yuzden 0 kalir.
+    "nisan_govde": 0,
     # Olu bolge (ates hassasiyeti) HEDEF KUTUSUNUN YUKSEKLIGININ orani olarak.
     # Sartname (s.19): "kesit alanina gore belli bir buyuklukte balon" -> balonun
     # boyu hedefin boyuyla ORANTILI, sabit degil. Dolayisiyla "lazer balonun icinde
@@ -160,7 +165,7 @@ AYAR_SINIR = {
     "fov": (20.0, 140.0),
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
     "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
-    "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60),
+    "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60), "nisan_govde": (0, 1),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
     "kamera_fps": (5, 120),
     "sahi": (0, 1), "sahi_dilim": (320, 1280), "sahi_ortusme": (0.05, 0.50),
@@ -1109,6 +1114,11 @@ def nisan_noktasi(box, balonlar=()):
     """
     x1, y1, x2, y2 = box
     hx = (x1 + x2) * 0.5
+
+    # GOVDE MODU: balonsuz arac takibi. Nisan noktasi kutunun merkezi olur,
+    # balon tespiti/kestirimi yok sayilir. Bkz. VARSAYILAN_AYAR["nisan_govde"].
+    if int(AYAR.get("nisan_govde", 0)):
+        return (hx, (y1 + y2) * 0.5)
 
     for bx1, by1, bx2, by2 in balonlar:
         bcx = (bx1 + bx2) * 0.5

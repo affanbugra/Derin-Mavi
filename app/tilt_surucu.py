@@ -776,8 +776,18 @@ class TiltSurucu:
         if simdiki is not None and abs(hedef - simdiki) < 0.05:
             self._bekleyen_hedef = None
             return None
+        # AYNI HEDEF, KART HENUZ CEVAP VERMEDI: tekrar gonderme. Kart "hareket
+        # ediyorum" diyene kadar (sonraki STATE3, en fazla 100 ms) durum hala
+        # "bos" gorunur; bu arada gelen her git() ayni G'yi yeniden yollardi.
+        # Kara kutuda goruldu: 100 ms'de 10 adet ayni "G0.0000".
+        if (self._gonderilen_hedef is not None
+                and abs(hedef - self._gonderilen_hedef) < 1e-6
+                and self.son_durum_t <= getattr(self, "_gonderim_t", 0.0)):
+            self._bekleyen_hedef = None
+            return None
         self._bekleyen_hedef = None
         self._gonderilen_hedef = hedef
+        self._gonderim_t = self._saat()
         self._yaz(git(hedef))
         return hedef
 
@@ -1060,6 +1070,18 @@ if __name__ == "__main__":
     assert hk.mock.maks_hiz == HIZ_TAVAN, hk.mock.maks_hiz
     assert not any(s.endswith("BAD_SPEED") for s in hk.satirlar), hk.satirlar
     MockTiltKart.UST_DARBE = _eski_ust_darbe
+
+    # 15. AYNI HEDEF, KART HENUZ CEVAP VERMEDEN tekrar gonderilmez (kara kutuda
+    #     100 ms'de 10 adet ayni G goruldu). Kart durum bildirdikten sonra —
+    #     ornegin komut reddedildiyse — ayni hedef yeniden gonderilebilir.
+    saat[0] += 1.0
+    d = TiltSurucu("mock", _saat=lambda: saat[0])
+    for _ in range(3):
+        saat[0] += 0.25; d.yokla()
+    n0 = len([k for k in d.mock.kayit if k.startswith("G")])
+    for _ in range(10):
+        d.git(40.0)                      # ayni an, STATE3 araya girmeden
+    assert len([k for k in d.mock.kayit if k.startswith("G")]) == n0 + 1, d.mock.kayit[-5:]
 
     # 12. mock kaynagi seri port acmaya CALISMAMALI (otomatik-bulma dali eklenince
     #     mock, seri acma koduna dusup "port acilamadi" hatasi uretmisti).

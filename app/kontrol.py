@@ -43,6 +43,7 @@ bildirimi kazanirsa tek degisecek yer burasi.
 import os
 
 import protokol as P
+import tilt_egri as TE
 import tilt_surucu as T
 from mock_esp32 import MockESP32
 
@@ -55,6 +56,10 @@ class Kontrol:
         # DIKEY EKSEN SURUCUSU (ayri kart). "off" ise tilt eski kartta kalir ve
         # bu nesne hicbir seyi degistirmez — mevcut davranis birebir korunur.
         self.tilt = T.TiltSurucu(tilt_kaynak)
+        # Komut acisi -> kamera acisi egrisi (kol-biyel mekanizmasi, bkz. tilt_egri.py).
+        # Yalniz ayri tilt kartinda anlamlidir; dosya yoksa None ve otonom takip
+        # komut acisini dogrudan kullanir (eski davranis).
+        self.tilt_egri = TE.KameraEgrisi.yukle() if self.tilt.bagli else None
         self.mock = None
         self.seri = None
         self.hata = None

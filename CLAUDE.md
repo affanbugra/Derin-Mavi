@@ -1068,6 +1068,54 @@ Tüm modül testleri + E-Stop/ateş/nişan kapıları başsız testle yeniden ge
 
 ---
 
+## 14. Dikey eksen: ESP32-S3 + HSD57 kol-biyel kartı (`tilt-takip` dalı, 20–21.09.2026)
+
+Dikey eksen artık ayrı bir kartta: **ESP32-S3 + HSD57 kapalı çevrim**, **krank + biyel**
+mekanizması, firmware `ws_motor_test/esp32_ws_test` (repo dışı). Protokol `G<derece>` / `STATE3`
+(konum **geri bildirimli**). `DERINMAVI_TILT=auto|COMx|mock|off`; yönlendirme tek noktada
+`kontrol.aci()`. Ayrıntı ve ölçümler: [TILT_TAKIP.md](TILT_TAKIP.md).
+
+**[KESİN — kamerayla ölçüldü] Mekanizma doğrusal değil ve altta ÖLÜ NOKTADAN geçiyor.**
+Kalibrasyon (0–60°) "kol açısı"dır, kamera açısı değildir. `tilt_yon_testi.py egri` ile iki
+kez ölçüldü, tekrarlanabilir (±0.1°):
+
+| Komut | Kamera°/komut° | |
+|---|---|---|
+| 2–6° | **−0.60** | **TERS** — kol yukarı, kamera aşağı |
+| 6–10° | −0.08 | ölü nokta |
+| 10–18° | 0.13–0.24 | zayıf |
+| 18–42° | 0.32–0.45 | verimli |
+| 42–50° | ~0.22 | zayıf |
+
+10–50° komut aralığında kamera toplam yalnız **~12°** döner. Eğri `app/tilt_egri.json`'da;
+mekanizma/kamera montajı/kalibrasyon değişirse **yeniden ölçülmeli.**
+
+**Sahadaki arıza (21.09) ve kök sebebi:** otonomda "hedef merkezin üstündeyken namlu aşağı
+indi, kol alt uca dayandı, kısa süre sonra kart sustu". Yön işareti **doğru** çıktı (ölçüldü).
+Sebep iki şeyin birleşimi: (1) nişan noktası balon için kutunun **0.9 boy altında** —
+balonsuz takipte hedef merkezin üstündeyken bile namlu iner; (2) aşağı inen kol ters
+bölgeye girince her düzeltme hatayı büyütür, kol uca kaçar. Benzetimde birebir üretildi
+(`tilt_takip_testi` test 11a: kol 24° → 0°).
+
+**Çözüm:** `tilt_egri.KameraEgrisi` — otonom istek o bölgenin eğimine göre komuta çevrilir
+(döngü kazancı her bölgede aynı) ve kol **yalnız geçerli aralıkta (10–50°)** tutulur,
+dışarıdaysa ilk komut geri çeker. Aynı arıza senaryosunda kol 10°'de durur. Nişan için
+`nisan_govde` ayarı (⚙ "Gövdeye nişan"): balonsuz takipte kutu merkezi.
+
+**Kart kilitlenmesi — sebebi HÂLÂ BİLİNMİYOR.** Kart tamamen sustu (STATE3 yok, USB reset'e
+bile cevap yok), yalnız USB çekip takınca düzeldi. Masada **üretilemedi**: otonomun komut
+deseni (180 s), sık yön değiştiren hareket (120 s), 60 s alt uca + 30 s üst uca dayalı bekleme —
+hepsi temiz. Kamera ile ESP farklı USB taraflarındaydı. `tilt_surucu` artık her gerçek oturumu
+`app/loglar/`'a yazıyor (kara kutu); tekrarlanırsa son satırlar oradan okunacak.
+
+**Diğer ölçülenler:** manuel basılı-tutma tık tık 2° hedef yerine tek uzak hedef → 5 → 17 °/s
+(gerçek kartta). Kazanç tavanını gecikme belirliyor: 133 ms'de kp 0.70+kd 0.06 salınıyor;
+kp 0.60/kd 0.06 seçildi. `sahi=1` takip ID'lerini yok ediyordu → 0. OBSBOT Meet 2:
+1280×720 MJPG @ 60 FPS (ölçüldü). Firmware'e runtime hız profili `Z<hız>,<ivme>` eklendi
+ama **karta henüz yüklenmedi** (kart eski sürümde; sürücü bunu algılayıp uyarıyor).
+
+---
+
 ## 11. Takım (KTR'den)
 
 10 lisans öğrencisi. Roller: Kaptan (Makine), Organizasyon, Mekanik Tasarım, 3B Baskı,

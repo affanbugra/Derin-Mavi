@@ -318,6 +318,11 @@ AYAR_TANIM_NISAN = [
      "Yatay ofsetle aynı kalibrasyon, dikey eksende.\n\n"
      "Nişangah hedefin ALTINDA duruyorsa bu değeri AZALTIN, ÜSTÜNDE duruyorsa "
      "ARTIRIN — nişangah hedefe oturana kadar."),
+    ("nisan_govde", "Gövdeye nişan (balonsuz)", "anahtar", 0, 1,
+     "AÇIK: nişan noktası hedef kutusunun MERKEZİ olur — balonsuz araç takibi için.\n"
+     "KAPALI: nişan noktası balondur (aşağıdaki ofset kadar kutunun altı) — yarışma.\n\n"
+     "Balon yokken KAPALI bırakılırsa nişan noktası kutunun ~0.9 boy ALTINDA kalır: "
+     "hedef merkezin üstündeyken bile namlu AŞAĞI iner. Sahada tam olarak bu görüldü."),
     ("balon_ofset", "Balon nişan ofseti", "yuzde", 0, 150,
      "Nişan noktası, hedef kutusunun ALT KENARINDAN ne kadar aşağıya konsun. "
      "Birim: hedef kutusunun YÜKSEKLİĞİ (%100 = bir maket boyu aşağı).\n\n"
@@ -2564,11 +2569,28 @@ class MainWindow(QMainWindow):
             d_yaw = max(-tavan, min(tavan, d_yaw))
             d_pitch = max(-tavan, min(tavan, d_pitch))
         self._nisan_son_t = simdi
+        # Mesgul kapisi KAMERA derecesiyle hesaplanir (asagida): kol-biyelde komut
+        # derecesi kameranin gercekte ne kadar dondugunu soylemez.
+        mesafe = max(abs(d_yaw), abs(d_pitch))
+
+        # KOL-BIYEL EGRISI (tilt_egri.py). PD "kamerayi d_pitch derece cevir" der;
+        # tilt karti ise KOMUT acisi konusur ve ikisi arasindaki oran bolgeden
+        # bolgeye 3 kat degisir, ~8 derecenin altinda ISARET TERSINE DONER.
+        # Sahada otonom takip tam bu yuzden bozuldu: kol ters bolgeye girdi, her
+        # duzeltme hatayi buyuttu, kol alt uca kacti. Egri, istegi o bolgedeki
+        # egime gore dogru komuta cevirir ve kolu yalniz GECERLI ARALIKTA tutar
+        # (disaridaysa ilk komut onu iceri ceker). Egri dosyasi yoksa eski
+        # davranis surer — o durumda kalibrasyon: `python app/tilt_yon_testi.py egri`.
+        k = getattr(self, "kontrol", None)
+        egri = getattr(k, "tilt_egri", None) if (k and k.tilt_ayri) else None
+        olculen = k.tilt_olculen if egri is not None else None
+        if egri is not None and olculen is not None:
+            d_pitch = egri.komut_duzeltmesi(olculen, d_pitch)
+
         # taban_olculen=True: dikey eksende komut, kartin BILDIRDIGI aciya gore
         # kurulur (bkz. _aci_hareket). Kart bildirmiyorsa (eski donanim) eski
         # davranis aynen surer.
         if self._aci_hareket(d_yaw, d_pitch, taban_olculen=True):
-            mesafe = max(abs(d_yaw), abs(d_pitch))
             # Ucgen ivme profili (tepe hiza hic ulasilmadigi varsayimi — kisa
             # duzeltmelerde gecerli): TAM tamamlanma t = 2*sqrt(mesafe/ivme); yalniz
             # NISAN_MESGUL_ORANI kadarini bekleriz (bkz. sabitin yorumu — akicilik icin).
