@@ -1,7 +1,7 @@
 {
   "hassasiyet": 0.25,
   "gosterim": 0.25,
-  "kararlilik": 30,
+  "kararlilik": 60,
   "cozunurluk": 640,
   "iou": 0.7,
   "ortusme": 0.6,

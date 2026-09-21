@@ -710,6 +710,26 @@ def _ortusme(a, b):
     return kesisim / kucuk
 
 
+# Kilit koptuktan sonra ayni nesnenin YENIDEN bulunmasi icin arama yaricapi, son
+# kutunun buyuk kenarinin kati cinsinden. Eskiden yalniz son kutuyla ORTUSEN kutu
+# kabul ediliyordu (IoS > 0.3). Elde hizli hareket ettirilen hedefte tespit bir
+# kac kare kesilince hedef zaten baska yerde olur, ortusme olmaz ve kilit bir daha
+# gelmezdi — sahada 45 sn'lik testte 311 karede drone GORULDUGU halde takip
+# edilmedi. Yaricap kutuyla olcekli: uzak (kucuk) hedefte arama alani da kuculur,
+# kilit kadrajin baska ucundaki bir nesneye ATLAMAZ.
+YENIDEN_KILIT_YARICAP = 1.0
+
+
+def _ayni_nesne_olabilir(kutu, son_kutu):
+    """Kilit koptuktan sonra `kutu`, son gorulen `son_kutu` ile ayni nesne olabilir mi?"""
+    if _ortusme(kutu, son_kutu) > 0.3:
+        return True
+    sx, sy = (son_kutu[0] + son_kutu[2]) * 0.5, (son_kutu[1] + son_kutu[3]) * 0.5
+    kx, ky = (kutu[0] + kutu[2]) * 0.5, (kutu[1] + kutu[3]) * 0.5
+    boyut = max(son_kutu[2] - son_kutu[0], son_kutu[3] - son_kutu[1])
+    return ((kx - sx) ** 2 + (ky - sy) ** 2) ** 0.5 <= YENIDEN_KILIT_YARICAP * boyut
+
+
 def _cift_kutulari_ele(dets, esik):
     """Ayni nesneye atilmis IKINCI kutuyu eler.
 
@@ -1075,8 +1095,9 @@ def analiz_et(model, frame, estop=False, asama=None):
                 # Tek istisna: Tracker objeyi kaybedip ayni yerde yeni bir ID ile bulmussa.
                 if _kilitli_track_id in _takip_durumlari and "son_det" in _takip_durumlari[_kilitli_track_id]:
                     son_kutu = _takip_durumlari[_kilitli_track_id]["son_det"]["box"]
-                    # Ayni konumda (ortusme > 0.3) baska bir kutu var mi?
-                    ayni_yerdekiler = [i for i, d in enumerate(dets) if _ortusme(d["box"], son_kutu) > 0.3]
+                    # Son goruldugu yerin YAKININDA (kutuyla olcekli yaricap) bir kutu var mi?
+                    ayni_yerdekiler = [i for i, d in enumerate(dets)
+                                       if _ayni_nesne_olabilir(d["box"], son_kutu)]
                     if ayni_yerdekiler:
                         # Ayni nesne yeni ID almis! Kilidi buna devret (guven onemli degil)
                         en_iyi = max(ayni_yerdekiler, key=lambda i: dets[i]["conf"])
@@ -1363,6 +1384,14 @@ if __name__ == "__main__":
     assert dets[aktif].get("hayalet") is True, "kayip hedef HAYALET isaretlenmeliydi"
     assert dets[aktif]["conf"] == 1
     takip_sifirla()
+
+    # --- Kilit geri alma: hareket eden hedef, kutuyla olcekli yaricapta YENIDEN bulunur ---
+    son = (100, 100, 200, 200)                              # 100 px'lik kutu
+    assert _ayni_nesne_olabilir((180, 100, 280, 200), son), "80 px kayan hedef kabul edilmeli"
+    assert _ortusme((180, 100, 280, 200), son) < 0.3, "bu durum eskiden REDDEDILIYORDU"
+    assert not _ayni_nesne_olabilir((400, 100, 500, 200), son), "300 px otedeki nesneye ATLAMAMALI"
+    kucuk = (100, 100, 120, 120)                            # uzak (kucuk) hedef: yaricap da kucuk
+    assert not _ayni_nesne_olabilir((160, 100, 180, 120), kucuk), "kucuk hedefte 60 px cok uzak"
 
     print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, hafiza budama, "
           "kesin tanima (histerezis/coklu hedef/onay bozulma), cakisan kutu temizligi, "
