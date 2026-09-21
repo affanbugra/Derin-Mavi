@@ -56,3 +56,4 @@ Thumbs.db
 Desktop.ini
 .DS_Store
 app/ayarlar.json.yedek
+app/tilt_stres_*.log
