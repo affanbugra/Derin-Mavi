@@ -23,7 +23,7 @@ import cv2
 from ultralytics import YOLO
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect, QPointF
-from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter
+from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 
 import algi
 import nisan
+import tasarim as T          # Apple tasarim katmani — renk/olcu/stil TEK KAYNAK
 import gamepad as gamepad_mod
 import kontrol as kontrol_mod
 import protokol as P          # hiz duzeyi/durum sabitleri — TEK KAYNAK (bkz. protokol.py)
@@ -90,29 +91,68 @@ def _model_bul():
     m = _modelleri_bul()
     return m[0] if m else None
 
-# ---- Apple Human Interface Guidelines (macOS Dark Glassmorphism) Tokens ----
-# Derin Mavi logo renk paleti: Elektrik Okyanus Mavisi / Parlak Camgöbeği (#2ca6e7)
-BG = "#050811"; PANEL = "rgba(20, 32, 54, 0.85)"; CARD = "rgba(24, 38, 64, 0.80)"; BD = "rgba(255, 255, 255, 0.10)"; BD2 = "rgba(44, 166, 231, 0.40)"
-TXT = "#f5f5f7"; TXT2 = "#94a3b8"; TXT3 = "#64748b"
-MAVI = "#2ca6e7"; MAVI_ACIK = "#38bdf8"; MAVI_KOYU = "#0284c7"; MAVI_BG = "rgba(44, 166, 231, 0.15)"
-BLUE = "#2ca6e7"; RED = "#ff453a"; GRN = "#30d158"; AMB = "#ffd60a"
-F = "'.AppleSystemUIFont', 'SF Pro Display', 'SF Pro Text', '-apple-system', 'Helvetica Neue', sans-serif"
-FM = "'SF Mono', 'Menlo', 'Consolas', 'Courier New', monospace"
+# ---- Renk/olcu simgeleri: TEK KAYNAK app/tasarim.py (Apple macOS 27 UI Kit) ----
+# Buradaki adlar TARIHSEL: kod tabaninda yuzlerce yerde geciyorlar, hepsi artik
+# tasarim.py'deki Apple degerlerine isaret ediyor. Yeni kod dogrudan `T.` kullanir.
+BG   = T.PENCERE      # pencere zemini (Window Backgrounds/Dark)
+BD2  = T.AYRAC        # ince ayrac / pasif gosterge rengi
+TXT  = T.L1           # Labels/Dark 1 Primary
+TXT2 = T.L2           # 2 Secondary
+TXT3 = T.L3           # 3 Tertiary
+MAVI = MAVI_ACIK = BLUE = T.AKSAN                 # System Colors/Dark 8 Blue
+RED  = T.KIRMIZI; GRN = T.YESIL; AMB = T.SARI     # 1 Red / 4 Green / 3 Yellow
+F    = T.F
+
+
+class SecimKutusu(QComboBox):
+    """Acilir liste — ok isaretini KENDI cizer.
+
+    Neden: QSS'te yaygin olan "::down-arrow'u kenarliklardan ucgen yap" numarasi
+    (width/height 0 + border-left/right transparent) macOS'ta calismiyor; Qt alt
+    bileseni kutunun tum genisligine gerdigi icin ok, kutunun ustune oturan DEV bir
+    mavi kama olarak ciziliyordu (yaninda da native okun gri kalintisi). Ok artik
+    QSS'te tamamen kapatilip (`image: none; border: none; width/height: 0`) burada
+    QPainter ile ciziliyor: her platformda ayni, olceklenmeyen tek bir chevron.
+    """
+
+    def showPopup(self):
+        # Acilir liste kutu genisligine sikismasin: uzun kamera adlari
+        # ("MacBook Kamerası" gibi) kutuda kisalabilir ama LISTEDE tam okunmali.
+        v = self.view()
+        v.setMinimumWidth(max(self.width(), v.sizeHintForColumn(0) + 44))
+        super().showPopup()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        pen = QPen(QColor(TXT2 if self.isEnabled() else TXT3), 1.6)
+        pen.setCapStyle(Qt.RoundCap)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        cx, cy = self.width() - 15.0, self.height() / 2.0
+        p.drawPolyline([QPointF(cx - 4, cy - 2), QPointF(cx, cy + 2.5), QPointF(cx + 4, cy - 2)])
+        p.end()
 
 
 class AppleSwitch(QWidget):
-    """Apple iOS / macOS tarzı akıcı, yuvarlatılmış cam toggle switch bileşeni."""
+    """macOS anahtarı (toggle switch) — Apple macOS 27 UI Kit ölçüleriyle.
+
+    Kitten ölçülen "3 Rg" anahtarı: gövde 54×24, tutamaç 32×20 (daire DEĞİL,
+    KAPSÜL — macOS 26 ile değişti), kapalı zemin beyaz %10, açık zemin sistem
+    mavisi, tutamaç beyaz %85 + yumuşak gölge. Qt bu bileşeni stil sayfasıyla
+    düzgün çizemediği için kendimiz çiziyoruz."""
     toggled = Signal(bool)
 
-    def __init__(self, checked=False, parent=None, active_color=MAVI):
+    EN, BOY = 54, 24
+    TUT_EN, TUT_BOY, BOSLUK = 32, 20, 2
+
+    def __init__(self, checked=False, parent=None, active_color=None):
         super().__init__(parent)
-        self.setFixedSize(38, 22)
+        self.setFixedSize(self.EN, self.BOY)
         self.setCursor(Qt.PointingHandCursor)
         self._checked = bool(checked)
-        self._active_color = QColor(active_color)
-        self._track_inactive = QColor(18, 28, 46, 220)
-        self._border_inactive = QColor(255, 255, 255, 28)
-        self._thumb_color = QColor("#ffffff")
+        self._active_color = QColor(active_color or T.AKSAN)
         self.oneri_val = 0
 
     def isChecked(self):
@@ -138,29 +178,16 @@ class AppleSwitch(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-
         w, h = self.width(), self.height()
-        r = h / 2.0
-        track_rect = QRectF(0, 0, w, h)
 
-        if self._checked:
-            # Apple Glass Blue Track
-            p.setBrush(self._active_color)
-            p.setPen(QColor(56, 189, 248, 160))
-            p.drawRoundedRect(track_rect.adjusted(0.5, 0.5, -0.5, -0.5), r, r)
-        else:
-            p.setBrush(self._track_inactive)
-            p.setPen(self._border_inactive)
-            p.drawRoundedRect(track_rect.adjusted(0.5, 0.5, -0.5, -0.5), r, r)
-
-        # Smooth white thumb with subtle inner glow
-        thumb_diam = h - 4.0
-        thumb_x = (w - thumb_diam - 2.0) if self._checked else 2.0
-        thumb_rect = QRectF(thumb_x, 2.0, thumb_diam, thumb_diam)
-
-        p.setBrush(self._thumb_color)
         p.setPen(Qt.NoPen)
-        p.drawEllipse(thumb_rect)
+        p.setBrush(self._active_color if self._checked else QColor(255, 255, 255, 26))
+        p.drawRoundedRect(QRectF(0, 0, w, h), h / 2.0, h / 2.0)
+
+        x = (w - self.TUT_EN - self.BOSLUK) if self._checked else self.BOSLUK
+        tut = QRectF(x, self.BOSLUK, self.TUT_EN, self.TUT_BOY)
+        p.setBrush(QColor(255, 255, 255, 217))          # kit: beyaz %85
+        p.drawRoundedRect(tut, self.TUT_BOY / 2.0, self.TUT_BOY / 2.0)
         p.end()
 
 
@@ -169,81 +196,24 @@ class AppleSwitch(QWidget):
 # =====================================================================
 COZUNURLUK_SECENEK = [416, 512, 640, 960, 1280]
 
-# Kaydirici gorunumu: onerilen degerde YESIL tutamac, degistirilmisse DERIN MAVI.
-SLIDER_TASLAK = """
-    QSlider#ayarsl {{ height: 22px; }}
-    QSlider#ayarsl::groove:horizontal {{ height: 5px; border-radius: 2.5px; background: rgba(255, 255, 255, 0.12); margin: 0 2px; }}
-    QSlider#ayarsl::sub-page:horizontal {{ height: 5px; border-radius: 2.5px; background: %s; margin: 0 2px; }}
-    QSlider#ayarsl::add-page:horizontal {{ height: 5px; border-radius: 2.5px; background: rgba(255, 255, 255, 0.12); margin: 0 2px; }}
-    QSlider#ayarsl::handle:horizontal {{ width: 16px; height: 16px; margin: -5.5px 0; border-radius: 8px;
-        background: {tutamac}; border: 2px solid {kenar}; }}
-    QSlider#ayarsl::handle:horizontal:hover {{ background: {ust_tutamac}; border: 2px solid {ust_kenar}; }}
-    QSlider#ayarsl::handle:horizontal:pressed {{ background: {bas_tutamac}; border: 2px solid {bas_kenar}; }}
-""" % MAVI
+# Kaydirici: onerilen degerde YESIL, degistirilmisse VURGU rengi dolu kisim.
+# Govde olculeri (oluk 6px, tutamac 20px beyaz daire) Apple kitinden gelir.
+SLIDER_ONERI   = T.slider_stil(vurgu=T.YESIL)
+SLIDER_DEGISIK = T.slider_stil(vurgu=T.AKSAN)
+SLIDER_LAZER   = T.slider_stil("lazersl", vurgu=T.AKSAN)
 
-SLIDER_ONERI = {"tutamac": "#ffffff", "kenar": GRN,
-                "ust_tutamac": "#f0fdf4", "ust_kenar": "#22c55e",
-                "bas_tutamac": "#dcfce7", "bas_kenar": "#16a34a"}
-SLIDER_DEGISIK = {"tutamac": "#ffffff", "kenar": MAVI,
-                  "ust_tutamac": "#f0f9ff", "ust_kenar": MAVI_ACIK,
-                  "bas_tutamac": "#e0f2fe", "bas_kenar": MAVI_KOYU}
+ETIKET_ONERI   = T.deger_etiketi(T.YESIL)
+ETIKET_DEGISIK = T.deger_etiketi(T.AKSAN)
 
-_ETIKET = ("color:%s; background:rgba(%s,%s); border-radius:8px; padding:2px 10px; "
-           "font-family:" + FM + "; border: 1px solid rgba(%s,%s); font-size:12px; font-weight:700;")
-ETIKET_ONERI = _ETIKET % (GRN, "48,209,88", "0.14", "48,209,88", "0.35")
-ETIKET_DEGISIK = _ETIKET % (MAVI, "44,166,231", "0.14", "44,166,231", "0.35")
-
-# D-pad tuslari: Apple macOS Tactile Glass Keycaps
-_DPAD_GOVDE = ("QPushButton {{ "
-               "  background: {arka}; "
-               "  border: {kalinlik} solid {kenar}; "
-               "  border-top: {kalinlik} solid {ust_cizgi}; "
-               "  border-radius: 8px; "
-               "  color: {yazi}; "
-               "  font-size: {punto}; "
-               "  font-weight: 700; "
-               "  min-width: 58px; max-width: 58px; "
-               "  min-height: 32px; max-height: 32px; "
-               "}} ")
-DPAD_STIL = _DPAD_GOVDE + ("QPushButton:hover {{ "
-                           "  background: {ust_arka}; "
-                           "  border-color: {ust_kenar}; "
-                           "  color: {ust_yazi}; "
-                           "}}")
-DPAD_STIL_BASILI = _DPAD_GOVDE          # basili halde :hover kurali yok
-
-DPAD_KENAR = {
-    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(30, 46, 74, 0.90), stop:1 rgba(15, 25, 42, 0.95))",
-    "kenar": "rgba(255, 255, 255, 0.10)", "ust_cizgi": "rgba(255, 255, 255, 0.22)",
-    "kalinlik": "1px",
-    "yazi": "#f5f5f7", "punto": "13px",
-    "ust_arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(44, 166, 231, 0.30), stop:1 rgba(2, 132, 199, 0.20))",
-    "ust_kenar": "#38bdf8", "ust_yazi": "#ffffff"
-}
-DPAD_KENAR_BASILI = {
-    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #38bdf8, stop:1 #0284c7)",
-    "kenar": "#7dd3fc", "ust_cizgi": "rgba(255, 255, 255, 0.60)",
-    "kalinlik": "1.5px",
-    "yazi": "#ffffff", "punto": "13px"
-}
-DPAD_MERKEZ = {
-    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 rgba(22, 38, 64, 0.92), stop:1 rgba(12, 22, 38, 0.96))",
-    "kenar": "rgba(44, 166, 231, 0.40)", "ust_cizgi": "rgba(56, 189, 248, 0.50)",
-    "kalinlik": "1px",
-    "yazi": "#38bdf8", "punto": "9.5px",
-    "ust_arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #38bdf8, stop:1 #0284c7)",
-    "ust_kenar": "#7dd3fc", "ust_yazi": "#ffffff"
-}
-DPAD_MERKEZ_BASILI = {
-    "arka": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #0284c7, stop:1 #0369a1)",
-    "kenar": "#38bdf8", "ust_cizgi": "rgba(255, 255, 255, 0.60)",
-    "kalinlik": "1.5px",
-    "yazi": "#ffffff", "punto": "9.5px"
-}
+# D-pad tuslari: Apple'in XL kapsul butonu (Liquid Glass'in imzasi yuvarlak uctur).
+DPAD_NORMAL         = T.dpad_stil()
+DPAD_BASILI         = T.dpad_stil(basili=True)
+DPAD_MERKEZ         = T.dpad_stil(merkez=True)
+DPAD_MERKEZ_BASILI  = T.dpad_stil(basili=True, merkez=True)
 
 # ATES butonu metinleri
-ATES_METIN_KAPALI = "A T E Ş   [L]"
-ATES_METIN_ACIK = "ATEŞİ KES   [L]"
+ATES_METIN_KAPALI = "ATEŞ"
+ATES_METIN_ACIK = "ATEŞİ KES"
 
 # Klavye -> D-pad yonu (WASD + ok tuslari; R/C/Space = merkeze al).
 TUS_YON = {Qt.Key_W: "up", Qt.Key_Up: "up", Qt.Key_S: "down", Qt.Key_Down: "down",
@@ -572,6 +542,7 @@ class VideoThread(QThread):
         self.inference_thread = inference_thread
         self._gui_mesgul = False
         self._hedef_son_gorulen = {}   # titresim onleme: {track_id: (son_gorulen_zaman, hedef_dict)}
+        self.kamera_kapali = False
 
     def kare_islendi(self):
         self._gui_mesgul = False
@@ -605,29 +576,41 @@ class VideoThread(QThread):
                     self.kaynak_istegi = None
                     algi.takip_sifirla()   
                     self.inference_thread.nisanci.sifirla()
-                    eski = okuyucu.cap
+                    # release() ARTIK BURADA YAPILMAZ: okuma thread'i o anda
+                    # read() icinde olabilir, macOS'ta bu cokme uretiyordu.
+                    # cap_degistir okumayi bekletip kendisi birakir (bkz. algi.py).
                     okuyucu.cap_degistir(None)
-                    if eski is not None:
-                        eski.release()
-                    self.durum.emit("Kamera değiştiriliyor…", False)
-                    yeni = algi.open_camera() if istek == "auto" else algi.ac_kaynak(istek)
-                    if yeni is None:
-                        self.durum.emit("Seçilen kamera açılamadı — otomatik aranıyor…", True)
-                        yeni = algi.open_camera()
+
+                    if istek == "off":
+                        self.kamera_kapali = True
+                        with self.veri.kilit:
+                            self.veri.kare = None
+                            self.veri.dets = []
+                            self.veri.balonlar = []
+                            self.veri.active_idx = -1
+                        self.durum.emit("Kamera kapatıldı", False)
+                        continue
+                    else:
+                        self.kamera_kapali = False
+                        self.durum.emit("Kamera değiştiriliyor…", False)
+                        yeni = algi.open_camera() if istek == "auto" else algi.ac_kaynak(istek)
                         if yeni is None:
-                            self.durum.emit("Hiçbir kamera açılamadı", True)
-                            self.msleep(1000)
-                            continue
-                    okuyucu.cap_degistir(yeni)
-                    son_sira = None
-                    self.durum.emit("Sistem hazır", False)
+                            self.durum.emit("Seçilen kamera açılamadı — otomatik aranıyor…", True)
+                            yeni = algi.open_camera()
+                            if yeni is None:
+                                self.durum.emit("Hiçbir kamera açılamadı", True)
+                                self.msleep(1000)
+                                continue
+                        okuyucu.cap_degistir(yeni)
+                        son_sira = None
+                        self.durum.emit("Sistem hazır", False)
+
+                if self.kamera_kapali:
+                    self.msleep(50)
+                    continue
 
                 if okuyucu.hata_sayaci > 60:
                     self.durum.emit("Kamera koptu — yeniden deneniyor…", True)
-                    eski = okuyucu.cap
-                    okuyucu.cap_degistir(None)
-                    if eski is not None:
-                        eski.release()
                     okuyucu.cap_degistir(algi.open_camera())
                     son_sira = None
                     self.msleep(500)
@@ -961,7 +944,11 @@ class MainWindow(QMainWindow):
         self.saat_timer.start(1000)
         self._saat_guncelle()
         # CANLI gostergesi baslangicta gizli (kamera henuz baslamadi)
-        self.live_dot.setVisible(False)
+        self.live_badge.setVisible(False)
+        self.live_blink_state = True
+        self.live_blink_timer = QTimer(self)
+        self.live_blink_timer.setInterval(550)
+        self.live_blink_timer.timeout.connect(self._live_blink_tick)
 
         # Kontrol katmani (mock-ESP32 varsayilan; DERINMAVI_ESP env ile gercek porta gecilir)
         self.kontrol = kontrol_mod.Kontrol()
@@ -1084,27 +1071,39 @@ class MainWindow(QMainWindow):
         kam_row = QWidget()
         krh = QHBoxLayout(kam_row)
         krh.setContentsMargins(0, 0, 0, 0)
-        krh.setSpacing(8)
-        self.kam_sec = QComboBox()
+        krh.setSpacing(6)
+        self.kam_sec = SecimKutusu()
         self.kam_sec.setObjectName("camsel")
+        self.kam_sec.setMinimumWidth(158)      # uzun kamera adlari kisalmadan sigsin
         self.kam_sec.addItem("Otomatik", "auto")
+        self.kam_sec.addItem("Kapalı", "off")
         self.kam_sec.currentIndexChanged.connect(self._kamera_sec)
         krh.addWidget(self.kam_sec, 0, Qt.AlignVCenter)
-        
-        self.res_sec = QComboBox()
+
+        self.res_sec = SecimKutusu()
         self.res_sec.setObjectName("camsel")
+        self.res_sec.setMinimumWidth(112)      # "1280x720" + ok
         self.res_sec.addItem("Çözünürlük", None)
         self.res_sec.currentIndexChanged.connect(self._res_sec)
         krh.addWidget(self.res_sec, 0, Qt.AlignVCenter)
-        
-        # CANLI rozeti (kamera seçicinin sağında)
+
+        # CANLI rozeti: nokta + yazi TEK bir kapsul icinde. Eskiden ikisi ayri
+        # widget'ti ve yalnizca nokta gizleniyordu — kamera KAPALI iken bile
+        # bos bir "CANLI" yazisi duruyordu (yaniltici). Artik rozet butun olarak
+        # gorunur/gizlenir.
+        self.live_badge = QFrame()
+        self.live_badge.setObjectName("livebadge")
+        lb = QHBoxLayout(self.live_badge)
+        lb.setContentsMargins(8, 3, 9, 3)
+        lb.setSpacing(5)
         self.live_dot = QLabel()
         self.live_dot.setFixedSize(7, 7)
-        self.live_dot.setStyleSheet(f"background:{RED};border-radius:3px;")
-        live_lbl = QLabel("CANLI")
-        live_lbl.setObjectName("livet")
-        krh.addWidget(self.live_dot, 0, Qt.AlignVCenter)
-        krh.addWidget(live_lbl, 0, Qt.AlignVCenter)
+        self.live_dot.setStyleSheet(T.nokta(T.KIRMIZI, 7))
+        self.live_lbl = QLabel("CANLI")
+        self.live_lbl.setObjectName("livet")
+        lb.addWidget(self.live_dot, 0, Qt.AlignVCenter)
+        lb.addWidget(self.live_lbl, 0, Qt.AlignVCenter)
+        krh.addWidget(self.live_badge, 0, Qt.AlignVCenter)
         krh.addStretch(1)
         kv.addWidget(kam_row)
         ekle(kam_g)
@@ -1194,7 +1193,7 @@ class MainWindow(QMainWindow):
         for _ in range(n):
             d = QLabel()
             d.setFixedSize(20, 5)
-            d.setStyleSheet(f"background:{BD2};border-radius:3px;")
+            d.setStyleSheet(T.nokta(T.L3, 6))
             tdh.addWidget(d)
         row.addWidget(td)
         row.addStretch(1)
@@ -1277,7 +1276,7 @@ class MainWindow(QMainWindow):
         kaydir.setWidgetResizable(True)
         kaydir.setFrameShape(QFrame.NoFrame)
         kaydir.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        kaydir.setMaximumHeight(430)
+        kaydir.setMaximumHeight(520)   # satirlar Apple olculerinde buyudu, daha fazlasi sigsin
         pv.addWidget(kaydir, 1)
 
         alt = QHBoxLayout()
@@ -1432,7 +1431,7 @@ class MainWindow(QMainWindow):
                 deger_lbl.setStyleSheet(ETIKET_ONERI if onerilen else ETIKET_DEGISIK)
             return
         onerilen = (val == getattr(sl, "oneri_val", None))
-        sl.setStyleSheet(SLIDER_TASLAK.format(**(SLIDER_ONERI if onerilen else SLIDER_DEGISIK)))
+        sl.setStyleSheet(SLIDER_ONERI if onerilen else SLIDER_DEGISIK)
         if deger_lbl:
             deger_lbl.setStyleSheet(
                 ETIKET_ONERI if onerilen else ETIKET_DEGISIK)
@@ -1533,7 +1532,7 @@ class MainWindow(QMainWindow):
         # Baslik
         mt = QLabel("OTONOM TAKİP DURUMU")
         mt.setObjectName("ph")
-        mt.setStyleSheet("font-size:10px; padding-bottom:4px;")
+        mt.setStyleSheet(T.yazi(T.DIPNOT, T.L2, "padding-bottom: 4px;"))
         mv.addWidget(mt)
 
         # Takip durumu gostergesi (kilitli / araniyor / E-Stop)
@@ -1545,7 +1544,7 @@ class MainWindow(QMainWindow):
 
         self.oto_durum_dot = QLabel()
         self.oto_durum_dot.setFixedSize(10, 10)
-        self.oto_durum_dot.setStyleSheet(f"background:{AMB};border-radius:5px;")
+        self.oto_durum_dot.setStyleSheet(T.nokta(T.SARI, 10))
         dh.addWidget(self.oto_durum_dot)
 
         oto_sub = QVBoxLayout()
@@ -1561,20 +1560,20 @@ class MainWindow(QMainWindow):
 
         # Nisan (PD) durumu
         nisan_kart = QFrame()
-        nisan_kart.setStyleSheet(f"background:{CARD}; border-radius:8px;")
+        nisan_kart.setObjectName("altkart")
         nv = QVBoxLayout(nisan_kart)
         nv.setContentsMargins(12, 6, 12, 6)
         nv.setSpacing(3)
         nt = QLabel("NİŞAN KONTROLÜ")
-        nt.setStyleSheet(f"font-size:10px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
+        nt.setObjectName("ph")
         nv.addWidget(nt)
 
         self.oto_nisan_durum = QLabel("Bekleniyor")
-        self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+        self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.L3))
         nv.addWidget(self.oto_nisan_durum)
 
         self.oto_ates_kapi = QLabel("—")
-        self.oto_ates_kapi.setStyleSheet(f"font-size:11px; color:{TXT3}; padding:2px 0;")
+        self.oto_ates_kapi.setStyleSheet(T.yazi(T.ALTBASLIK, T.L3))
         self.oto_ates_kapi.setWordWrap(True)
         nv.addWidget(self.oto_ates_kapi)
 
@@ -1582,9 +1581,9 @@ class MainWindow(QMainWindow):
         aci_row = QHBoxLayout()
         aci_row.setSpacing(16)
         self.oto_pan_lbl = QLabel("Azimut: 0.0°")
-        self.oto_pan_lbl.setStyleSheet(f"font-family:{FM}; font-size:12px; color:{TXT2};")
+        self.oto_pan_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L2, f"font-family:{T.FM};"))
         self.oto_tilt_lbl = QLabel("Yükseliş: 0.0°")
-        self.oto_tilt_lbl.setStyleSheet(f"font-family:{FM}; font-size:12px; color:{TXT2};")
+        self.oto_tilt_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L2, f"font-family:{T.FM};"))
         aci_row.addWidget(self.oto_pan_lbl)
         aci_row.addWidget(self.oto_tilt_lbl)
         aci_row.addStretch(1)
@@ -1594,16 +1593,16 @@ class MainWindow(QMainWindow):
 
         # Aktif gorev bilgisi
         gorev_kart = QFrame()
-        gorev_kart.setStyleSheet(f"background:{CARD}; border-radius:8px;")
+        gorev_kart.setObjectName("altkart")
         gv = QVBoxLayout(gorev_kart)
         gv.setContentsMargins(12, 6, 12, 6)
         gv.setSpacing(3)
         gt = QLabel("GÖREV BİLGİSİ")
-        gt.setStyleSheet(f"font-size:10px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
+        gt.setObjectName("ph")
         gv.addWidget(gt)
 
         self.oto_gorev_lbl = QLabel("Aşama seçilmedi")
-        self.oto_gorev_lbl.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+        self.oto_gorev_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L3))
         self.oto_gorev_lbl.setWordWrap(True)
         gv.addWidget(self.oto_gorev_lbl)
 
@@ -1612,16 +1611,17 @@ class MainWindow(QMainWindow):
         # Bolge durumu (otonom icin de)
         self.oto_bolge_status = QLabel("● BÖLGE GÜVENLİ")
         self.oto_bolge_status.setAlignment(Qt.AlignCenter)
-        self.oto_bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+        self.oto_bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
         mv.addWidget(self.oto_bolge_status)
 
-        mv.addStretch(1)
-
-        # Otonom ATES bilgisi — buton YOK ama lazer durumu gosterilir
+        # Otonom ATES bilgisi — buton YOK ama lazer durumu gosterilir.
+        # Bosluk (stretch) EN SONA konur: daha once lazer durumunun ustundeydi ve
+        # panelin ortasinda hicbir sey anlatmayan genis bir bosluk biriktiriyordu.
         self.oto_lazer_durum = QLabel("○ Lazer kapalı")
         self.oto_lazer_durum.setAlignment(Qt.AlignCenter)
-        self.oto_lazer_durum.setStyleSheet(f"font-size:13px; font-weight:600; color:{TXT3}; padding:6px 0;")
+        self.oto_lazer_durum.setStyleSheet(T.yazi(T.GOVDE_VURGU, T.L3))
         mv.addWidget(self.oto_lazer_durum)
+        mv.addStretch(1)
 
         return mk
 
@@ -1654,7 +1654,7 @@ class MainWindow(QMainWindow):
         kv.addWidget(self.hedef_scroll)
 
         self.hedef_bos_lbl = QLabel("Hedef bekleniyor…")
-        self.hedef_bos_lbl.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+        self.hedef_bos_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L3))
         kv.addWidget(self.hedef_bos_lbl)
 
         return kart
@@ -1667,6 +1667,9 @@ class MainWindow(QMainWindow):
             if w is not None:
                 w.deleteLater()
         self.hedef_bos_lbl.setVisible(not hedefler)
+        # Bos listede kaydirma alanini da gizle: aksi halde kartta hicbir sey
+        # anlatmayan 30 px'lik bir bosluk kaliyordu.
+        self.hedef_scroll.setVisible(bool(hedefler))
         for i, hh in enumerate(hedefler):
             tid = hh.get("id")
             kilitli = hh["aktif"]
@@ -1686,8 +1689,9 @@ class MainWindow(QMainWindow):
             btn.setEnabled(tid is not None)
             btn.setStyleSheet(
                 "QPushButton#hedefsatir { text-align:left; border:none; background:transparent; "
-                f"padding:3px 4px; font-size:13px; font-weight:{700 if kilitli else 600}; color:{renk}; }} "
-                "QPushButton#hedefsatir:hover:enabled { background:rgba(18,88,168,0.10); border-radius:5px; }")
+                f"padding:3px 8px; border-radius:{T.YC_NORMAL}px; font-size:13px; "
+                f"font-weight:{700 if kilitli else 500}; color:{renk}; }} "
+                f"QPushButton#hedefsatir:hover:enabled {{ background:{T.D2}; }}")
             btn.clicked.connect(lambda checked=False, t=tid: self._hedef_secildi(t))
             lay.addWidget(btn)
         lay.addStretch(1)
@@ -1760,7 +1764,7 @@ class MainWindow(QMainWindow):
         self.lazer_sl.setSingleStep(5)
         self.lazer_sl.setPageStep(10)
         self.lazer_sl.setValue(self.lazer_guc)
-        self.lazer_sl.setStyleSheet(SLIDER_TASLAK.format(**SLIDER_DEGISIK))
+        self.lazer_sl.setStyleSheet(SLIDER_DEGISIK)
         self.lazer_sl.valueChanged.connect(self._lazer_guc_degisti)
         kv.addWidget(self.lazer_sl)
 
@@ -1782,7 +1786,7 @@ class MainWindow(QMainWindow):
         self.lazer_durum.setText(
             f"● ATEŞ · %{self.lazer_guc}" if acik else f"○ Kapalı · %{self.lazer_guc}")
         self.lazer_durum.setStyleSheet(
-            f"color:{RED if acik else TXT3}; font-weight:{700 if acik else 600};")
+            f"color:{T.KIRMIZI if acik else T.L3}; font-size:11px; font-weight:600;")
         for v, b in getattr(self, "lazer_btns", {}).items():
             b.setChecked(v == self.lazer_guc)
 
@@ -1815,13 +1819,13 @@ class MainWindow(QMainWindow):
         brow = QHBoxLayout()
         mt = QLabel("MANUEL NİŞAN & YÖN KONTROLÜ")
         mt.setObjectName("ph")
-        mt.setStyleSheet("font-size:10px; padding-bottom:4px;")
+        mt.setStyleSheet(T.yazi(T.DIPNOT, T.L2, "padding-bottom: 4px;"))
         brow.addWidget(mt, 1)
         self.aci_ayar_btn = QPushButton("⚙ Açı Ayarları")
         self.aci_ayar_btn.setObjectName("ayaralt")
         self.aci_ayar_btn.setCursor(Qt.PointingHandCursor)
-        self.aci_ayar_btn.setFixedHeight(22)
-        self.aci_ayar_btn.setStyleSheet("padding:2px 12px; font-size:11px;")
+        self.aci_ayar_btn.setFixedHeight(T.BOY_NORMAL)
+        self.aci_ayar_btn.setObjectName("ayaralt")
         self.aci_ayar_btn.clicked.connect(self._aci_ayarlar_toggle)
         brow.addWidget(self.aci_ayar_btn, 0)
         mv.addLayout(brow)
@@ -1872,9 +1876,7 @@ class MainWindow(QMainWindow):
         self.bolge_status = QLabel("● BÖLGE GÜVENLİ")
         self.bolge_status.setObjectName("bolgestatus")
         self.bolge_status.setAlignment(Qt.AlignCenter)
-        self.bolge_status.setStyleSheet(
-            f"background: rgba(48, 209, 88, 0.12); border: 1px solid rgba(48, 209, 88, 0.30); "
-            f"border-radius: 8px; padding: 3px 10px; color: {GRN}; font-size: 10.5px; font-weight: 700; letter-spacing: 0.8px;")
+        self.bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
         dv.addWidget(self.bolge_status)
 
         dv.addWidget(self._dpad_izgarasi(), 0, Qt.AlignCenter)
@@ -1886,7 +1888,7 @@ class MainWindow(QMainWindow):
         """ATES butonu — Apple Glass High-Impact Action Button."""
         self.fire_btn = QPushButton(ATES_METIN_KAPALI)
         self.fire_btn.setObjectName("fire")
-        self.fire_btn.setFixedHeight(38)
+        self.fire_btn.setFixedHeight(T.BOY_XL)        # Apple XL kontrol: 36 px kapsül
         self.fire_btn.setCheckable(True)
         self.fire_btn.setCursor(Qt.PointingHandCursor)
         self.fire_btn.setToolTip("[L] — ateşi aç / kes")
@@ -1906,10 +1908,10 @@ class MainWindow(QMainWindow):
             v.setSpacing(0)
             bl = QLabel(baslik)
             bl.setObjectName("engsub")
-            bl.setStyleSheet(f"font-size:9px; font-weight:700; color:{TXT2}; letter-spacing:0.5px;")
+            bl.setStyleSheet(T.yazi(T.ETIKETCIK, T.L2, "letter-spacing: 0.6px;"))
             deger = QLabel("0.0°")
             deger.setObjectName("turn")
-            deger.setStyleSheet(f"font-size:15px; font-family:{FM}; color:{renk}; font-weight:700;")
+            deger.setStyleSheet(T.yazi(T.BASLIK3, renk, f"font-family:{T.FM};"))
             v.addWidget(bl)
             v.addWidget(deger)
             return v, bl, deger
@@ -1929,10 +1931,10 @@ class MainWindow(QMainWindow):
 
     def _dpad_izgarasi(self):
         """Yon tus takimi. 4 stil (normal/basili x kenar/merkez) tek sablondan uretilir."""
-        self._key_normal_style = DPAD_STIL.format(**DPAD_KENAR)
-        self._key_active_style = DPAD_STIL_BASILI.format(**DPAD_KENAR_BASILI)
-        self._key_center_normal_style = DPAD_STIL.format(**DPAD_MERKEZ)
-        self._key_center_active_style = DPAD_STIL_BASILI.format(**DPAD_MERKEZ_BASILI)
+        self._key_normal_style = DPAD_NORMAL
+        self._key_active_style = DPAD_BASILI
+        self._key_center_normal_style = DPAD_MERKEZ
+        self._key_center_active_style = DPAD_MERKEZ_BASILI
 
         dpad = QWidget()
         dpad.setFixedSize(186, 108)
@@ -1965,6 +1967,7 @@ class MainWindow(QMainWindow):
         secenekler: [(deger, etiket), ...]   Doner: (capsule_frame, {deger: buton})"""
         capsule = QFrame()
         capsule.setObjectName("tabs")
+        capsule.setFixedHeight(T.BOY_NORMAL + 4)      # 24 px segment + 2px iç boşluk
         th = QHBoxLayout(capsule)
         th.setContentsMargins(2, 2, 2, 2)
         th.setSpacing(2)
@@ -1974,7 +1977,7 @@ class MainWindow(QMainWindow):
             b.setObjectName("tab")
             b.setCheckable(True)
             b.setChecked(val == secili)
-            b.setFixedHeight(24)
+            b.setFixedHeight(T.BOY_NORMAL)
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda checked=False, v=val: geri_cagri(v))
             th.addWidget(b, 1)
@@ -2071,7 +2074,7 @@ class MainWindow(QMainWindow):
         kutu = QVBoxLayout()
         kutu.setSpacing(3)
         cb = QCheckBox(baslik)
-        cb.setStyleSheet(f"color:{TXT2}; font-size:11px; font-weight:600;")
+        cb.setStyleSheet(T.yazi(T.ALTBASLIK_V, T.L2))
         cb.setChecked(acik)
         cb.stateChanged.connect(self._ap_yasak_degisti)
         kutu.addWidget(cb)
@@ -2291,14 +2294,12 @@ class MainWindow(QMainWindow):
                                            f'<small style="color:{TXT2}">({", ".join(txts)})</small>')
             if hasattr(self.hareket_yasak_sw, "setChecked"):
                 self.hareket_yasak_sw.setChecked(True)
-            else:
-                self.hareket_yasak_sw.setStyleSheet(f"background:{AMB};border-radius:8px;")
+
         else:
             self.hareket_yasak_lbl.setText(f'<small style="color:{TXT3}">Devre Dışı — Serbest</small>')
             if hasattr(self.hareket_yasak_sw, "setChecked"):
                 self.hareket_yasak_sw.setChecked(False)
-            else:
-                self.hareket_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
+
 
         # Atışa Yasak Alan Kartı
         if self.atis_yasak_aktif:
@@ -2306,14 +2307,12 @@ class MainWindow(QMainWindow):
                                         f'<small style="color:{TXT2}">({int(self.atis_pan_min)}°-{int(self.atis_pan_max)}°)</small>')
             if hasattr(self.atis_yasak_sw, "setChecked"):
                 self.atis_yasak_sw.setChecked(True)
-            else:
-                self.atis_yasak_sw.setStyleSheet(f"background:{RED};border-radius:8px;")
+
         else:
             self.atis_yasak_lbl.setText(f'<small style="color:{TXT3}">Devre Dışı — Serbest</small>')
             if hasattr(self.atis_yasak_sw, "setChecked"):
                 self.atis_yasak_sw.setChecked(False)
-            else:
-                self.atis_yasak_sw.setStyleSheet(f"background:{BD2};border-radius:8px;")
+
 
     def _ap_varsayilana_don(self):
         tavan = int(P.TILT_CALISMA_VARSAYILAN)   # sabit 60 yaziliydi: tavan degisince kalirdi
@@ -2365,7 +2364,7 @@ class MainWindow(QMainWindow):
 
         if yasak_mi:
             self.bolge_status.setText("▲ HAREKETE YASAK LİMİTİ — ENGELLENDİ")
-            self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
+            self.bolge_status.setStyleSheet(T.durum_bandi(T.KIRMIZI))
             return False
 
         self.pan_ham = yeni_pan_ham
@@ -2378,11 +2377,11 @@ class MainWindow(QMainWindow):
         # girilirse ates KESILIR (sartname: atisa-yasak alan, ates sirasinda da gecerli).
         if self.atis_yasak_aktif and (self.atis_pan_min <= self.pan_aci <= self.atis_pan_max):
             self.bolge_status.setText("⚠️ ATIŞA YASAK BÖLGEDESİNİZ — ATEŞ KİLİTLİ")
-            self.bolge_status.setStyleSheet(f"color:{AMB}; font-size:11px; font-weight:700; padding:2px 0;")
+            self.bolge_status.setStyleSheet(T.durum_bandi(T.SARI))
             self._ates_kes("ATIŞA YASAK AÇI BÖLGESİNE GİRİLDİ")
         else:
             self.bolge_status.setText("● BÖLGE GÜVENLİ")
-            self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+            self.bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
 
         # ESP32'ye MUTLAK hedef aci gider (pan sarmasiz). Degismeyen ekseni kontrol
         # katmani zaten gondermez, burada ayrica ayiklamaya gerek yok.
@@ -2443,7 +2442,7 @@ class MainWindow(QMainWindow):
         self.pan_val_lbl.setText("0.0°")
         self.tilt_val_lbl.setText("0.0°")
         self.bolge_status.setText("● MERKEZE ALINDI")
-        self.bolge_status.setStyleSheet(f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+        self.bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
         if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
             self.kontrol.home()
 
@@ -2548,7 +2547,7 @@ class MainWindow(QMainWindow):
         eh.setSpacing(8)
         self.eng_dot = QLabel()
         self.eng_dot.setFixedSize(8, 8)
-        self.eng_dot.setStyleSheet(f"background:{GRN};border-radius:4px;")
+        self.eng_dot.setStyleSheet(T.nokta(T.YESIL, 8))
         ev_sub = QVBoxLayout()
         ev_sub.setSpacing(1)
         self.eng_name = QLabel("Hedef bekleniyor")
@@ -2671,7 +2670,7 @@ class MainWindow(QMainWindow):
         if dot_renk is not None:
             dot = QLabel()
             dot.setFixedSize(7, 7)
-            dot.setStyleSheet(f"background:{dot_renk};border-radius:3px;")
+            dot.setStyleSheet(T.nokta(dot_renk, 6))
             hl.addWidget(dot, 0, Qt.AlignVCenter)
         lbl = QLabel(html)
         lbl.setObjectName("sbseg")
@@ -2830,12 +2829,10 @@ class MainWindow(QMainWindow):
         if hasattr(self, "bolge_status"):
             if aktif:
                 self.bolge_status.setText("⏻ ACİL DURDURULDU — hareket ve ateş kesildi")
-                self.bolge_status.setStyleSheet(
-                    f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
+                self.bolge_status.setStyleSheet(T.durum_bandi(T.KIRMIZI))
             else:
                 self.bolge_status.setText("● BÖLGE GÜVENLİ")
-                self.bolge_status.setStyleSheet(
-                    f"color:{GRN}; font-size:11px; font-weight:600; padding:2px 0;")
+                self.bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
         if self.kontrol.bagli:
             d = self.kontrol.estop(aktif)
             if aktif:
@@ -2889,8 +2886,7 @@ class MainWindow(QMainWindow):
                                 f'ATEŞ reddedildi — ATIŞA YASAK AÇI BÖLGESİ')
             if hasattr(self, "bolge_status"):
                 self.bolge_status.setText("🚫 ATIŞA YASAK AÇI BÖLGESİ — ATEŞ ENGELLENDİ")
-                self.bolge_status.setStyleSheet(
-                    f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
+                self.bolge_status.setStyleSheet(T.durum_bandi(T.KIRMIZI))
             return
         ac = self.fire_btn.isChecked()
         d = self.kontrol.ates(ac)
@@ -2988,6 +2984,14 @@ class MainWindow(QMainWindow):
             self.sb_msg.setText(f'<span style="color:{TXT3}">ESP32:</span>&nbsp;{yeni[-1]}')
         self._esp_goster(self.kontrol.durum)
 
+    def _live_blink_tick(self):
+        """Kamera canli akisi varken kirmizi noktanin estetik yanip sonmesi (pulse)."""
+        self.live_blink_state = not self.live_blink_state
+        if self.live_blink_state:
+            self.live_dot.setStyleSheet(T.nokta(T.KIRMIZI, 7))
+        else:
+            self.live_dot.setStyleSheet(T.nokta(T._a(T.KIRMIZI, 0.22), 7))
+
     def _kamera_sec(self, i):
         veri = self.kam_sec.itemData(i)
         if veri is None:
@@ -2996,7 +3000,11 @@ class MainWindow(QMainWindow):
         # Cozunurluk menusu guncelle
         self.res_sec.blockSignals(True)
         self.res_sec.clear()
-        if hasattr(self, 'kamera_cozunurlukleri') and veri in self.kamera_cozunurlukleri:
+        if veri == "off":
+            self.res_sec.addItem("Çözünürlük", None)
+            self.res_sec.setEnabled(False)
+        elif hasattr(self, 'kamera_cozunurlukleri') and veri in self.kamera_cozunurlukleri:
+            self.res_sec.setEnabled(True)
             res_list = self.kamera_cozunurlukleri[veri]
             if res_list:
                 for w, h in res_list:
@@ -3004,6 +3012,7 @@ class MainWindow(QMainWindow):
             else:
                 self.res_sec.addItem("Bilinmiyor", None)
         else:
+            self.res_sec.setEnabled(True)
             self.res_sec.addItem("Otomatik", None)
         self.res_sec.blockSignals(False)
         
@@ -3019,7 +3028,7 @@ class MainWindow(QMainWindow):
         
         # Mevcut kamerayi yeni cozunurlukle yeniden baslat
         idx = self.kam_sec.currentData()
-        if idx is not None:
+        if idx is not None and idx != "off":
             self.thread.kaynak_istegi = idx
 
     def _kameralar_geldi(self, liste):
@@ -3031,7 +3040,6 @@ class MainWindow(QMainWindow):
             idx = cam["index"]
             self.kamera_cozunurlukleri[idx] = cam.get("resolutions", [])
             if idx not in mevcut:
-                # Gercek isim varsa kullan, yoksa generic
                 isim = cam.get("name", f"Kamera {idx}")
                 self.kam_sec.addItem(f"{isim}", idx)
         # arka plan taramasi bir kez calissin (Qt listesi zaten tum kameralari verir)
@@ -3052,9 +3060,12 @@ class MainWindow(QMainWindow):
         dosya = os.path.basename(_model_bul() or "model")
         if eksikler:
             adlar = ", ".join(algi.DISPLAY.get(e, e) for e in eksikler)
+            # Alt cubuk KISA kalir: sinif adlarinin tamami sigmiyor ve satirin
+            # sonu kirpiliyordu. Tam liste ipucu balonunda (tooltip) duruyor.
+            sinif_sayisi = ozet.split(" ")[0]
             self.sb_model.setText(
                 f'<span style="color:{BLUE}">{dosya}</span>&nbsp;'
-                f'<small style="color:{AMB}">· {ozet} · eksik: {adlar}</small>')
+                f'<small style="color:{AMB}">· {sinif_sayisi} sınıf · eksik: {adlar}</small>')
             self.sb_model.setToolTip(
                 f"Model: {ozet}\n\nBu tipler modelde YOK, tespit EDİLEMEZ:\n  {adlar}\n\n"
                 "Şartname 4 hedef tipi + nişan için balon gerektiriyor. Eksik tipler "
@@ -3063,36 +3074,37 @@ class MainWindow(QMainWindow):
                                 f'Model {ozet} — şu tipler tespit EDİLEMEZ: {adlar}')
         else:
             self.sb_model.setText(f'<span style="color:{BLUE}">{dosya}</span>&nbsp;'
-                                  f'<small style="color:{TXT3}">· {ozet}</small>')
+                                  f'<small style="color:{TXT3}">· {ozet.split(" ")[0]} sınıf · tam</small>')
             self.sb_model.setToolTip(f"Model: {ozet}\nŞartnamenin gerektirdiği tüm tipler mevcut.")
 
     def _durum_geldi(self, mesaj, hata):
         renk = AMB if hata else GRN
         self.sb_msg.setText(f'<span style="color:{renk}">●</span>&nbsp;{mesaj}')
-        if hata:
+        if "kapatıldı" in mesaj or "kapalı" in mesaj:
+            self.video.setPixmap(QPixmap())
+            self.video.setText("KAMERA KAPALI\n\n(Akış durduruldu)")
+            self._ci("Kamera", TXT3, "· kapalı")
+            if self.live_blink_timer.isActive():
+                self.live_blink_timer.stop()
+            self.live_badge.setVisible(False)
+        elif hata:
+            self.video.setPixmap(QPixmap())
             self.video.setText(mesaj)
             self._ci("Kamera", BD2, "· yok")
-            self.live_dot.setVisible(False)
+            if self.live_blink_timer.isActive():
+                self.live_blink_timer.stop()
+            self.live_badge.setVisible(False)
 
     def _ci(self, ad, renk, alt):
         dot, lbl = self.ci[ad]
-        dot.setStyleSheet(f"background:{renk};border-radius:3px;")
+        dot.setStyleSheet(T.nokta(renk, 6))
         base = ad
         lbl.setText(f'{base}<small style="color:{TXT3}">&nbsp;{alt}</small>')
 
     def _badge_stil(self, badge, tip):
-        if tip == "Düşman":
-            badge.setStyleSheet(f"background:rgba(255,69,58,0.14);color:{RED};"
-                                f"border:1px solid rgba(255,69,58,0.38);border-radius:13px;"
-                                f"padding:3px 11px 5px 11px;font-size:10px;font-weight:700;")
-        elif tip == "Dost":
-            badge.setStyleSheet(f"background:rgba(59,130,246,0.14);color:{BLUE};"
-                                f"border:1px solid rgba(59,130,246,0.38);border-radius:13px;"
-                                f"padding:3px 11px 5px 11px;font-size:10px;font-weight:700;")
-        else:
-            badge.setStyleSheet(f"background:rgba(113,113,122,0.14);color:{TXT3};"
-                                f"border:1px solid rgba(113,113,122,0.35);border-radius:13px;"
-                                f"padding:3px 11px 5px 11px;font-size:10px;font-weight:700;")
+        """Dost/düşman rozeti — Apple'ın tonlanmış (tinted) kapsül dili."""
+        renk = {"Düşman": T.KIRMIZI, "Dost": T.AKSAN}.get(tip, T.L3)
+        badge.setStyleSheet(T.rozet(renk))
 
     def _saat_guncelle(self):
         self.clk.setText(time.strftime("%H:%M:%S"))
@@ -3219,9 +3231,11 @@ class MainWindow(QMainWindow):
         finally:
             self.thread.kare_islendi()
 
-        # CANLI gostergesi: kare geliyorsa aktif
-        if not self.live_dot.isVisible():
-            self.live_dot.setVisible(True)
+        # CANLI gostergesi: kare geliyorsa aktif ve yanip soner
+        if not self.live_badge.isVisible():
+            self.live_badge.setVisible(True)
+        if not self.live_blink_timer.isActive():
+            self.live_blink_timer.start()
         self._ci("Kamera", GRN, f"· {qimg.width()}×{qimg.height()}")
 
         # A3'te dost/dusman ayrimi var; A1-A2'de yok (hepsi hedef).
@@ -3282,7 +3296,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "oto_ates_kapi"):
             return
         self.oto_ates_kapi.setText(f"{baslik} — {ayrinti}")
-        self.oto_ates_kapi.setStyleSheet(f"font-size:11px; color:{renk}; padding:2px 0;")
+        self.oto_ates_kapi.setStyleSheet(T.yazi(T.ALTBASLIK, renk))
 
     def _otonom_ates_kontrol(self, data, estop):
         """Hedef olu bolgeye girdiginde (merkezde) dwell suresi kadar bekler,
@@ -3344,21 +3358,21 @@ class MainWindow(QMainWindow):
 
         # 1. Takip Durumu
         if active_hedef:
-            self.oto_durum_dot.setStyleSheet(f"background:{GRN};border-radius:5px;")
+            self.oto_durum_dot.setStyleSheet(T.nokta(T.YESIL, 10))
             self.oto_durum_baslik.setText("Hedef Kilitli")
-            self.oto_durum_baslik.setStyleSheet(f"font-size:14px; font-weight:700; color:{GRN}; background:transparent;")
+            self.oto_durum_baslik.setStyleSheet(T.yazi(T.BASLIK3, T.YESIL, "background: transparent;"))
             
             taraf = f" · {active_hedef['tip']}" if data.get("a3") else ""
             self.oto_durum_alt.setText(f"{active_hedef['ad']}{taraf} · %{active_hedef['conf']} güven")
         elif estop:
-            self.oto_durum_dot.setStyleSheet(f"background:{RED};border-radius:5px;")
+            self.oto_durum_dot.setStyleSheet(T.nokta(T.KIRMIZI, 10))
             self.oto_durum_baslik.setText("ACİL DURDURMA")
-            self.oto_durum_baslik.setStyleSheet(f"font-size:14px; font-weight:700; color:{RED}; background:transparent;")
+            self.oto_durum_baslik.setStyleSheet(T.yazi(T.BASLIK3, T.KIRMIZI, "background: transparent;"))
             self.oto_durum_alt.setText(data.get("mesaj", ""))
         else:
-            self.oto_durum_dot.setStyleSheet(f"background:{AMB};border-radius:5px;")
+            self.oto_durum_dot.setStyleSheet(T.nokta(T.SARI, 10))
             self.oto_durum_baslik.setText("Hedef Aranıyor...")
-            self.oto_durum_baslik.setStyleSheet(f"font-size:14px; font-weight:700; color:{AMB}; background:transparent;")
+            self.oto_durum_baslik.setStyleSheet(T.yazi(T.BASLIK3, T.SARI, "background: transparent;"))
             self.oto_durum_alt.setText("Görüş alanında hedef yok")
 
         # 2. Bolge Durumu
@@ -3375,25 +3389,24 @@ class MainWindow(QMainWindow):
         if self.mod == "Otonom":
             if estop:
                 self.oto_nisan_durum.setText("Sistem durduruldu")
-                self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{RED}; padding:2px 0;")
+                self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.KIRMIZI))
             elif active_hedef:
                 simdi = time.time()
                 if simdi < getattr(self, "_nisan_mesgul_ta", 0):
                     self.oto_nisan_durum.setText("Konumlanıyor...")
-                    self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{BLUE}; padding:2px 0;")
+                    self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.AKSAN))
                 else:
                     self.oto_nisan_durum.setText("Takip aktif")
-                    self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{GRN}; padding:2px 0;")
+                    self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.YESIL))
             else:
                 self.oto_nisan_durum.setText("Bekleniyor")
-                self.oto_nisan_durum.setStyleSheet(f"font-size:12px; color:{TXT3}; padding:2px 0;")
+                self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.L3))
 
         # 4. Lazer Durumu
         acik = bool(getattr(self, "kontrol", None) and self.kontrol.bagli and self.kontrol.lazer_acik)
         self.oto_lazer_durum.setText(f"● ATEŞ AKTİF · %{self.lazer_guc}" if acik else f"○ Lazer Kapalı · %{self.lazer_guc}")
         self.oto_lazer_durum.setStyleSheet(
-            f"font-size:13px; font-weight:{700 if acik else 600}; "
-            f"color:{RED if acik else TXT3}; padding:6px 0;")
+            T.yazi(T.GOVDE_VURGU, T.KIRMIZI if acik else T.L3))
 
     def _otonom_gorev_guncelle(self):
         """Otonom paneldeki aktif gorev aciklamasini gunceller."""
@@ -3423,6 +3436,14 @@ class MainWindow(QMainWindow):
     def closeEvent(self, e):
         self.thread.durdur()
         self.thread.wait(2000)
+        # Inference ve kamera tarama thread'leri de DURDURULMALI: calisan bir
+        # QThread yok edilirse Qt "Destroyed while thread is still running" deyip
+        # uygulamayi abort ettirir — kapanista cokme olarak gorunuyordu.
+        if hasattr(self, "inference_thread"):
+            self.inference_thread.durdur()
+            self.inference_thread.wait(2000)
+        if isinstance(getattr(self, "tarama", None), QThread) and self.tarama.isRunning():
+            self.tarama.wait(2000)
         if hasattr(self, "esp_timer"):
             self.esp_timer.stop()      # kapanan port yoklanmasin
         if hasattr(self, "gp_timer"):
@@ -3433,461 +3454,15 @@ class MainWindow(QMainWindow):
             self.kontrol.kapat()
         e.accept()
 
-    # ================= STIL (Apple macOS Dark Glassmorphism) =================
+    # ================= STIL =================
     def _stil(self):
-        qss = f"""
-        QWidget {{
-            background: transparent;
-            color: {TXT};
-            font-family: {F};
-            font-size: 13px;
-        }}
-        #content {{
-            background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                                        stop:0 #050811, stop:0.35 #070d1a, stop:0.75 #0a1326, stop:1 #060a14);
-        }}
-        #top {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                        stop:0 rgba(24, 38, 64, 0.82), stop:1 rgba(14, 24, 42, 0.90));
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-top: 1px solid rgba(255, 255, 255, 0.22);
-            border-radius: 14px;
-        }}
-        #brand {{
-            font-size: 15px;
-            font-weight: 800;
-            color: {TXT};
-            background: transparent;
-            letter-spacing: 0.5px;
-        }}
-        #brandtxt {{
-            font-size: 14px;
-            font-weight: 700;
-            color: {MAVI_ACIK};
-            background: transparent;
-            letter-spacing: 0.3px;
-        }}
-        #vdiv {{
-            background: rgba(255, 255, 255, 0.10);
-        }}
-        #sbdiv {{
-            background: rgba(255, 255, 255, 0.10);
-        }}
-        #tgcap {{
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1.2px;
-            color: {TXT2};
-            background: transparent;
-            text-transform: uppercase;
-        }}
-        #tabs {{
-            background: rgba(8, 14, 26, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 9px;
-            padding: 2px;
-        }}
-        #tab {{
-            padding: 4px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            color: {TXT2};
-            background: transparent;
-            border: none;
-            border-radius: 7px;
-        }}
-        #tab:hover {{
-            background: rgba(255, 255, 255, 0.07);
-            color: {TXT};
-        }}
-        #tab:checked {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {MAVI_ACIK}, stop:1 {MAVI_KOYU});
-            color: #ffffff;
-            font-weight: 700;
-            border: 1px solid rgba(255, 255, 255, 0.28);
-            border-top: 1px solid rgba(255, 255, 255, 0.50);
-        }}
-        #tab:disabled {{
-            color: {TXT3};
-            background: transparent;
-        }}
-        #tab:disabled:checked {{
-            background: rgba(44, 166, 231, 0.30);
-            color: rgba(255, 255, 255, 0.65);
-        }}
-        #camsel {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                        stop:0 rgba(28, 44, 72, 0.85), stop:1 rgba(16, 26, 46, 0.90));
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-top: 1px solid rgba(255, 255, 255, 0.22);
-            border-radius: 8px;
-            padding: 4px 12px;
-            font-size: 12px;
-            font-weight: 600;
-            color: {TXT};
-            min-width: 120px;
-        }}
-        #camsel:hover {{
-            border-color: {MAVI_ACIK};
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                        stop:0 rgba(36, 56, 92, 0.90), stop:1 rgba(22, 36, 62, 0.95));
-        }}
-        #camsel QAbstractItemView {{
-            background: #0c1524;
-            color: {TXT};
-            selection-background-color: {MAVI};
-            selection-color: #ffffff;
-            border: 1px solid rgba(44, 166, 231, 0.35);
-            border-radius: 8px;
-            padding: 4px;
-        }}
-        #stt {{
-            font-size: 12px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #estop {{
-            padding: 6px 16px;
-            border-radius: 9px;
-            border: 1.5px solid {RED};
-            border-top: 1.5px solid #ff857d;
-            color: #ff6961;
-            font-size: 12px;
-            font-weight: 700;
-            background: rgba(255, 69, 58, 0.12);
-            letter-spacing: 0.5px;
-        }}
-        #estop:hover {{
-            background: {RED};
-            color: #ffffff;
-        }}
-        #estop:checked {{
-            background: #dc2626;
-            color: #ffffff;
-            border-color: #ffffff;
-        }}
-        #cam {{
-            background: #040711;
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-top: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 14px;
-        }}
-        #video {{
-            background: #040711;
-            border-radius: 14px;
-            color: {TXT3};
-            font-size: 14px;
-        }}
-        #livet {{
-            font-size: 11px;
-            font-weight: 700;
-            color: {RED};
-            background: transparent;
-            letter-spacing: 0.5px;
-        }}
-        /* --- Ayar paneli (kamera uzeri overlay) --- */
-        #ayarbtn {{
-            background: rgba(18, 28, 48, 0.85);
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            border-top: 1px solid rgba(255, 255, 255, 0.30);
-            border-radius: 10px;
-            font-size: 16px;
-        }}
-        #ayarbtn:hover {{
-            background: {MAVI};
-            border-color: {MAVI_ACIK};
-        }}
-        #ayarpanel {{
-            background: rgba(12, 18, 32, 0.97);
-            border: 1px solid rgba(44, 166, 231, 0.35);
-            border-top: 1px solid rgba(255, 255, 255, 0.25);
-            border-radius: 16px;
-        }}
-        #ayarbaslik {{
-            font-size: 15px;
-            font-weight: 800;
-            color: {TXT};
-            background: transparent;
-            letter-spacing: 0.3px;
-        }}
-        #ayarkapat {{
-            background: rgba(255, 255, 255, 0.08);
-            color: {TXT2};
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 700;
-        }}
-        #ayarkapat:hover {{
-            background: rgba(255, 69, 58, 0.22);
-            border-color: {RED};
-            color: {RED};
-        }}
-        #ayarlbl {{
-            font-size: 13px;
-            font-weight: 600;
-            color: {TXT};
-            background: transparent;
-        }}
-        #ayargrup {{
-            font-size: 10px;
-            font-weight: 800;
-            color: {TXT2};
-            background: transparent;
-            letter-spacing: 1.2px;
-            padding-top: 4px;
-        }}
-        #ayarkaydir, #ayaric {{
-            background: transparent;
-            border: none;
-        }}
-        #ayarkaydir QScrollBar:vertical {{
-            background: transparent;
-            width: 7px;
-            margin: 0;
-        }}
-        #ayarkaydir QScrollBar::handle:vertical {{
-            background: rgba(255, 255, 255, 0.18);
-            border-radius: 3.5px;
-            min-height: 28px;
-        }}
-        #ayarkaydir QScrollBar::handle:vertical:hover {{
-            background: {MAVI};
-        }}
-        #ayarkaydir QScrollBar::add-line:vertical, #ayarkaydir QScrollBar::sub-line:vertical {{
-            height: 0;
-        }}
-        #ayarkaydir QScrollBar::add-page:vertical, #ayarkaydir QScrollBar::sub-page:vertical {{
-            background: transparent;
-        }}
-        #ayardeg {{
-            font-size: 12px;
-            font-weight: 700;
-            color: {MAVI_ACIK};
-            background: {MAVI_BG};
-            border: 1px solid rgba(44, 166, 231, 0.35);
-            border-radius: 8px;
-            padding: 2px 10px;
-            font-family: {FM};
-        }}
-        #ayarinfo {{
-            background: rgba(44, 166, 231, 0.18);
-            color: {MAVI_ACIK};
-            border: none;
-            border-radius: 8px;
-            font-size: 11px;
-            font-weight: 800;
-            font-style: italic;
-        }}
-        #ayarinfo:hover {{
-            background: {MAVI};
-            color: #ffffff;
-        }}
-        #ayaralt {{
-            background: rgba(255, 255, 255, 0.06);
-            color: {TXT2};
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-radius: 8px;
-            padding: 6px 16px;
-            font-size: 12px;
-            font-weight: 600;
-            min-height: 16px;
-        }}
-        #ayaralt:hover {{
-            background: rgba(44, 166, 231, 0.15);
-            border-color: {MAVI};
-            color: {TXT};
-        }}
-        #ayarkaydet {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {MAVI_ACIK}, stop:1 {MAVI_KOYU});
-            color: #ffffff;
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            border-top: 1px solid rgba(255, 255, 255, 0.45);
-            border-radius: 8px;
-            padding: 6px 20px;
-            font-size: 12px;
-            font-weight: 700;
-            min-height: 16px;
-        }}
-        #ayarkaydet:hover {{
-            background: {MAVI_ACIK};
-            color: #050811;
-        }}
-        #panelk {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                        stop:0 rgba(20, 32, 54, 0.82), stop:1 rgba(11, 18, 32, 0.90));
-            border: 1px solid rgba(255, 255, 255, 0.09);
-            border-top: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 14px;
-        }}
-        #ph {{
-            font-size: 10.5px;
-            font-weight: 700;
-            letter-spacing: 1.2px;
-            color: {TXT2};
-            padding-bottom: 6px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
-            background: transparent;
-            text-transform: uppercase;
-        }}
-        #turn {{
-            font-size: 20px;
-            font-weight: 700;
-            color: {TXT};
-            background: transparent;
-        }}
-        #asamap {{
-            font-size: 10px;
-            font-weight: 700;
-            letter-spacing: 1px;
-            padding: 3px 10px 5px 10px;
-            border-radius: 12px;
-            background: rgba(255, 214, 10, 0.12);
-            color: {AMB};
-            border: 1px solid rgba(255, 214, 10, 0.35);
-        }}
-        #cit {{
-            font-size: 13px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #kural {{
-            padding: 10px 14px;
-            background: rgba(14, 22, 38, 0.80);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 10px;
-            font-size: 13px;
-            color: {TXT2};
-            line-height: 1.8;
-        }}
-        #bosmsg {{
-            font-size: 14px;
-            color: {TXT3};
-            background: transparent;
-            padding: 28px 0;
-        }}
-        #ipucu {{
-            font-size: 12px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #turbilgi {{
-            font-size: 13px;
-            color: {TXT2};
-            background: transparent;
-            line-height: 1.6;
-        }}
-        #kart {{
-            background: rgba(18, 30, 52, 0.85);
-            border: 1px solid rgba(255, 255, 255, 0.10);
-            border-top: 1px solid rgba(255, 255, 255, 0.18);
-            border-radius: 10px;
-        }}
-        #kart:hover {{
-            border: 1px solid {MAVI_ACIK};
-            background: rgba(26, 44, 76, 0.90);
-        }}
-        #kartno {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 {MAVI_ACIK}, stop:1 {MAVI_KOYU});
-            color: #ffffff;
-            border-radius: 8px;
-            font-size: 11px;
-            font-weight: 700;
-        }}
-        #kartad {{
-            font-size: 12px;
-            font-weight: 600;
-            color: {TXT};
-            background: transparent;
-        }}
-        #hname {{
-            font-size: 26px;
-            font-weight: 800;
-            color: {TXT};
-            background: transparent;
-        }}
-        #hconf {{
-            font-size: 14px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #fire {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff453a, stop:1 #d70015);
-            border: 1px solid rgba(255, 255, 255, 0.35);
-            border-top: 1px solid rgba(255, 255, 255, 0.60);
-            border-radius: 12px;
-            color: #ffffff;
-            font-size: 15px;
-            font-weight: 800;
-            letter-spacing: 4px;
-        }}
-        #fire:hover {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff5b52, stop:1 #e0061a);
-            border-color: rgba(255, 255, 255, 0.50);
-        }}
-        #fire:checked {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #ff3b30, stop:1 #991b1b);
-            color: #ffffff;
-            border: 2px solid #ffffff;
-        }}
-        #fire:disabled {{
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            color: rgba(255, 255, 255, 0.30);
-        }}
-        #firest {{
-            font-size: 13px;
-            color: {GRN};
-            font-weight: 600;
-            background: transparent;
-        }}
-        #engok {{
-            background: rgba(48, 209, 88, 0.10);
-            border: 1px solid rgba(48, 209, 88, 0.28);
-            border-radius: 10px;
-        }}
-        #engname {{
-            font-size: 14px;
-            font-weight: 700;
-            color: {GRN};
-            background: transparent;
-        }}
-        #engsub {{
-            font-size: 11px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #angtgl {{
-            background: rgba(12, 20, 36, 0.70);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-top: 1px solid rgba(255, 255, 255, 0.16);
-            border-radius: 10px;
-        }}
-        #tgll {{
-            font-size: 12px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #sbar {{
-            background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                                        stop:0 rgba(16, 26, 44, 0.92), stop:1 rgba(8, 14, 26, 0.98));
-            border-top: 1px solid rgba(255, 255, 255, 0.08);
-        }}
-        #sbseg {{
-            font-size: 11.5px;
-            color: {TXT2};
-            background: transparent;
-        }}
-        #clk {{
-            font-family: {FM};
-            font-size: 13px;
-            font-weight: 600;
-            color: {TXT};
-            background: transparent;
-            margin-left: 11px;
-        }}
-        """
+        """Tum gorunum app/tasarim.py'den gelir (Apple macOS 27 UI Kit degerleri).
+
+        Burada artik TEK BIR renk/olcu yazili degil: stil sayfasi tasarim
+        katmaninda uretilir, burada yalnizca uygulanir. Ayni stil hem pencereye
+        hem QApplication'a verilir — ikincisi ayri ust pencerelerin (acilir
+        listeler, ipucu baloncuklari) da ayni dili konusmasini saglar."""
+        qss = T.qss()
         self.content.setStyleSheet(qss)
         if QApplication.instance():
             QApplication.instance().setStyleSheet(qss)
@@ -3895,15 +3470,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
-    # Apple San Francisco / System UI font
-    font = QFont(".AppleSystemUIFont", 10)
-    if not font.exactMatch():
-        font = QFont("SF Pro Display", 10)
-    if not font.exactMatch():
-        font = QFont("-apple-system", 10)
-    if not font.exactMatch():
-        font = QFont("Helvetica Neue", 10)
-    app.setFont(font)
+    app.setFont(T.uygulama_fontu())      # SF Pro varsa o, yoksa en yakın karşılığı
     w = MainWindow()
     w.showMaximized()   # acilista ekrani tam kapla (yan bosluk kalmasin)
     sys.exit(app.exec())

@@ -75,6 +75,25 @@ TensorRT sürümüne bağlıdır, başka makinede açılmaz. `.gitignore` zaten 
 
 ---
 
+## Arayüz görünümü (Apple macOS tasarım sistemi)
+
+Arayüzün tüm görünümü **`app/tasarim.py`** dosyasından gelir: renkler, yazı tipi
+rampası, kontrol ölçüleri, köşe yarıçapları ve Qt stil sayfası. Değerler göz kararı
+değil, **Apple macOS 27 UI Kit**'ten çıkarılmıştır (vurgu #0091FF, metin beyaz
+%100/55/25, yüzeyler beyaz %10→%2, kontrol yüksekliği 24 px, büyük butonlar kapsül).
+
+Pratikte ne demek:
+- **Bir rengi değiştirmek istiyorsan** tek yer var: `tasarim.py`. Örneğin sistemin
+  vurgu rengini marka mavisine döndürmek için `AKSAN = "#2CA6E7"` yeterli.
+- **Yeni bir bileşen eklerken** ona `setObjectName("...")` ver ve stilini
+  `tasarim.qss()` içine yaz. Yazmazsan `python app/tasarim.py` kapı testi
+  kırmızıya düşer — çünkü stilsiz bileşeni Qt macOS'un **yerel** stiliyle çizer
+  ve koyu arayüzde açık gri bir kutu belirir.
+- Satır içi `setStyleSheet` kullanma; gerekiyorsa `tasarim.py`'deki yardımcıları
+  (`yazi`, `rozet`, `nokta`, `durum_bandi`, `slider_stil`, `dpad_stil`) çağır.
+  Satır içi stiller ÇOCUK widget'lara da miras geçer ve yarı saydam yüzeylerde
+  beklenmedik bantlar oluşturur.
+
 ## Ortam değişkenleri (opsiyonel)
 
 Hiçbiri zorunlu değildir; hepsinin makul otomatik varsayılanı vardır.
@@ -98,6 +117,7 @@ Derin Mavi/
 ├── requirements.txt        # bağımlılıklar
 ├── app/                    # uygulama kodu
 │   ├── arayuz_qt.py        #   ANA uygulama (native PySide6 kontrol istasyonu)
+│   ├── tasarim.py          #   Görünümün tek kaynağı: Apple macOS renk/ölçü/stil
 │   ├── algi.py             #   Algı çekirdeği: kamera + YOLO + karar (tek kaynak)
 │   ├── nisan.py            #   Nişan matematiği: piksel hatası → gimbal açı komutu
 │   ├── renk_analizi.py     #   HSV ile dost/düşman (renk tarafı)
@@ -217,6 +237,7 @@ test edilmiştir.
   ```bash
   python app/protokol.py && python app/renk_analizi.py && python app/mock_esp32.py
   python app/kontrol.py && python app/nisan.py && python app/algi.py
+  python app/tasarim.py           # stil sayfası bütünlüğü + stil kapsamı
   python app/kapi_testleri.py     # E-Stop / ateş / yasak alan güvenlik kapıları
   ```
   Her modül kendi kendini test eder; `kapi_testleri.py` ise şartnamenin can alıcı

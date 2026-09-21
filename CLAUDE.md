@@ -983,6 +983,81 @@ Uçtan uca doğrulandı (sahte model, `analiz_et` zinciri): 2 çakışan hedef �
 yüksek olan kaldı), ayrı hedef korundu, **balon gövdeyle örtüşmesine rağmen korundu.**
 `algi.py`'ye 8 birim testi eklendi.
 
+### 12.3 macOS: kamera seçici görünümü + kamera değişiminde ÇÖKME (20.09.2026)
+
+Şikâyet: üst şeritteki KAMERA bölümü "çok kötü görünüyor". Görsel hata **macOS'a özgüydü**
+ve altından iki gerçek hata daha çıktı.
+
+| # | Kök sebep | Çözüm |
+|---|---|---|
+| 1 | **QSS'te "kenarlıkla üçgen çiz" numarası** (`::down-arrow`'a `width/height:0` + saydam yan kenarlıklar) macOS'ta çalışmıyor: Qt alt bileşeni kutunun tüm genişliğine gerdiği için ok, kutunun üstüne oturan **dev bir mavi kama** olarak çiziliyordu; yanında da native okun gri kalıntısı duruyordu. | Ok QSS'te tamamen kapatıldı (`image:none; border:none; width/height:0`), yeni **`SecimKutusu(QComboBox)`** sınıfı chevron'u `paintEvent`'te QPainter ile kendisi çiziyor — her platformda aynı, ölçeklenmez. Kutu stili `#tabs` ile eşitlendi (aynı zemin/yarıçap/kenarlık) → üst şeritteki üç grup tek tasarım dili. Açılır liste kutuya sıkışmıyor (`showPopup` içerik genişliğine açıyor), uzun kamera adları kesilmiyor. |
+| 2 | **"CANLI" yazısı kamera KAPALI iken de duruyordu** — gizlenen yalnızca kırmızı noktaydı, yazı ayrı widget'tı. | Nokta + yazı tek kapsülde (`#livebadge`); rozet bütün olarak görünür/gizlenir. Kapalıyken çözünürlük kutusu da soluk/devre dışı ("Çözünürlük" yazar, eski "—" değil). |
+| 3 | ⚠ **Kamera değiştirince/kapatınca uygulama ÇÖKÜYORDU** (SIGSEGV; kaza izi `CaptureDelegate grabImageUntilDate:`). `VideoThread` `okuyucu.cap = None` yapıp **hemen** `eski.release()` çağırıyordu; okuma thread'i o sırada **`cap.read()` içinde** olabiliyordu. macOS/AVFoundation'da sürücü bunu affetmiyor. | `KameraOkuyucu`'ya **okuma kilidi** eklendi: `read()` süren bir cap serbest bırakılamaz; bırakma işi artık `cap_degistir()`'in kendi işi (arayüz tarafındaki `release()` çağrıları silindi). Kilit 2 sn'de alınamazsa (kamera `read()` içinde takılmış) eski cap **bırakılmaz** — bir tutamak sızdırmak çökmekten iyidir. |
+| 4 | `closeEvent` yalnız `VideoThread`'i durduruyordu; **`InferenceThread` çalışırken yok ediliyordu** → Qt `abort` ediyordu (kapanışta çökme, SIGABRT). | Kapanışta inference ve kamera-tarama thread'leri de durdurulup bekleniyor. Doğrulandı: aç → kamerayı kapat → tekrar aç → kapan, **çıkış kodu 0**. |
+
+⚠ **Bu branch'te (`Affan-UI_Design-2026-09-20`) bir kapı testi KIRMIZI ve sebebi bizim
+değişikliğimiz değil:** `test_estopta_iki_eksen_de_oldugu_yerde_donar` testi E-Stop'ta **her iki
+eksenin de olduğu yerde donmasını** bekliyor, ama `kontrol.estop()` §5.1'deki karara göre
+**tilt'i 0° park konumuna indiriyor.** Test mi koda, kod mu teste uyacak — bu bir **güvenlik
+davranışı kararıdır**, ekip vermeli (§5.1'deki "⚠ şartname riski" notu da bu park hareketiyle
+ilgili). Diğer 18 kapı testi + `algi.py`/`nisan.py` kendi testleri geçiyor.
+
+### 12.4 APPLE TASARIM SİSTEMİ — arayüzün tamamı kite taşındı (20–21.09.2026)
+
+Takım kararı: arayüz baştan sona **Apple macOS görünümüne** oturtulacak; "AI ile
+üretilmiş" hissi veren rastgele renk/ölçü kalmayacak. Kaynak: takımın indirdiği
+**Apple macOS 27 UI Kit** (Sketch, ~110 MB). Sketch dosyası aslında ZIP+JSON'dur;
+değerler dosyadan **çıkarılarak** alındı, göz kararı yapılmadı.
+
+**Yeni dosya: `app/tasarim.py` — görünümün TEK KAYNAĞI.** Renk, tipografi, ölçü,
+yarıçap, cam efekti ve tüm QSS burada. `arayuz_qt.py` içinde artık elle yazılmış
+renk/punto yok; eski sabitler (`TXT`, `MAVI`, `RED`…) korundu ama hepsi buraya
+işaret ediyor (yüzlerce çağrı yerini değiştirmeden tek noktadan renk değişimi).
+
+| Konu | Kitten gelen değer |
+|---|---|
+| Vurgu rengi | `System Colors/Dark 8 Blue` **#0091FF** (`T.AKSAN` — tek satır değiştirilerek marka mavisine dönülebilir) |
+| Durum renkleri | Kırmızı #FF4245 · Yeşil #30D158 · Sarı #FFD600 · Camgöbeği #3CD3FE |
+| Metin hiyerarşisi | `Labels/Dark`: beyaz %100 / %55 / %25 / %10 — başka gri YOK |
+| Yüzeyler | `Fills/Dark`: beyaz %10/8/5/3/2. Kontrol zemini boşta %7, üstünde %10, basılı %16, pasif %3 |
+| Pencere | `Window Backgrounds/Dark` **#1E1E1E** (eski lacivert gradyan kaldırıldı) |
+| Tipografi | Apple metin rampası: Body 13 · Callout 12 · Subheadline 11 · Caption 10; SF Pro yoksa Inter/Segoe UI'ye düşer |
+| Boyut rampası | Mini 16 · Small 20 · **Regular 24** · Large 28 · XL 36 px. Köşe: 4/5/6 px; **Large ve XL KAPSÜL** (macOS 26 "Liquid Glass"in imzası) |
+| Group box | beyaz %3 dolgu, **12 px** yarıçap, **kenarlık yok** |
+| Segmented | kapsayıcı beyaz %8; seçili segment dolu vurgu rengi |
+| Anahtar (switch) | 54×24, tutamaç **32×20 kapsül** (artık daire değil), beyaz %85 |
+| Kaydırıcı | oluk 6 px beyaz %10, tutamaç 20 px beyaz daire |
+| Tooltip | #262626 %96, 11 px Medium |
+
+**Liquid Glass — dürüst sınır:** gerçek cam efekti arka planı BULANIKLAŞTIRIR;
+Qt stil sayfasında böyle bir özellik yok. Kitin reçetesindeki diğer katmanlarla
+taklit ediliyor: yarı saydam gövde + üst kenar ışık çizgisi + kapsül geometri.
+Yan yana koyunca fark görülür, tek başına bakınca aynı dili konuşur.
+
+**Bu iş sırasında bulunan ve düzeltilen GERÇEK hatalar:**
+1. **Kaydırıcılar açık gri kutu içinde duruyordu.** QSS'te yalnız alt bileşenler
+   (`::groove`, `::handle`) tanımlanmış, bileşenin kendi zemini tanımlanmamıştı →
+   macOS **yerel stili** arkaya gri dikdörtgen boyuyordu. Aynı sınıf hata
+   açılır listelerde de vardı (§12.3). Ders: *bir bileşenin alt parçasını
+   biçimlendiriyorsan gövdesini de biçimlendir.*
+2. **Satır içi `setStyleSheet` ÇOCUKLARA da miras geçiyor.** Otonom paneldeki
+   iki kart dolgusunu her etiket bir kez daha boyuyor, yarı saydam yüzeylerde
+   bantlar oluşuyordu. Kartlar nesne adına (`#altkart`) taşındı.
+3. **Ölü kod:** yasak-alan anahtarları için `setChecked` yoksa çalışacak yedek
+   dallar, custom çizilen anahtarın üstüne kutu boyuyordu — silindi.
+
+**Yeni kapı testi (`python app/tasarim.py`):** arayüzdeki her `setObjectName`
+için stil sayfasında karşılık var mı diye bakar. Karşılığı olmayan bileşeni Qt
+**yerel macOS stiliyle** çizer — koyu arayüzde açık gri bir kutu belirir, hata
+vermez, sadece çirkinleşir. Testin gerçekten kırmızıya düştüğü doğrulandı.
+
+⚠ **GÖRSEL DOĞRULAMA YARIM KALDI.** Manuel/Otonom/Aşama-1/ayar paneli ekranları
+gerçek macOS'ta ekran görüntüsüyle karşılaştırılarak 5 tur düzeltildi; ardından
+laptopun ekranı kapandığı için Qt pencere açamaz oldu (`no Qt platform plugin`)
+ve **son tur (açı kartı yüzeyi, ikinci ayar paneli, durum noktaları, uygulama
+fontu seçimi) yalnızca kod düzeyinde** yapıldı. Makine başına dönülünce
+`Baslat.command` ile açıp gözden geçirilmeli.
+
 ---
 
 ## 13. Kod sadeleştirme (30.07.2026) — ne silindi, neden

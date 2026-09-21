@@ -222,13 +222,14 @@ def ayar_guncelle(**kw):
                 _tracker_yeniden_kur = True
             AYAR[k] = yeni
 
-# BGR renkler (kutu cizimleri)
-RED = (32, 32, 191)      # dusman (yalniz A3)
-BLUE = (168, 88, 18)     # dost (yalniz A3) / belirsiz
-HEDEF = (0, 170, 255)    # A1/A2: taraf ayrimi yok, hepsi hedef
-YELLOW = (60, 200, 235)  # balon (nisan noktasi) / orta guven
-ORANGE = (0, 165, 255)   # belirsiz / onay bekliyor
-GREEN = (40, 200, 40)    # yuksek guven
+# BGR renkler (kutu cizimleri) — Apple "System Colors / Dark" ile AYNI degerler.
+# Arayuzdeki bir hedefin rengi ile canli goruntudeki kutusunun rengi ayni olmali;
+# iki ayri palet kullanmak operatorun kafasini karistirir. RGB -> BGR cevrildi.
+RED    = (69, 66, 255)     # #FF4245 — dusman (yalniz A3)
+BLUE   = (255, 145, 0)     # #0091FF — dost (yalniz A3) / belirsiz
+HEDEF  = (254, 211, 60)    # #3CD3FE — A1/A2: taraf ayrimi yok, hepsi hedef
+YELLOW = (0, 214, 255)     # #FFD600 — balon (nisan noktasi) / orta guven
+GREEN  = (88, 209, 48)     # #30D158 — yuksek guven
 
 CAM_SOURCE = os.environ.get("DERINMAVI_CAM", "").strip()
 
@@ -303,6 +304,11 @@ class KameraOkuyucu:
         self._kare = None
         self._sira = 0            # kac kare uretildi (ayni kareyi iki kez islememek icin)
         self._kilit = threading.Lock()
+        # Okuma kilidi: cap.read() SURERKEN baska bir thread'in ayni cap'i
+        # release() etmesini engeller. macOS'ta (AVFoundation) bu yaris dogrudan
+        # COKME uretiyordu — kamerayi degistirince/kapatinca uygulama SIGSEGV ile
+        # oluyordu (kaza izi: CaptureDelegate grabImageUntilDate:).
+        self._okuma_kilidi = threading.Lock()
         self._calis = True
         self.hata_sayaci = 0
         self._th = threading.Thread(target=self._dongu, daemon=True)
@@ -310,11 +316,12 @@ class KameraOkuyucu:
 
     def _dongu(self):
         while self._calis:
-            cap = self.cap
+            with self._okuma_kilidi:
+                cap = self.cap
+                ok, frame = cap.read() if cap is not None else (False, None)
             if cap is None:
                 time.sleep(0.01)
                 continue
-            ok, frame = cap.read()
             if not ok or frame is None:
                 self.hata_sayaci += 1
                 time.sleep(0.01)
@@ -333,18 +340,27 @@ class KameraOkuyucu:
             return self._kare, self._sira
 
     def cap_degistir(self, yeni_cap):
-        """Kamera degisiminde (arayuzden secim) okuyucuyu yeni cap'e baglar."""
+        """Kamera degisiminde (arayuzden secim) okuyucuyu yeni cap'e baglar.
+
+        ESKI cap'i BURADA serbest birakir: cagiran taraf release() ederse, okuma
+        thread'i o anda read() icinde olabilir ve surucu cokerdi. Kilit alinamazsa
+        (kamera read() icinde takilmis) eski cap serbest BIRAKILMAZ — bir kamera
+        tutamagi sizdirmak, cokmekten iyidir."""
+        alindi = self._okuma_kilidi.acquire(timeout=2.0)
+        eski = self.cap
+        self.cap = yeni_cap
         with self._kilit:
             self._kare = None
-        self.cap = yeni_cap
         self.hata_sayaci = 0
+        if alindi:
+            self._okuma_kilidi.release()
+            if eski is not None and eski is not yeni_cap:
+                eski.release()
 
     def kapat(self):
         self._calis = False
         self._th.join(timeout=1.0)
-        if self.cap is not None:
-            self.cap.release()
-            self.cap = None
+        self.cap_degistir(None)
 
 
 def _grab_gercek(cap):
@@ -406,7 +422,7 @@ def _ac_index(idx):
 # Telefonu webcam yapan uygulamalar (kamera darbogazinda pratik bir yedek — bkz. CLAUDE.md §12).
 TELEFON_UYG = {"droidcam": "DroidCam", "ivcam": "iVCam", "iriun": "Iriun"}
 # Dahili kamera ipuclari: "Integrated Camera" gibi acik adlar + laptop sensor kod adlari.
-DAHILI_IPUCU = ("integrated", "built-in", "facetime", "techfront", "ov97", "ov56", "ov27")
+DAHILI_IPUCU = ("integrated", "built-in", "facetime", "techfront", "macbook", "apple built-in", "ov97", "ov56", "ov27")
 
 
 def _guzel_kamera_adi(raw: str) -> str:
@@ -420,13 +436,15 @@ def _guzel_kamera_adi(raw: str) -> str:
     Tanimadigi cihaz HAM adiyla gecer — hicbir kamera listede kaybolmaz.
     (Bu ad yalnizca gorunustur; kamera secimi/karar mantigi index ile calisir.)"""
     low = raw.lower().replace("_", " ")
+    if "iphone" in low:
+        return "iPhone Kamerası"
     for anahtar, ad in TELEFON_UYG.items():
         if anahtar in low:
             return f"Telefon Kamerası · {ad}"
-    if "virtual" in low:
+    if "virtual" in low or "sanal" in low:
         return "Sanal Kamera"
     if any(k in low for k in DAHILI_IPUCU):
-        return "PC Kamerası"
+        return "MacBook Kamerası" if "macbook" in low or "facetime" in low else "PC Kamerası"
 
     # Harici/USB: teknik son ekleri atip marka adini birak.
     temizle = raw
@@ -490,16 +508,32 @@ def ac_kaynak(idx):
     return cap
 
 
-def _aday_indexler():
-    """Denenecek kamera index'lerini oncelik sirasiyla: USB/harici once, PC sona."""
+def _aday_indexler(include_phone=False):
+    """Denenecek kamera index'lerini oncelik sirasiyla: USB/harici once, PC/Dahili sona.
+    include_phone=False iken iPhone/Telefon kameralari otomatik taramaya ALINMAZ
+    (boylece acilista telefona bildirim/baglanti gitmez; yalnizca kullanici arayuzden iPhone secerse acilir).
+    """
     idxs = []
     qt_cams = kameralari_listele_qt()
     if qt_cams:
-        sirali = sorted(qt_cams, key=lambda c: 1 if "PC Kamerası" in c["name"] else 0)
+        uygun = []
+        for c in qt_cams:
+            n = c["name"].lower()
+            is_phone = "iphone" in n or "telefon" in n
+            if not is_phone or include_phone:
+                uygun.append(c)
+        # Oncelik: Varsayilan veya USB/Harici once, Dahili/PC en son
+        def _oncelik(c):
+            if c.get("is_default"):
+                return 0
+            n = c["name"]
+            if "PC" in n or "MacBook" in n or "Dahili" in n:
+                return 2
+            return 1
+        sirali = sorted(uygun, key=_oncelik)
         idxs = [c["index"] for c in sirali]
-    for i in range(4):   # QMediaDevices eksikse/bulamazsa tamamla
-        if i not in idxs:
-            idxs.append(i)
+    if not idxs:
+        idxs = [0]
     return idxs
 
 
@@ -531,8 +565,8 @@ def open_camera():
         cap = _ac_index(_cached_open)
         if cap is not None:
             return cap
-    # 3. iki fazli tarama: faz1 = tum indexler DSHOW, faz2 = tum indexler MSMF
-    adaylar = _aday_indexler()
+    # 3. iki fazli tarama: telefona acilista bildirim gitmemesi icin include_phone=False
+    adaylar = _aday_indexler(include_phone=False)
     for backend, ad in _BACKENDS:          # _BACKENDS = [DSHOW(hizli), MSMF(yavas)]
         for idx in adaylar:
             cap = _dene(idx, backend, ad)
@@ -1128,9 +1162,9 @@ def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
     # --- Sabit Merkez Nisangahi (Lazer referansi) ---
     h, w = frame.shape[:2]
     mcx, mcy = w // 2, h // 2
-    cv2.line(frame, (mcx - 20, mcy), (mcx + 20, mcy), (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.line(frame, (mcx, mcy - 20), (mcx, mcy + 20), (0, 255, 0), 2, cv2.LINE_AA)
-    cv2.circle(frame, (mcx, mcy), 3, (0, 255, 0), -1, cv2.LINE_AA)
+    cv2.line(frame, (mcx - 20, mcy), (mcx + 20, mcy), GREEN, 2, cv2.LINE_AA)
+    cv2.line(frame, (mcx, mcy - 20), (mcx, mcy + 20), GREEN, 2, cv2.LINE_AA)
+    cv2.circle(frame, (mcx, mcy), 3, GREEN, -1, cv2.LINE_AA)
 
     for bx in balonlar:
         x1, y1, x2, y2 = bx
