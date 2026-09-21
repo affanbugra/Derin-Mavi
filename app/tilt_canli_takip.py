@@ -114,7 +114,7 @@ def main(sure=10.0, baslangic=14.0, kayit_dizin=None, kp=None, gecikme=0.0, kd=N
             _, d_pitch = nisanci.adim((hx, hy), (w, h), simdi=simdi,
                                       hedef_yukseklik=abs(kutu[3] - kutu[1]))
             # ---- arayuz_qt._nisan_geldi aynasi (dikey) ----
-            if d_pitch is not None and simdi >= mesgul_ta and kol is not None:
+            if d_pitch and simdi >= mesgul_ta and kol is not None:   # 0.0 = eksen olu bolgede
                 tavan_hiz, tavan_ivme = P.HIZ_TABLO[hiz_seviye]
                 if son_t is not None:
                     tavan = tavan_hiz * min(0.2, simdi - son_t)

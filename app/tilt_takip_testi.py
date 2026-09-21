@@ -138,7 +138,7 @@ class Benzetim:
             d_yaw, d_pitch = self.nisanci.adim(
                 (KARE_W * 0.5, y), (KARE_W, KARE_H), simdi=self.saat,
                 hedef_yukseklik=HEDEF_KUTU_YUKSEKLIK)
-            if d_pitch is not None:
+            if d_pitch:                         # None / 0.0 = dikeye komut yok
                 self._nisan_geldi(d_pitch)
         return self.iz
 

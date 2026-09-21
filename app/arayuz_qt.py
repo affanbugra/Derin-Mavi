@@ -2530,7 +2530,10 @@ class MainWindow(QMainWindow):
         # tusuna ucuncu kez bastiginda kol henuz hareket halindeyse bile "3 adim
         # yukari" beklenir; olculene gore hesaplamak o basislari yutardi.
         tilt_taban = self.tilt_aci
-        if taban_olculen:
+        # d_tilt == 0: bu eksene komut YOK (nisan.adim eksen bazli olu bolge). Olculen
+        # aciya "yeniden oturtmak" bile karta yeni bir G yollar ve durmasi gereken
+        # namluyu kipirdatir — o yuzden taban degistirilmez, eksen oldugu gibi kalir.
+        if taban_olculen and d_tilt:
             olculen = getattr(getattr(self, "kontrol", None), "tilt_olculen", None)
             if olculen is not None:
                 tilt_taban = olculen

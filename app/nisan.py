@@ -237,6 +237,20 @@ class PDNisanci:
         # Guvenlik: tek komutta kacak aci gonderme.
         d_yaw = max(-self.maks_adim, min(self.maks_adim, d_yaw))
         d_pitch = max(-self.maks_adim, min(self.maks_adim, d_pitch))
+
+        # EKSEN BAZLI OLU BOLGE. Yukaridaki "merkezde" karari IKI ekseni birlikte
+        # ister (ates kapisi bunu kullanir, o yuzden boyle kalir). Ama komut ekseni
+        # tek tek kesilmeli: bir eksen yerlesmisken digeri yerlesmemisse, yerlesmis
+        # eksen her karede tespit kutusunun birkac piksellik oynamasini (ve elde
+        # tutulan hedefin titremesini) komut olarak surerdi. Sahada tam bu goruldu:
+        # pan motoru yokken yatay hata hic sifirlanmiyor, dolayisiyla olu bolge hic
+        # devreye girmiyordu; dikey hata 0-10 px iken 40 sn'de 141 komut gitti ve
+        # namlu 7.6-7.9 derece arasinda gidip geldi (26 dur-kalk). 0.0 = o eksene
+        # KOMUT YOK (arayuz o ekseni oldugu gibi birakir).
+        if abs(px) <= olu_x:
+            d_yaw = 0.0
+        if abs(py) <= olu_y:
+            d_pitch = 0.0
         return d_yaw, d_pitch
 
 
@@ -339,6 +353,20 @@ if __name__ == "__main__":
     n2.sifirla()
     dy_uzak, _ = n2.adim(kare_orta, (1920, 1080), simdi=1.0, hedef_yukseklik=70.0)
     assert dy_uzak is not None, "uzak hedefte 15 px hata icin komut URETILMELIYDI"
+
+    # 6f. ⭐ EKSEN BAZLI OLU BOLGE: yatay hata buyukken (pan henuz yerlesmemis ya da
+    #     pan motoru hic yok) dikeyde olu bolge icindeki kucuk hata KOMUT URETMEMELI.
+    #     Sahada tam tersi oluyordu ve namlu tespit gurultusunu surup titriyordu.
+    n3 = PDNisanci()
+    for t_, dy_px in ((1.0, 3.0), (1.07, -4.0), (1.13, 5.0), (1.2, -2.0)):
+        d_y, d_p = n3.adim((1920 * 0.5 + 400, 1080 * 0.5 + dy_px), (1920, 1080),
+                           simdi=t_, hedef_yukseklik=200.0)
+        assert d_y is not None and d_y > 0, "yatay hata icin komut uretilmeliydi"
+        assert d_p == 0.0, f"dikey olu bolge icinde komut uretildi: {d_p}"
+    #     ...ve tersi: dikey hata buyukse dikey komut normal uretilir
+    d_y, d_p = n3.adim((1920 * 0.5 + 400, 1080 * 0.5 + 200), (1920, 1080),
+                       simdi=1.3, hedef_yukseklik=200.0)
+    assert d_p is not None and d_p < 0, d_p
 
     # --- Kapali cevrim benzetimi: gimbal dondukce hedef kadrajda merkeze kayar ---
     KARE_SURESI = 0.07
