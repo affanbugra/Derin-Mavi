@@ -456,6 +456,50 @@ class TiltSurucu:
             self.kaynak = bulunan       # artik gercek port adi (arayuz bunu gosterir)
         self._ac_seri()
 
+    # ---- KARA KUTU ----
+    # Sahada otonom takip sirasinda kart TAMAMEN sustu (STATE3 yok, USB reset'e
+    # cevap yok) ve masada 5 dakikalik stres testiyle (komut deseni + sik yon
+    # degistiren gercek hareket) yeniden URETILEMEDI. Sebebi tahminle degil kayitla
+    # bulmak icin: gercek portta her calistirmada karta giden ve karttan gelen her
+    # satir zaman damgasiyla app/loglar/ altina yazilir. Kilitlenme olursa son
+    # satirlar, o an ne oldugunu gosterir.
+    # STATE3 her 10'da bir yazilir (saniyede 1); dosya saatte ~1-2 MB buyur.
+    KARA_KUTU_DIZIN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loglar")
+
+    def _kara_kutu_ac(self):
+        try:
+            os.makedirs(self.KARA_KUTU_DIZIN, exist_ok=True)
+            ad = f"tilt_{time.strftime('%Y%m%d_%H%M%S')}_{self.kaynak}.log"
+            self.kara_kutu_yolu = os.path.join(self.KARA_KUTU_DIZIN, ad)
+            # Satir tamponlu: uygulama coker ya da kapatilirsa son satirlar kaybolmasin.
+            self._kara_kutu = open(self.kara_kutu_yolu, "w", encoding="utf-8", buffering=1)
+            self._kk_t0 = time.time()
+            self._kk_state_sayac = 0
+            self._kk_sessiz = False
+            self._kara_kutu_yaz("--", f"oturum basladi, port {self.kaynak}")
+        except OSError:
+            self._kara_kutu = None          # kayit acilamazsa surucu yine calisir
+
+    def _kara_kutu_yaz(self, yon, metin):
+        if getattr(self, "_kara_kutu", None) is None:
+            return
+        try:
+            self._kara_kutu.write(f"{time.strftime('%H:%M:%S')} "
+                                  f"{time.time() - self._kk_t0:9.3f} {yon} {metin}\n")
+        except (OSError, ValueError):
+            self._kara_kutu = None
+
+    def _kara_kutu_sessizlik(self):
+        """Kart sustugu ANI ve geri geldigi ani kayda gecer."""
+        if getattr(self, "_kara_kutu", None) is None or self.durum is None:
+            return
+        sessiz = not self.taze
+        if sessiz != self._kk_sessiz:
+            self._kk_sessiz = sessiz
+            gecen = self._saat() - self.son_durum_t
+            self._kara_kutu_yaz("!!", f"KART SUSTU ({gecen:.2f} sn STATE3 yok)" if sessiz
+                                else "kart yeniden konusuyor")
+
     def _ac_seri(self):
         try:
             import serial              # pyserial — yalniz gercek portta gerekir
@@ -472,6 +516,7 @@ class TiltSurucu:
             baglanti.open()
             baglanti.reset_input_buffer()
             self.seri = baglanti
+            self._kara_kutu_ac()
         except Exception as e:
             self.hata = f"Tilt portu açılamadı ({self.kaynak}): {e}"
 
@@ -582,6 +627,10 @@ class TiltSurucu:
             return True
         if self.seri is None:
             return False
+        # H her 120 ms gider; kayda yazilsa dosyanin cogu H olurdu ve asil olaylar
+        # kaybolurdu. Yazma HATASI ise her zaman kaydedilir (asagida).
+        if satir != CANLI:
+            self._kara_kutu_yaz(">>", satir.strip())
         try:
             veri = satir.encode("ascii")
             if self.seri.write(veri) != len(veri):
@@ -589,10 +638,17 @@ class TiltSurucu:
             return True
         except Exception as e:
             self.hata = f"Tilt seri iletişim hatası: {e}"
+            self._kara_kutu_yaz("!!", f"YAZMA HATASI ({satir.strip()}): {e}")
             return False
 
     def _kart_yaziyor(self, s):
         self.durum_satiri = s
+        if s.startswith("STATE3,"):
+            self._kk_state_sayac = getattr(self, "_kk_state_sayac", 0) + 1
+            if self._kk_state_sayac % 10 == 0:
+                self._kara_kutu_yaz("<<", s)
+        else:
+            self._kara_kutu_yaz("<<", s)
         d = durum_coz(s)
         if d is not None:
             # ⚠ KART RESET ATTI MI? Firmware her acilista darbe sayacini 0 kabul eder
@@ -682,6 +738,7 @@ class TiltSurucu:
         self._hiz_bosalt()
         self._bosalt()
         self._oku()
+        self._kara_kutu_sessizlik()
         return self.ozet()
 
     def git(self, derece):
@@ -742,6 +799,12 @@ class TiltSurucu:
                 self.seri.close()
             except Exception:
                 pass
+            self._kara_kutu_yaz("--", "oturum kapandi")
+            try:
+                self._kara_kutu.close()
+            except Exception:
+                pass
+            self._kara_kutu = None
 
     def yeni_satirlar(self):
         yeni, self._yeni = self._yeni, []
