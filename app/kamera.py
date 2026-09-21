@@ -1,0 +1,247 @@
+"""Kamera — YALNIZ takılı HARİCİ kamera (USB-C). Takımın kuralı (22.09.2026):
+
+  * Laptopun kendi kamerası (Mac FaceTime / Windows "Integrated") KULLANILMAZ.
+  * Telefon (iPhone Süreklilik Kamerası, DroidCam…) ve sanal kameralar KULLANILMAZ.
+  * Harici kamera takılıysa onu aç; yoksa "Kamera bulunamadı" de. Sonradan
+    takılırsa kendiliğinden bağlanır, çıkarılırsa "bulunamadı"ya döner.
+
+NEDEN Qt, NEDEN OpenCV DEĞİL: eski kod kameraları Qt ile İSİMLERİYLE listeleyip
+(iPhone'u orada eliyordu) ama OpenCV ile SIRA NUMARASIYLA açıyordu. İki
+kütüphanenin sırası macOS'ta aynı değil — "iPhone hariç" seçilen numara OpenCV'de
+iPhone'a denk gelebiliyor, her açılışta telefona bağlantı isteği gidiyordu. Burada
+kamera, seçilen cihazın KENDİSİYLE açılır: elenen cihaza hiç dokunulmaz.
+
+Kareler numpy BGR olarak verilir (algı zinciri değişmedi); arayüz tarafı
+`oku(son_sira)` ile eskisiyle aynı arayüzü kullanır.
+"""
+import os
+import threading
+
+import cv2
+import numpy as np
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QImage
+from PySide6.QtMultimedia import (QCamera, QCameraDevice, QMediaCaptureSession,
+                                  QMediaDevices, QVideoSink)
+
+# Harici OLMAYAN kameralar isimden elenir. macOS adları sistem diline göre gelir
+# ("MacBook Air Kamerası", "iPhone Kamerası") — Türkçe/İngilizce ikisi de burada.
+# ⚠ Windows'ta bazı dahili kameralar harici USB kamerayla AYNI tip adla görünür
+#   ("USB2.0 HD UVC WebCam"). Böyle biri seçilirse adını buraya TEK satır eklemek yeter.
+HARICI_DEGIL = (
+    "macbook", "facetime", "imac", "built-in", "yerleşik",                 # Mac dahili
+    "iphone", "ipad", "continuity", "süreklilik", "desk view", "masaüstü görünümü",
+    "integrated", "internal", "dahili", "truevision", "easycamera",        # PC dahili
+    "ir camera", "kızılötesi",
+    "droidcam", "ivcam", "iriun", "camo", "epoccam",                       # telefon uyg.
+    "virtual", "sanal", "obs virtual", "manycam", "snap camera", "broadcast",  # sanal
+    # ⚠ Yalniz "obs" YAZILMAZ: gercek harici OBSBOT kamerayi da eler (test yakaladi).
+)
+
+# Test/tekrar için: DERINMAVI_CAM=dosya.mp4 veya rtsp://... (cihaz taramaz).
+DOSYA_KAYNAGI = os.environ.get("DERINMAVI_CAM", "").strip()
+
+
+def harici_mi(cihaz):
+    if cihaz.position() in (QCameraDevice.FrontFace, QCameraDevice.BackFace):
+        return False                    # telefon/tablet/laptop kasası kamerası
+    ad = cihaz.description().lower()
+    return not any(k in ad for k in HARICI_DEGIL)
+
+
+def harici_kameralar():
+    return [c for c in QMediaDevices.videoInputs() if harici_mi(c)]
+
+
+def en_yakin_format(cihaz, genislik, yukseklik, fps):
+    """Cihazın desteklediği formatlardan istenen çözünürlüğe en yakın olanı
+    (eşitlikte istenen FPS'i karşılayanı) seçer. Desteklenmeyen format ASLA
+    zorlanmaz — kamera kendi listesinden seçilir."""
+    formatlar = cihaz.videoFormats()
+    if not formatlar:
+        return None
+
+    def puan(f):
+        r = f.resolution()
+        return (abs(r.width() * r.height() - genislik * yukseklik),
+                0 if f.maxFrameRate() >= fps - 0.5 else 1,
+                -f.maxFrameRate())
+    return min(formatlar, key=puan)
+
+
+class Kamera(QObject):
+    """Tek kamera kaynağı. ANA (GUI) thread'de yaşar; kareyi `oku()` ile her
+    thread güvenle alır."""
+    durum = Signal(str, bool)            # mesaj, hata_mi
+    liste_degisti = Signal(list)         # [QCameraDevice] — yalnız harici olanlar
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._kilit = threading.Lock()
+        self._kare, self._sira = None, 0
+        self._kamera = None
+        self.secili_id = None
+        self.kapali = False              # operatör "Kapalı" seçti
+        self.istenen = (1280, 720, 30)   # (genişlik, yükseklik, fps)
+        self._dosya = None               # DERINMAVI_CAM dosya/URL okuyucusu
+
+        self._cihazlar = QMediaDevices(self)
+        self._cihazlar.videoInputsChanged.connect(self._liste_guncelle)
+        self._oturum = QMediaCaptureSession(self)
+        self._sink = QVideoSink(self)
+        self._oturum.setVideoSink(self._sink)
+        self._sink.videoFrameChanged.connect(self._kare_geldi)
+
+    # ---- yaşam döngüsü ----
+    def baslat(self):
+        if DOSYA_KAYNAGI:
+            self._dosya = _DosyaOkuyucu(DOSYA_KAYNAGI, self._kare_koy)
+            self.durum.emit(f"Kaynak: {DOSYA_KAYNAGI}", False)
+            self.liste_degisti.emit([])          # secici "dosya" modunu gostersin
+            return
+        self._liste_guncelle()
+
+    @property
+    def dosya_adi(self):
+        return os.path.basename(DOSYA_KAYNAGI) if self._dosya is not None else None
+
+    @property
+    def aktif(self):
+        return self._kamera is not None or self._dosya is not None
+
+    def _liste_guncelle(self):
+        """Kamera takıldı/çıkarıldı. Açık kamera hâlâ varsa dokunma; yoksa ilk
+        harici kamerayı aç; hiç yoksa 'bulunamadı' de."""
+        liste = harici_kameralar()
+        self.liste_degisti.emit(liste)
+        if self._dosya is not None or self.kapali:
+            return
+        if self._kamera is not None and self.secili_id in [bytes(c.id()) for c in liste]:
+            return
+        if liste:
+            self.ac(liste[0])
+        else:
+            self._durdur()
+            self.durum.emit("Kamera bulunamadı — harici kamera takılı değil", True)
+
+    def ac(self, cihaz):
+        self._durdur()
+        self.kapali = False
+        kamera = QCamera(cihaz, self)
+        fmt = en_yakin_format(cihaz, *self.istenen)
+        if fmt is not None:
+            kamera.setCameraFormat(fmt)
+        kamera.errorOccurred.connect(
+            lambda _hata, metin: self.durum.emit(f"Kamera hatası: {metin}", True))
+        self._oturum.setCamera(kamera)
+        kamera.start()
+        self._kamera = kamera
+        self.secili_id = bytes(cihaz.id())
+        r = fmt.resolution() if fmt is not None else None
+        ek = f" · {r.width()}×{r.height()}" if r is not None else ""
+        self.durum.emit(f"Kamera açıldı: {cihaz.description()}{ek}", False)
+
+    def kapat(self):
+        self.kapali = True
+        self._durdur()
+        self.durum.emit("Kamera kapatıldı", False)
+
+    def yeniden_ac(self):
+        """Çözünürlük/FPS değişince seçili kamerayı yeni formatla açar."""
+        for c in harici_kameralar():
+            if bytes(c.id()) == self.secili_id:
+                self.ac(c)
+                return
+
+    def secili_cihaz(self):
+        for c in harici_kameralar():
+            if bytes(c.id()) == self.secili_id:
+                return c
+        return None
+
+    def _durdur(self):
+        if self._kamera is not None:
+            self._kamera.stop()
+            self._oturum.setCamera(None)
+            self._kamera.deleteLater()
+            self._kamera = None
+        with self._kilit:
+            self._kare = None
+
+    def durdur(self):
+        """Uygulama kapanırken."""
+        self._durdur()
+        if self._dosya is not None:
+            self._dosya.kapat()
+
+    # ---- kareler ----
+    def _kare_geldi(self, kare):
+        img = kare.toImage()
+        if img.isNull():
+            return
+        img = img.convertToFormat(QImage.Format_BGR888)
+        w, h, satir = img.width(), img.height(), img.bytesPerLine()
+        dizi = np.frombuffer(img.constBits(), np.uint8, count=satir * h)
+        self._kare_koy(dizi.reshape(h, satir)[:, :w * 3].reshape(h, w, 3).copy())
+
+    def _kare_koy(self, bgr):
+        with self._kilit:
+            self._kare = bgr
+            self._sira += 1
+
+    def oku(self, son_sira=None):
+        """En taze kare: (kare, sira). Yeni kare yoksa (None, sira)."""
+        with self._kilit:
+            if self._kare is None or (son_sira is not None and self._sira == son_sira):
+                return None, self._sira
+            return self._kare, self._sira
+
+
+class _DosyaOkuyucu:
+    """DERINMAVI_CAM ile verilen video dosyası / akış (kamera taramasına dokunmaz).
+    Dosya bitince başa sarar — kamerasız test için."""
+
+    def __init__(self, kaynak, koy):
+        self._cap = cv2.VideoCapture(kaynak)
+        self._koy = koy
+        self._calis = True
+        self._fps = self._cap.get(cv2.CAP_PROP_FPS) or 30.0
+        threading.Thread(target=self._dongu, daemon=True).start()
+
+    def _dongu(self):
+        import time
+        while self._calis:
+            ok, kare = self._cap.read()
+            if not ok:
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                time.sleep(0.05)
+                continue
+            self._koy(kare)
+            time.sleep(1.0 / self._fps)
+
+    def kapat(self):
+        self._calis = False
+
+
+# =====================================================================
+#  Kendi kendini test (kamera AÇMAZ — yalnız eleme kuralı)
+# =====================================================================
+if __name__ == "__main__":
+    class _Sahte:
+        def __init__(self, ad, konum=QCameraDevice.UnspecifiedPosition):
+            self._ad, self._konum = ad, konum
+        def description(self): return self._ad
+        def position(self): return self._konum
+
+    elenmeli = ["MacBook Air Kamerası", "FaceTime HD Camera", "iPhone Kamerası",
+                "Affan's iPhone Camera", "Masaüstü Görünümü Kamerası", "Integrated Camera",
+                "HP TrueVision HD Camera", "OBS Virtual Camera", "DroidCam Source 3",
+                "Integrated IR Camera"]
+    kalmali = ["OBSBOT Meet SE StreamCamera", "Logitech BRIO", "HD Pro Webcam C920",
+               "USB2.0 HD UVC WebCam", "Arducam OV9281 USB Camera"]
+    for ad in elenmeli:
+        assert not harici_mi(_Sahte(ad)), f"elenmeliydi: {ad}"
+    for ad in kalmali:
+        assert harici_mi(_Sahte(ad)), f"harici sayılmalıydı: {ad}"
+    assert not harici_mi(_Sahte("Camera", QCameraDevice.FrontFace))
+    print("kamera testleri OK — dahili/telefon/sanal eleme, harici kabul")

@@ -17,6 +17,7 @@ import arayuz_qt as A
 import gamepad as gamepad_mod
 import kontrol as kontrol_mod
 import protokol as P
+import bolge as B
 
 
 class SahteEtiket:
@@ -72,14 +73,13 @@ class SahteGamepad:
     dondurur ve `bagli` False'a duser (gercek modulun kopma davranisi)."""
 
     def __init__(self, pan=0.0, tilt=0.0, ates=False, estop=False, merkez=False,
-                 hiz_yukari=False, hiz_asagi=False, kopuk=False):
+                 kopuk=False):
         self.ad = "Sahte Pad"
         self._kopuk = kopuk
         self.bagli = not kopuk
         self._d = gamepad_mod.Durum()
         self._d.pan, self._d.tilt = pan, tilt
         self._d.ates, self._d.estop, self._d.merkez = ates, estop, merkez
-        self._d.hiz_yukari, self._d.hiz_asagi = hiz_yukari, hiz_asagi
 
     def oku(self):
         if self._kopuk:
@@ -113,6 +113,9 @@ class SahteTimer:
 class SahtePencere:
     """MainWindow'un hareket/ates/hiz kapilari icin ihtiyac duydugu asgari yuzey."""
     _aci_hareket = A.MainWindow._aci_hareket
+    _hareket_kilitli = A.MainWindow._hareket_kilitli   # E-Stop kilidi: TEK tanim
+    _aci_reset = A.MainWindow._aci_reset               # [R] / gamepad Y — merkeze al
+    _dpad_press = A.MainWindow._dpad_press
     _ates_bas = A.MainWindow._ates_bas
     _ates_kes = A.MainWindow._ates_kes
     _ates_kisayolu = A.MainWindow._ates_kisayolu
@@ -123,14 +126,14 @@ class SahtePencere:
     _esp_goster = A.MainWindow._esp_goster      # gercegi: lazer + donanimsal E-Stop yansimasi
     _esp_yokla = A.MainWindow._esp_yokla
     _estop_konum_uygula = A.MainWindow._estop_konum_uygula
-    _hiz_sec = A.MainWindow._hiz_sec
+    _tilt_goster = A.MainWindow._tilt_goster       # yukselis etiketi + arac ikonu tek kapi
+    _pan_goster = A.MainWindow._pan_goster         # azimut etiketi + ust gorunus ikonu tek kapi
     _tekrar_tik = A.MainWindow._tekrar_tik
     _tekrar_durdur = A.MainWindow._tekrar_durdur
     YON_TABLO = A.MainWindow.YON_TABLO
-    _hiz_bilgi_yaz = A.MainWindow._hiz_bilgi_yaz
     _lazer_bilgi_yaz = A.MainWindow._lazer_bilgi_yaz
     _lazer_guc_degisti = A.MainWindow._lazer_guc_degisti
-    _step_btn_stil_guncelle = A.MainWindow._step_btn_stil_guncelle
+    _lazer_taslak_ayarla = A.MainWindow._lazer_taslak_ayarla
 
     def _ci(self, ad, renk, alt):               # alt cubuk segmenti — testte gorsel yok
         pass
@@ -141,19 +144,14 @@ class SahtePencere:
         self.pan_aci = 0.0                # ekran (0-360 sarmali)
         self.pan_ham = 0.0                # karta giden sarmasiz azimut
         self.tilt_aci = 0.0
-        self.max_tilt_limit = 60.0
-        self.pan_yasak_aktif = self.tilt_yasak_aktif = self.atis_yasak_aktif = False
-        self.pan_yasak_min = self.pan_yasak_max = 0.0
-        self.tilt_yasak_min = self.tilt_yasak_max = 0.0
-        self.atis_pan_min = self.atis_pan_max = 0.0
+        self.max_tilt_limit = P.TILT_MAX
+        self.bolge = B.Bolgeler()          # hareket/atis pencereleri (hepsi kapali)
         self.pan_val_lbl = SahteEtiket()
         self.tilt_val_lbl = SahteEtiket()
         self.bolge_status = SahteEtiket()
         self.sb_msg = SahteEtiket()
         self.fire_btn = SahteButon()
         self.hiz_seviye = P.HIZ_VARSAYILAN
-        self.hiz_bilgi = SahteEtiket()
-        self.hiz_btns = {s: SahteButon() for s in P.HIZ_SEVIYELER}
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
         self.lazer_durum = SahteEtiket()
         self.lazer_sl = SahteKaydirici(P.LAZER_GUC_VARSAYILAN)
@@ -162,7 +160,6 @@ class SahtePencere:
         self._son_tekrar_t = 0.0
         self._tekrar_gecikme = SahteTimer()
         self._tekrar_timer = SahteTimer()
-        self.btn_center = SahteButon()       # gamepad "merkez" kapisi bunun enabled'ina bakar
         self.gamepad = SahteGamepad()
         self._gp_son_t = time.time()
         self._gp_tarama = 0
@@ -214,28 +211,30 @@ def test_ates_sirasinda_yasak_alan():
     `_ates_bas` yalnizca butona basildigi ani denetler; bolgeye ates surerken
     girmek de engellenmeli (sartname: atisa-yasak alan)."""
     w = SahtePencere()
-    w.atis_yasak_aktif = True
-    w.atis_pan_min, w.atis_pan_max = 40.0, 50.0
+    w.bolge.atis_pan = B.Pencere(True, -40.0, 40.0)    # atis yalniz on ±40°
     w.fire_btn.setChecked(True)
     w.kontrol.ates(True)
     assert w.kontrol.durum["lazer"] is True
 
-    w._aci_hareket(30.0, 0.0)                 # guvenli bolge -> ates surer
+    w._aci_hareket(30.0, 0.0)                 # pencere icinde -> ates surer
     assert w.kontrol.durum["lazer"] is True, "guvenli bolgede ates kesilmemeliydi"
 
-    w._aci_hareket(15.0, 0.0)                 # pan 45 -> YASAK bolge
+    w._aci_hareket(15.0, 0.0)                 # pan 45 -> pencere DISI (yasak)
     assert w.fire_btn.isChecked() is False, "ates butonu acik kaldi"
     assert w.kontrol.durum["lazer"] is False, "yasak bolgede lazer sonmedi"
 
 
 def test_harekete_yasak_alan():
-    """Harekete yasak aci araligina giren komut UYGULANMAMALI (aci da degismemeli)."""
+    """Hareket penceresinin DISINA cikilamaz: komut sinirda KIRPILIR, kart hedefi
+    de ayni sinirda kalir (sartname §4.2 — yasak bolgeye donmesine izin verilmez)."""
     w = SahtePencere()
-    w.pan_yasak_aktif = True
-    w.pan_yasak_min, w.pan_yasak_max = 100.0, 140.0
-    assert w._aci_hareket(90.0, 0.0) is True and w.pan_aci == 90.0
-    assert w._aci_hareket(20.0, 0.0) is False, "yasak araliga girildi"
-    assert w.pan_aci == 90.0, w.pan_aci
+    w.bolge.hareket_pan = B.Pencere(True, -90.0, 90.0)
+    assert w._aci_hareket(80.0, 0.0) is True and w.pan_aci == 80.0
+    w._aci_hareket(20.0, 0.0)                              # 100'e gitmek isterdi
+    assert w.pan_ham == 90.0 and w.kontrol.pan_hedef == 90.0, (w.pan_ham, w.kontrol.pan_hedef)
+    # sinirda: daha ileri gitmek ENGELLENIR, geri donmek serbest
+    assert w._aci_hareket(5.0, 0.0) is False and w.pan_ham == 90.0
+    assert w._aci_hareket(-10.0, 0.0) is True and w.pan_ham == 80.0
 
 
 def test_estop_hareketi_keser():
@@ -244,7 +243,7 @@ def test_estop_hareketi_keser():
     w = SahtePencere()
     # Kamera thread'i CALISTIRILMAZ; yalnizca `_aci_hareket`in baktigi tip + estop
     # alani gerekiyor (isinstance kontrolu bilincli: bkz. _aci_hareket B2 notu).
-    w.thread = A.VideoThread(None, None)
+    w.thread = A.VideoThread(None, None, None)
     w.thread.estop = True
     assert w._aci_hareket(0.0, 5.0) is False
     assert w.tilt_aci == 0.0 and w.kontrol.mock.tilt_hedef == 0.0
@@ -254,25 +253,12 @@ def test_estop_hareketi_keser():
     assert w.tilt_aci == 5.0 and w.kontrol.mock.tilt_hedef == 5.0
 
 
-def test_hiz_duzeyi_karta_gider():
-    """Secilen motor hiz duzeyi karta S (tavan hiz) + A (ivme) olarak gitmeli."""
+def test_sabit_hiz_duzeyi_karta_gider():
+    """Motor hizi arayuzde SECILMEZ (22.09); karta sabit kademe S (tavan hiz) + A
+    (ivme) olarak gider. Basili tutma / gamepad / otonom hiz siniri da buna dayanir."""
     w = SahtePencere()
+    assert w.hiz_seviye == P.HIZ_VARSAYILAN
     assert (w.kontrol.mock.max_hiz, w.kontrol.mock.ivme) == P.HIZ_TABLO[P.HIZ_VARSAYILAN]
-
-    w._hiz_sec(P.H_HIZLI)
-    assert w.hiz_seviye == P.H_HIZLI and w.kontrol.hiz == P.H_HIZLI
-    assert w.hiz_btns[P.H_HIZLI].isChecked() and not w.hiz_btns[P.H_NORMAL].isChecked()
-    assert (w.kontrol.mock.max_hiz, w.kontrol.mock.ivme) == P.HIZ_TABLO[P.H_HIZLI]
-    assert w.kontrol.mock.kayit[-2:] == ["S75.0", "A200.0"], w.kontrol.mock.kayit[-2:]
-
-    w._hiz_sec(P.H_YAVAS)                     # hassas nisan duzeyine in
-    assert (w.kontrol.mock.max_hiz, w.kontrol.mock.ivme) == P.HIZ_TABLO[P.H_YAVAS]
-
-    # Hiz degisimi hedefi BOZMAMALI (takip surerken kademe degistirilebilmeli)
-    w._aci_hareket(30.0, 10.0)
-    hedef = (w.kontrol.mock.pan_hedef, w.kontrol.mock.tilt_hedef)
-    w._hiz_sec(P.H_NORMAL)
-    assert (w.kontrol.mock.pan_hedef, w.kontrol.mock.tilt_hedef) == hedef
 
 
 def test_kart_disaridan_durdurulursa_ates_birakilir():
@@ -437,8 +423,7 @@ def test_basili_tutma_motor_hizini_asmaz():
     Tik başına açı = seçili kademenin derece/sn'si × geçen süre. Sabit adım (örn. her
     50 ms'de 5° = 100°/s) gönderilseydi hedef motordan hızlı ilerler, tuş bırakıldığında
     gimbal hedefe yetişmek için dönmeye devam ederdi — kullanıcı "durmuyor" derdi."""
-    w = SahtePencere()
-    w._hiz_sec(P.H_NORMAL)                       # 40°/s
+    w = SahtePencere()                           # sabit kademe: Normal, 40°/s
     w._basili_yonler.add("right")
     w._son_tekrar_t = time.time() - 0.5          # 0.5 sn geçmiş say
     w._tekrar_tik()
@@ -453,14 +438,6 @@ def test_basili_tutma_motor_hizini_asmaz():
     w._tekrar_tik()
     assert w.pan_aci > once_pan and w.tilt_aci > once_tilt, (w.pan_aci, w.tilt_aci)
 
-    # Yavaş kademede aynı sürede daha az yol
-    w2 = SahtePencere()
-    w2._hiz_sec(P.H_YAVAS)                       # 15°/s
-    w2._basili_yonler.add("right")
-    w2._son_tekrar_t = time.time() - 0.1
-    w2._tekrar_tik()
-    assert 0 < w2.pan_aci < w.pan_aci, (w2.pan_aci, w.pan_aci)
-
 
 def test_l_kisayolu_ates_kapisindan_gecer():
     """[L] tuşu ATEŞ butonuyla BİREBİR aynı davranmalı — kendi yolunu açmamalı.
@@ -468,7 +445,7 @@ def test_l_kisayolu_ates_kapisindan_gecer():
     Kısayolun butondan fazla yetkisi olamaz: E-Stop'ta buton kilitliyse [L] de
     geçmemeli, yoksa şartnamenin E-Stop'u klavyeden aşılabilir olurdu (Yetenek 4)."""
     w = SahtePencere()
-    w.thread = A.VideoThread(None, None)
+    w.thread = A.VideoThread(None, None, None)
 
     w._ates_kisayolu()                      # aç
     assert w.fire_btn.isChecked() and w.kontrol.mock.lazer is True
@@ -485,8 +462,7 @@ def test_l_kisayolu_ates_kapisindan_gecer():
     # Atışa yasak bölgede de reddedilmeli (ateşin tek kapısı ortak)
     w.thread.estop = False
     w.fire_btn.setEnabled(True)
-    w.atis_yasak_aktif = True
-    w.atis_pan_min, w.atis_pan_max = 0.0, 30.0      # pan 0 → yasak
+    w.bolge.atis_pan = B.Pencere(True, 40.0, 60.0)   # pan 0 -> pencere DISI (yasak)
     w._ates_kisayolu()
     assert w.kontrol.mock.lazer is False, "yasak bölgede [L] ile ateş açıldı"
 
@@ -498,11 +474,10 @@ def test_gamepad_ayni_kapilardan_gecer():
     B1). Gamepad üçüncü giriş; hareket `_aci_hareket`, ateş `_ates_bas`, merkez
     `_aci_reset` üzerinden gitmezse aynı sınıf hata geri gelir."""
     w = SahtePencere()
-    w.thread = A.VideoThread(None, None)
+    w.thread = A.VideoThread(None, None, None)
 
     # --- HAREKET: analog çubuk motor hızını AŞMAMALI (basılı tutmayla aynı matematik)
-    w._hiz_sec(P.H_NORMAL)                       # 40°/s
-    w.gamepad = SahteGamepad(pan=1.0)            # çubuk sonuna kadar sağda
+    w.gamepad = SahteGamepad(pan=1.0)            # sabit kademe: 40°/s            # çubuk sonuna kadar sağda
     w._gp_son_t = time.time() - 0.1              # 0.1 sn geçmiş say
     w._gamepad_tik()
     assert 0 < w.pan_aci <= 4.1, w.pan_aci       # 0.1 sn x 40°/s = 4°
@@ -542,24 +517,11 @@ def test_gamepad_ayni_kapilardan_gecer():
     assert w.kontrol.mock.lazer is False, "gamepad ateşi kesmedi"
 
     # --- Atışa yasak bölgede ateş reddedilmeli (ortak kapı)
-    w.atis_yasak_aktif = True
-    w.atis_pan_min, w.atis_pan_max = 0.0, 360.0
+    w.bolge.atis_pan = B.Pencere(True, 100.0, 110.0)  # pan 0 -> pencere DISI
     w.gamepad = SahteGamepad(ates=True)
     w._gamepad_tik()
     assert w.kontrol.mock.lazer is False, "yasak bölgede gamepad ile ateş açıldı"
-    w.atis_yasak_aktif = False
-
-    # --- Hız kademesi
-    w._hiz_sec(P.H_YAVAS)
-    w.gamepad = SahteGamepad(hiz_yukari=True)
-    w._gamepad_tik()
-    assert w.hiz_seviye == P.H_NORMAL, w.hiz_seviye
-    w.gamepad = SahteGamepad(hiz_asagi=True)
-    w._gamepad_tik()
-    assert w.hiz_seviye == P.H_YAVAS
-    w.gamepad = SahteGamepad(hiz_asagi=True)     # en alt kademede daha aşağı inmemeli
-    w._gamepad_tik()
-    assert w.hiz_seviye == P.H_YAVAS
+    w.bolge.atis_pan.aktif = False
 
     # --- Cihaz koparsa arayüz kilitlenmemeli (istisna sızmamalı)
     w.gamepad = SahteGamepad(kopuk=True)
@@ -641,7 +603,7 @@ def test_ates_kapaliyken_tazeleme_gitmez():
 def test_basili_tutma_estopta_kesilir():
     """E-Stop sırasında tuş basılı kalsa bile tekrar durmalı (Yetenek 3)."""
     w = SahtePencere()
-    w.thread = A.VideoThread(None, None)
+    w.thread = A.VideoThread(None, None, None)
     w._basili_yonler.add("right")
     w._son_tekrar_t = time.time() - 0.1
     w._tekrar_timer.start()
@@ -653,13 +615,121 @@ def test_basili_tutma_estopta_kesilir():
     assert not w._basili_yonler
 
 
+def test_estopta_r_merkeze_almaz():
+    """[R] (ve gamepad Y) E-Stop'ta HICBIR sey yapmamali.
+
+    Eskiden bu koruma yalniz MERKEZ butonunun devre disi kalmasina dayaniyordu;
+    klavye yolu (_dpad_press -> _aci_reset) onu atliyordu: E-Stop'ta ekrandaki acilar
+    sifirlanir, karta 'eve don' giderdi. Buton kaldirilinca koruma _aci_reset'in
+    kendi icine alindi."""
+    w = SahtePencere()
+    w._aci_hareket(40.0, 20.0)
+    w.kontrol.estop(True)
+    once = (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef)
+    w._dpad_press("center")                              # klavyede [R]
+    assert (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef) == once, "E-Stop'ta R merkeze aldi"
+    # E-Stop kalkinca R yine calisir
+    w.kontrol.estop(False)
+    w._dpad_press("center")
+    assert w.pan_ham == 0.0 and w.tilt_aci == 0.0
+
+
+def test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar():
+    """Aci karolarindaki kirmizi isik ARAYUZ tahmini degil, kontrol katmaninin
+    (kartla eslenmis) lazer durumudur: ates -> yanar, kes / E-Stop -> soner."""
+    class SahteKaro:
+        lazer_acik = False
+        def lazer_ayarla(self, acik):
+            self.lazer_acik = acik
+    w = SahtePencere()
+    w.arac_ikon, w.arac_yon_ikon = SahteKaro(), SahteKaro()
+    w._lazer_bilgi_yaz()
+    assert not w.arac_ikon.lazer_acik, "lazer kapaliyken isik yandi"
+    w.fire_btn.setChecked(True)                           # ATES (mevcut testlerle ayni yol)
+    w._esp_goster(w.kontrol.ates(True))
+    assert w.arac_ikon.lazer_acik and w.arac_yon_ikon.lazer_acik, "ates var, isik yok"
+    w._esp_goster(w.kontrol.estop(True))                  # E-Stop lazeri keser
+    assert not w.arac_ikon.lazer_acik, "E-Stop sonrasi isik hala yaniyor"
+
+
+def test_dikey_hareket_penceresi_kullanici_ornegi():
+    """Kullanicinin ornegi: dikey pencere fiziksel −20…+20 (ekranda 10…50).
+    Gimbal bu araligin disina CIKAMAZ; mekanik tavan (0…60) her zaman gecerli."""
+    w = SahtePencere()
+    w._aci_hareket(0.0, 30.0)                              # fiziksel 0 (yere paralel)
+    w.bolge.hareket_tilt = B.Pencere(True, -20.0, 20.0)
+    w._aci_hareket(0.0, 40.0)                              # +40 isterdi
+    assert w.tilt_aci == 50.0 and w.kontrol.tilt_hedef == 50.0, w.tilt_aci
+    w._aci_hareket(0.0, -60.0)                             # asagi dibe isterdi
+    assert w.tilt_aci == 10.0, w.tilt_aci
+    # pencere kapaliyken bile mekanik tavan asilamaz
+    w.bolge.hareket_tilt.aktif = False
+    w._aci_hareket(0.0, 500.0)
+    assert w.tilt_aci == P.TILT_MAX == 60.0, w.tilt_aci
+
+
+def test_yatay_pencere_arkadan_dolanilamaz():
+    """Yatayda fiziksel sinir yok (360°) ama pencere varken gimbal arkadan dolanip
+    yasak bolgeye GECEMEZ — pan sarmasiz hesaplanir."""
+    w = SahtePencere()
+    w.bolge.hareket_pan = B.Pencere(True, -30.0, 30.0)
+    for _ in range(20):                                     # saga israrla basmak
+        w._aci_hareket(10.0, 0.0)
+    assert w.pan_ham == 30.0, w.pan_ham
+    for _ in range(20):                                     # sola israrla basmak
+        w._aci_hareket(-10.0, 0.0)
+    assert w.pan_ham == -30.0 and w.pan_aci == 330.0, (w.pan_ham, w.pan_aci)
+
+
+def test_dikey_atis_penceresi_ates_keser():
+    """Atis penceresi dikeyde de gecerli: namlu pencereden cikinca ates KESILIR."""
+    w = SahtePencere()
+    w._aci_hareket(0.0, 30.0)                              # fiziksel 0
+    w.bolge.atis_tilt = B.Pencere(True, -10.0, 10.0)
+    w.fire_btn.setChecked(True)
+    w.kontrol.ates(True)
+    w._aci_hareket(0.0, 5.0)                               # fiziksel +5: icerde
+    assert w.kontrol.durum["lazer"] is True
+    w._aci_hareket(0.0, 10.0)                              # fiziksel +15: DISARIDA
+    assert w.kontrol.durum["lazer"] is False, "dikey atis penceresi disinda lazer yandi"
+
+
+def test_lazer_gucu_onaysiz_degismez():
+    """Lazer sayfasi TASLAK uzerinde calisir: kaydirici/kademe ve 'Kaydet' karta
+    HICBIR SEY gondermez; yalniz onay ('Değiştir') gonderir. ✕ taslagi atar."""
+    w = SahtePencere()
+    w.lazer_sl = SahteKaydirici(P.LAZER_GUC_VARSAYILAN)
+    w._lazer_taslak_ayarla(70)
+    assert w.lazer_guc == P.LAZER_GUC_VARSAYILAN == w.kontrol.mock.lazer_guc, "taslak karta gitti"
+    w._lazer_guc_degisti(w.lazer_taslak)                    # 'Değiştir' = tek uygulama kapisi
+    assert w.lazer_guc == 70 == w.kontrol.mock.lazer_guc
+
+
+def test_odunc_kapilar_gercek_pencerede_de_metot():
+    """SahtePencere kapilari MainWindow'dan ODUNC alir. Bir metot gercek sinifta
+    yanlislikla @staticmethod/@classmethod olursa sinif uzerinden okunan duz fonksiyon
+    SahtePencere'de normal calisir — testler YESIL kalir ama gercek pencerede cagri
+    patlar. 22.09'da tam bu oldu: `_aci_hareket` ustune sahipsiz bir @staticmethod
+    yapismisti; klavye, D-pad, gamepad ve otonom hareketin HEPSI calismiyordu ve hicbir
+    test gormedi. Bu test o acigi kapatir."""
+    import inspect
+    bozuk = []
+    for ad, deger in vars(SahtePencere).items():
+        if not callable(deger) or ad.startswith("__"):
+            continue
+        gercek = inspect.getattr_static(A.MainWindow, ad, None)
+        if isinstance(gercek, (staticmethod, classmethod)):
+            bozuk.append(ad)
+    assert not bozuk, f"gercek pencerede metot OLMAYAN kapilar: {bozuk}"
+
+
 if __name__ == "__main__":
     test_ekran_aci_kart_hedefi_ayni()
     test_azimut_sarmasiz_gider()
     test_ates_sirasinda_yasak_alan()
     test_harekete_yasak_alan()
     test_estop_hareketi_keser()
-    test_hiz_duzeyi_karta_gider()
+    test_sabit_hiz_duzeyi_karta_gider()
     test_kart_disaridan_durdurulursa_ates_birakilir()
     test_donanim_butonu_yazilimdan_kaldirilamaz()
     test_kart_reseti_yakalanir()
@@ -673,6 +743,13 @@ if __name__ == "__main__":
     test_ates_tazelemesi_kesilirse_lazer_soner()
     test_ates_kapaliyken_tazeleme_gitmez()
     test_basili_tutma_estopta_kesilir()
+    test_estopta_r_merkeze_almaz()
+    test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar()
+    test_dikey_hareket_penceresi_kullanici_ornegi()
+    test_yatay_pencere_arkadan_dolanilamaz()
+    test_dikey_atis_penceresi_ates_keser()
+    test_lazer_gucu_onaysiz_degismez()
+    test_odunc_kapilar_gercek_pencerede_de_metot()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "

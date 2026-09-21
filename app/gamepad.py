@@ -56,8 +56,6 @@ if PYGAME_VAR:
     CB_ATES = pygame.CONTROLLER_BUTTON_A                # atesi ac/kes (ATES butonuyla ayni)
     CB_MERKEZ = pygame.CONTROLLER_BUTTON_Y              # merkeze al (0°, 0°)
     CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # ACIL DURDUR / DEVAM
-    CB_HIZ_ASAGI = pygame.CONTROLLER_BUTTON_LEFTSHOULDER
-    CB_HIZ_YUKARI = pygame.CONTROLLER_BUTTON_RIGHTSHOULDER
     CB_EKSEN_PAN = pygame.CONTROLLER_AXIS_LEFTX
     CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_LEFTY
     # GameController'da D-pad ayri bir "hat" degil, dort dugmedir.
@@ -72,8 +70,6 @@ if PYGAME_VAR:
 # `python app/gamepad.py` hangi dugmenin hangi numara oldugunu canli gosterir.
 BTN_ATES = 0          # A
 BTN_MERKEZ = 3        # Y
-BTN_HIZ_ASAGI = 4     # LB
-BTN_HIZ_YUKARI = 5    # RB
 BTN_ESTOP = 7         # Start/Menu
 
 # Sol analog cubuk. Y ekseni SDL'de yukari = NEGATIF; tilt'te yukari = ARTI oldugu icin
@@ -99,7 +95,7 @@ class Durum:
     Neden kenar tetikli: ates/E-Stop birer ac-kapa. Seviye okunsaydi dugme basili
     tutuldugu surece her yoklamada (50 ms) tekrar tetiklenir, lazer yanip sonerdi."""
 
-    __slots__ = ("pan", "tilt", "ates", "estop", "merkez", "hiz_yukari", "hiz_asagi")
+    __slots__ = ("pan", "tilt", "ates", "estop", "merkez")
 
     def __init__(self):
         self.pan = 0.0
@@ -107,8 +103,6 @@ class Durum:
         self.ates = False
         self.estop = False
         self.merkez = False
-        self.hiz_yukari = False
-        self.hiz_asagi = False
 
     @property
     def hareket_var(self):
@@ -231,8 +225,6 @@ class Gamepad:
         d.ates = self._kenar(CB_ATES, bool(c.get_button(CB_ATES)))
         d.estop = self._kenar(CB_ESTOP, bool(c.get_button(CB_ESTOP)))
         d.merkez = self._kenar(CB_MERKEZ, bool(c.get_button(CB_MERKEZ)))
-        d.hiz_yukari = self._kenar(CB_HIZ_YUKARI, bool(c.get_button(CB_HIZ_YUKARI)))
-        d.hiz_asagi = self._kenar(CB_HIZ_ASAGI, bool(c.get_button(CB_HIZ_ASAGI)))
 
     def _oku_joystick(self, d):
         """Ham Joystick yolu — SDL cihazi tanimadi, numaralar XInput duzeni VARSAYILIR."""
@@ -250,8 +242,6 @@ class Gamepad:
         d.ates = self._kenar(BTN_ATES, bas(BTN_ATES))
         d.estop = self._kenar(BTN_ESTOP, bas(BTN_ESTOP))
         d.merkez = self._kenar(BTN_MERKEZ, bas(BTN_MERKEZ))
-        d.hiz_yukari = self._kenar(BTN_HIZ_YUKARI, bas(BTN_HIZ_YUKARI))
-        d.hiz_asagi = self._kenar(BTN_HIZ_ASAGI, bas(BTN_HIZ_ASAGI))
 
     def kapat(self):
         try:
@@ -296,8 +286,7 @@ if __name__ == "__main__":
         while True:
             d = g.oku()
             olaylar = [ad for ad, v in (("ATES", d.ates), ("E-STOP", d.estop),
-                                        ("MERKEZ", d.merkez), ("HIZ+", d.hiz_yukari),
-                                        ("HIZ-", d.hiz_asagi)) if v]
+                                        ("MERKEZ", d.merkez)) if v]
             ham = ""
             if g.js is not None:
                 ham = " ham:" + str([i for i in range(g.js.get_numbuttons())

@@ -122,9 +122,10 @@ const float MAX_STEP_SN = 8000.0;
 
 // ---- Yazilimsal aci limitleri (app/protokol.py: TILT_MIN/TILT_MAX) ----
 const float TILT_MIN = 0.0;                           // 0° = ufuk
-const float TILT_MAX = 180.0;                         // tavan; negatif tilt YOK
-// ⚠ app/protokol.py TILT_MAX ile AYNI olmali. 07.08'de 60 -> 90 -> 180 yukseltildi.
-//   Arayuz acilista 90'da baslar; operator daha yukarisini ⚙ panelinden acar.
+const float TILT_MAX = 60.0;                          // tavan; negatif tilt YOK
+// ⚠ app/protokol.py TILT_MAX ile AYNI olmali. 21.09.2026: MEKANIK aralik toplam 60°
+//   (fiziksel -30..+30; sistem 0 = namlu 30° asagi). 60'in ustu motoru fiziksel
+//   duraga zorlardi. (Gecmis: 07.08'de 60 -> 90 -> 180'e cikarilmisti.)
 
 bool systemActive = true;
 bool laserOn = false;

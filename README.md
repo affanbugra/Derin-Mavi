@@ -11,8 +11,10 @@ hedef tespiti, renkten dost/düşman ayrımı ve gimbal/lazer kontrol iskeleti i
 
 ## Özellikler
 
-- **Canlı kamera akışı** — donanım bağımsız; kamera otomatik bulunur, arayüzden seçilebilir
-  (`DERINMAVI_CAM` env ile de zorlanabilir: index / dosya / RTSP-URL).
+- **Canlı kamera akışı** — YALNIZ takılı **harici** (USB-C) kamera kullanılır; laptopun
+  kendi kamerası, telefon (iPhone Süreklilik) ve sanal kameralar hiç açılmaz. Harici kamera
+  yoksa "Kamera bulunamadı" der, sonradan takılınca kendiliğinden bağlanır. Test için
+  `DERINMAVI_CAM=video.mp4` (veya `rtsp://...`) ile dosya/akış verilebilir.
 - **YOLO hedef tespiti** — tip tespiti (F-16 / Helikopter / İHA / Füze) + balon (nişan noktası).
 - **Renkten dost/düşman ayrımı** — HSV ile kırmızı = düşman, camgöbeği (cyan) = dost.
   Deterministik ve açıklanabilir; tip değil **renk** tarafı belirler.
@@ -100,7 +102,7 @@ Hiçbiri zorunlu değildir; hepsinin makul otomatik varsayılanı vardır.
 
 | Değişken | Ne işe yarar | Örnek |
 |---|---|---|
-| `DERINMAVI_CAM` | Kamera kaynağını sabitler (yoksa otomatik tarama) | `0`, `video.mp4`, `rtsp://...` |
+| `DERINMAVI_CAM` | Kamera yerine video dosyası / akış (test için; cihaz taranmaz) | `video.mp4`, `rtsp://...` |
 | `DERINMAVI_MODEL` | Belirli model dosyası / ONNX seçer | `onnx`, `C:\yol\best.pt` |
 | `DERINMAVI_ESP` | Kontrolcü hedefi | `mock` (varsayılan), `COM5`, `off` |
 | `DERINMAVI_FOCAL` | Mesafe kalibrasyon odak (piksel) | `900` |
@@ -118,6 +120,8 @@ Derin Mavi/
 ├── app/                    # uygulama kodu
 │   ├── arayuz_qt.py        #   ANA uygulama (native PySide6 kontrol istasyonu)
 │   ├── tasarim.py          #   Görünümün tek kaynağı: Apple macOS renk/ölçü/stil
+│   ├── kamera.py           #   Yalnız harici (USB-C) kamera — dahili/telefon/sanal elenir
+│   ├── bolge.py            #   Harekete/atışa izinli pencereler (şartname §4.2)
 │   ├── algi.py             #   Algı çekirdeği: kamera + YOLO + karar (tek kaynak)
 │   ├── nisan.py            #   Nişan matematiği: piksel hatası → gimbal açı komutu
 │   ├── renk_analizi.py     #   HSV ile dost/düşman (renk tarafı)
@@ -238,6 +242,8 @@ test edilmiştir.
   python app/protokol.py && python app/renk_analizi.py && python app/mock_esp32.py
   python app/kontrol.py && python app/nisan.py && python app/algi.py
   python app/tasarim.py           # stil sayfası bütünlüğü + stil kapsamı
+  python app/kamera.py            # harici kamera eleme kuralı (kamera açmaz)
+  python app/bolge.py             # hareket/atış pencereleri
   python app/kapi_testleri.py     # E-Stop / ateş / yasak alan güvenlik kapıları
   ```
   Her modül kendi kendini test eder; `kapi_testleri.py` ise şartnamenin can alıcı

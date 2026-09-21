@@ -144,6 +144,7 @@ BOY_MINI, BOY_KUCUK, BOY_NORMAL, BOY_BUYUK, BOY_XL = 16, 20, 24, 28, 36
 YC_MINI, YC_KUCUK, YC_NORMAL = 4, 5, 6
 YC_KAPSUL_BUYUK = BOY_BUYUK // 2      # 14
 YC_KAPSUL_XL    = BOY_XL // 2         # 18
+ATES_BOY = 44                         # ATEŞ butonu: XL'den biraz büyük (takım kararı 22.09)
 
 YC_KART   = 12    # Group Box (kitten: beyaz %3 dolgu, 12 px yarıçap)
 YC_PANEL  = 16    # büyük cam yüzeyler (kit "Large UI": 20 — biz 16 kullanıyoruz)
@@ -189,7 +190,11 @@ def slider_stil(nesne="ayarsl", vurgu=None, tutamac=20, oluk=6):
     oluğu bileşenin tüm yüksekliğine yayıyor ve koyu arayüzde kaydırıcının
     arkasında açık gri bir kutu belirir (bir tur bunu yerel macOS stili sandık,
     değilmiş — kendi kuralımızmış). Marjı yükseklikten hesaplıyoruz ki tutamaç
-    veya oluk kalınlığı değişince kendiliğinden doğru kalsın."""
+    veya oluk kalınlığı değişince kendiliğinden doğru kalsın.
+
+    ⚠ Durum ALT BİLEŞENDEN SONRA yazılır: `::handle:horizontal:disabled`.
+    Ters sıra (`:disabled::handle`) Qt'de kuralı kaydırıcının GÖVDESİNE
+    uygulatıyor — etkin kaydırıcının arkasında %25 beyaz kutu çıkıyordu (22.09)."""
     v = vurgu or AKSAN
     yari = tutamac // 2
     boy = tutamac + 4                     # bileşenin toplam yüksekliği
@@ -210,8 +215,8 @@ def slider_stil(nesne="ayarsl", vurgu=None, tutamac=20, oluk=6):
         border: 0.5px solid {siyah(0.12)};
     }}
     QSlider#{nesne}::handle:horizontal:pressed {{ background: #F2F2F2; }}
-    QSlider#{nesne}:disabled::sub-page:horizontal {{ background: {D2}; }}
-    QSlider#{nesne}:disabled::handle:horizontal   {{ background: {beyaz(0.25)}; }}
+    QSlider#{nesne}::sub-page:horizontal:disabled {{ background: {D2}; }}
+    QSlider#{nesne}::handle:horizontal:disabled   {{ background: {beyaz(0.25)}; }}
     """
 
 
@@ -259,7 +264,7 @@ def deger_etiketi(renk_metin):
 
 
 # D-pad tuşları: Apple'ın XL kapsül butonu. Basılı hâl vurgu rengiyle dolar.
-def dpad_stil(basili=False, merkez=False, en=58, boy=34):
+def dpad_stil(basili=False, merkez=False, en=58, boy=BOY_BUYUK):
     yc = boy // 2
     if basili:
         zemin, yazi_renk, kenar = AKSAN, "#FFFFFF", _a(AKSAN, 0.0)
@@ -548,13 +553,23 @@ def qss() -> str:
     #hname {{ {yazi(CAGRI_VURGU, L1)} background: transparent; }}
     #hconf {{ {yazi(DIPNOT, L2, f"font-family: {FM};")} background: transparent; }}
 
+    /* ---------- lazer gücü düğmesi (ATEŞ butonunun İÇİNDE, solda) ----------
+       Kırmızı zemin üstünde hem ATEŞ (tonlu) hem ATEŞİ KES (dolu) hâlinde okunsun
+       diye beyaz yarı saydam daire; renk ATEŞ yazısıyla aynı dilde. */
+    #lazerayar {{
+        background: {beyaz(0.14)}; border: none; border-radius: {(ATES_BOY - 10) // 2}px;
+        color: #FFFFFF; font-size: 15px;
+    }}
+    #lazerayar:hover   {{ background: {beyaz(0.24)}; }}
+    #lazerayar:pressed {{ background: {beyaz(0.32)}; }}
+
     /* ---------- ATEŞ (XL kapsül) ---------- */
     #fire {{
         background: {_a(KIRMIZI, 0.20)};
         border: none;
-        border-radius: {YC_KAPSUL_XL}px;
+        border-radius: {ATES_BOY // 2}px;
         color: {KIRMIZI};
-        min-height: {BOY_XL}px;
+        min-height: {ATES_BOY}px;
         {yazi(GOVDE_VURGU)}
         letter-spacing: 1.2px;
     }}
@@ -640,7 +655,7 @@ def _stil_kapsami_testi():
     kaynak = open(yol, encoding="utf-8").read()
     stil = qss()
     # Stili QSS'te değil, kod içinde satır içi verilenler (bilinçli istisnalar)
-    satir_ici = {"ayarsl", "bolgestatus", "hedefsatir"}
+    satir_ici = {"ayarsl", "bolgestatus"}
     eksik = sorted({m.group(1) for m in re.finditer(r'setObjectName\("([^"]+)"\)', kaynak)}
                    - {m.group(1) for m in re.finditer(r'#([a-zA-Z0-9_]+)', stil)}
                    - satir_ici)

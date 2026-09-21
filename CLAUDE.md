@@ -30,8 +30,8 @@ Sen bu projede **teknik danışman + yazılım geliştirme ortağısın.** Amaç
    geliştiriliyor ama yarışmaya **büyük ihtimalle daha güçlü, farklı bir laptopla** gidilecek.
    HİÇBİR şey bu makineye sabitlenmez: kamera index/backend otomatik bulunur (env override
    destekli), yollar göreli, model/donanım seçimi çalışma anında algılanır. Kod başka ortamda
-   "indir-çalıştır" mantığıyla sorunsuz koşmalı. (Kamera kaynağı: `DERINMAVI_CAM` env — index
-   / dosya / RTSP-URL; tanımsızsa otomatik tarama.)
+   "indir-çalıştır" mantığıyla sorunsuz koşmalı. (Kamera: YALNIZ takılı harici USB-C kamera,
+   isminden seçilir — `app/kamera.py`; test için `DERINMAVI_CAM` = dosya / RTSP-URL.)
 8. **ŞARTNAME DİSİPLİNİ + KESİN/VARSAYIM AYRIMI.** Şartname gerektiren her bilgi/işlemde
    **gerçek şartnameyi tara** (`sartname/sartname_metin.txt` grep veya `sartname/Şartname.pdf` oku) —
    hafızaya/varsayıma güvenip **emin olmadan işlem yapma.** Bir bilgi şartnamede/resmi duyuruda
@@ -481,7 +481,7 @@ gamepad videoda gösterilecek, doğrudan puan. `app/gamepad.py` + arayüzde 50 m
 | **Tek kapı kuralı** | Gamepad **kendi komut yolunu AÇMAZ**: hareket `_aci_hareket`, ateş `_ates_kisayolu`→`_ates_bas`, merkez `_aci_reset`, E-Stop `_estop_bas`. Geçmişte ikinci bir ateş yolu E-Stop denetimini atlamıştı (§12 B1) — aynı hata sınıfı geri gelmesin. |
 | **Buton haritası** | **SDL GameController API** tercih edilir: SDL'in cihaz veritabanı her padi standart düzene eşler, *A tuşu hangi padde olursa olsun A'dır*. SDL cihazı tanımazsa ham Joystick'e düşülür (XInput numaraları varsayılır). |
 | Neden bu kadar önemli | Ham numaralar padden pade **değişir**: Xbox/XInput'ta `7 = Start`, PlayStation DualSense'te `7 = R2`. Sabit numara yazılsaydı **ACİL DURDUR başka bir pad takıldığında yanlış tuşa düşerdi.** |
-| Düzen | Sol çubuk + D-pad = gimbal · **A** = ateş (aç/kes) · **Y** = merkeze al · **LB/RB** = motor hız kademesi · **Start** = ACİL DURDUR / DEVAM |
+| Düzen | Sol çubuk + D-pad = gimbal · **A** = ateş (aç/kes) · **Y** = merkeze al · **Start** = ACİL DURDUR / DEVAM · *(LB/RB hız kademesi 22.09'da kaldırıldı — hız sabit)* |
 | Hareket matematiği | Adım = `tavan hız (°/s) × geçen süre × çubuk sapması` — basılı tutmayla (§5.1) aynı mantık, tek farkı analog çarpan. Sabit adım gönderilseydi hedef motorun önüne geçer, çubuk bırakılınca gimbal dönmeye devam ederdi. |
 | Ölü bölge | %15, ve **kalan aralık yeniden 0..1'e yayılır**. Düz kesme yapılsaydı çubuk eşiği geçtiği anda hız 0'dan 0.15'e sıçrardı. Ölü bölge olmasaydı gimbal hiç durmaz, sürüklenirdi. |
 | Kenar tetikleme | Ateş/E-Stop butonları **basıldığı an** okunur. Seviye okunsaydı düğme basılı tutuldukça her 50 ms'de tekrar tetiklenir, lazer yanıp sönerdi. |
@@ -527,7 +527,7 @@ uçtan uca deneme **henüz yapılmadı**; kod cihazsız (sahte pad) test edildi.
   üretir (`yolo export …`) — o çıktılar repoya girmez. Eski Flask arayüzü (`arayuz_app.py`)
   emekli edildi, yedeğe taşındı.
 - Ortam: Python 3.10+ (3.14 test), torch **CPU**, PySide6 6.11 (abi3),
-  OpenCV Türkçe-yol düzeltmesi (imdecode). Kamera donanım-bağımsız (`DERINMAVI_CAM` env / otomatik tarama).
+  OpenCV Türkçe-yol düzeltmesi (imdecode). Kamera: yalnız harici USB-C (`app/kamera.py`, §12.5).
 - **⚠️ TEKNİK TUZAK:** torch/ultralytics `arayuz_qt.py`'de **ANA THREAD'de** import edilir
   (op-registration thread-safe DEĞİL; arka planda import = Qt çizimiyle çakışıp segfault). QThread
   yalnızca hazır `YOLO(path)`'i kullanır. **Modeli asla arka planda import etme.**
@@ -790,9 +790,10 @@ bir güvenlik payıyla seçildi. Gerçek donanımda hâlâ yavaşsa **bir sonrak
   (1:1) bekliyor, sabit **8.889**'a çekilmiş (yani 2:1 girilmiş). Gerçek oran
   ölçümle doğrulanmadan test düzeltilmemeli — yanlışsa tüm tilt açıları yanlış
   olur (§5.1).
-- **[ ] Arayüzün görsel doğrulaması yarım:** Apple tasarım sisteminin son
-  rötuşları (kaydırıcı oluk marjı, otonom panel boşluğu, alt çubuk model yazısı)
-  yalnızca kod düzeyinde yapıldı; gerçek ekranda karşılaştırılmadı (§12.4).
+- **[x] Dikey tavan = 60° (21.09.2026, kullanıcı kararı):** mekanik aralık toplam 60°,
+  fiziksel −30…+30 (sistem 0 = namlu 30° aşağı). `protokol.TILT_MAX` ve firmware
+  `TILT_MAX` 180 → **60**. ⚠ **Firmware karta YENİDEN YÜKLENMELİ** — yüklenene kadar
+  kart eski 180'i bildirir ve arayüz "firmware uyumsuz" uyarısı verir (bu kasıtlı).
 - **[ ] Aktüatör/kontrolcü fiziksel durumu:** NEMA23 + ESP32 alındı mı? Araç mekanikçe
   sıfırdan yapılacağından yazılım donanım-bağımsız (mock UART) ilerleyebilir.
 
@@ -1072,6 +1073,97 @@ laptopun ekranı kapandığı için Qt pencere açamaz oldu (`no Qt platform plu
 ve **son tur (açı kartı yüzeyi, ikinci ayar paneli, durum noktaları, uygulama
 fontu seçimi) yalnızca kod düzeyinde** yapıldı. Makine başına dönülünce
 `Baslat.command` ile açıp gözden geçirilmeli.
+
+### 12.5 Kamera: YALNIZ harici USB-C · izinli pencereler · açı karoları (21–22.09.2026)
+
+**Kamera (`app/kamera.py`, takım kararı 22.09):** laptopun kendi kamerası (Mac/Windows),
+telefon (iPhone Süreklilik, DroidCam…) ve sanal kameralar **hiç açılmaz**. Takılı harici
+kamera varsa açılır; yoksa "Kamera bulunamadı"; sonradan takılınca kendiliğinden bağlanır.
+- **Telefona her açılışta istek gitmesinin kök sebebi:** kameralar Qt ile İSİMLE
+  listelenip (iPhone orada eleniyordu) OpenCV ile SIRA NUMARASIYLA açılıyordu; macOS'ta iki
+  sıra aynı değil → "iPhone hariç" seçilen numara iPhone'a denk gelebiliyordu. Ayrıca
+  `TaramaThread` Qt listesi boş gelirse 0–4 numaralı TÜM cihazları OpenCV ile açıyordu.
+  Artık kamera **Qt'nin kamera nesnesiyle, seçilen cihazın kendisinden** açılır; elenen
+  cihaza hiç dokunulmaz. Eski tarama/indeks/ısınma kodu `algi.py`'den silindi (−370 satır).
+- Eleme **isimden** (`HARICI_DEGIL`): macOS'ta dahili kamera da iPhone da konumu
+  "belirtilmemiş" bildiriyor ve adlar sistem diliyle geliyor ("MacBook Air Kamerası").
+  ⚠ `"obs"` yazılmaz — gerçek **OBSBOT** kamerasını da eliyordu (test yakaladı).
+  ⚠ [VARSAYIM] Windows'ta bazı dahili kameralar USB kamerayla aynı adla görünür
+  ("USB2.0 HD UVC WebCam"); böyle biri seçilirse adı listeye tek satır eklenir.
+
+**Harekete / atışa yasak alan (`app/bolge.py`, şartname §4.2 [KESİN]):** operatör YASAK
+aralığı değil **izin verilen pencereyi** yazar, dışı yasaktır. Her eksende iki pencere:
+hareket (dışına çıkılamaz, sınırda **kırpılır** — eskiden komut komple reddediliyordu)
+ve atış (yalnız içinde ateş; dışına çıkılınca ateş kesilir). Atış penceresi hareket
+penceresinin dışına taşamaz (**"harmanlama"**, `atis_uyumla`). Yatay: ön = 0°, ±180,
+fiziksel sınır yok ama pencere varken **arkadan dolanılamaz** (pan sarmasız hesaplanır).
+Dikey: fiziksel −30…+30 girilir, panel ekrandaki karşılığını (0…60) yanında gösterir.
+Ayrı "Maksimum Yükseliş" kaydırıcısı kaldırıldı (hareket penceresi o işi görür).
+
+**Açı karoları:** azimut (üstten görünüş, saat yönünde döner) + yükseliş (yandan görünüş,
+namlu sistem açısı − 30 kadar kalkar) resimleri; büyük ortalı derece; namludan kırmızı
+lazer ışığı **yalnız gerçek lazer açıkken** (kontrol katmanının kartla eşlenmiş durumu).
+Merkeze alma yalnız **[R]** (Space/C kaldırıldı) + MERKEZ butonu.
+
+**Bu iş sırasında bulunan GERÇEK hatalar:**
+1. **E-Stop'ta [R] merkeze alıyordu** — koruma yalnız MERKEZ butonunun devre dışı
+   kalmasına dayanıyordu, klavye yolu atlıyordu. Kilit `_hareket_kilitli()`'ye taşındı,
+   `_aci_reset` kendini korur (kapı testi eski hâlde kırmızıya düşüyor).
+2. **Yazılım dikeyde 180°'ye izin veriyordu** (mekanik 60).
+3. **Sağ kolon taşıyordu** → derece yazıları kesikti. Ölçüldü (660 px istek / 624 px yer):
+   HEDEFLER kartında boş yazı + boş liste üst üste biniyordu (kamera yokken), ayar sayfası
+   yığının minimumunu büyütüyordu. HEDEFLER sabit 30 px yuvaya, ayar sayfası kaydırma
+   alanına, D-pad Apple "Large" (28 px) boyuna alındı → 623/624.
+
+**Sadeleştirme (22.09, takım kararı):**
+- **Motor hızı seçimi kaldırıldı** (kart, `_hiz_sec`, gamepad LB/RB). Hız SABİT
+  `P.HIZ_VARSAYILAN` (Normal, 40°/s) — kart açılışta bir kez alır; basılı tutma,
+  gamepad ve otonom hız sınırı hâlâ buna dayanır, o yüzden iç değişken (`hiz_seviye`)
+  duruyor.
+- **Adım seçimi (1°/5°/10°) kaldırıldı:** tek dokunuş her zaman **1°**.
+- **Lazer gücü:** sağdaki LAZER kartı kalktı; ATEŞ'in solundaki **⚙** kompakt bir
+  sayfa açar. Kaydırıcı/kademeler yalnız TASLAK; **Kaydet → "%40 → %70 olacak. Emin
+  misiniz?" → Değiştir** ile karta gider, ✕ taslağı atar. Tek uygulama kapısı hâlâ
+  `_lazer_guc_degisti` (kapı testi: `test_lazer_gucu_onaysiz_degismez`).
+- **Yasak alanlar:** alttaki kartlar + HEDEF DURUMU kaldırıldı; manuel panel
+  başlığında iki minimal kapsül (ad + anahtar). Kapsüle tıklamak sade Yatay/Dikey
+  Alt-Üst sayfasını açar; değerler **Kaydet** ile uygulanır. ⚠ Kapsüller Otonom modda
+  görünmez (kurallar Otonom'da da işler).
+- **Aşama kartı:** bütün yazılar solda (içerik + altında aşama adı ve tek satır kural).
+- Boşalan dikey alan açı karolarına verildi (resimler büyüdü); D-pad ızgarası 30 px'lik
+  tuşlara göre düzeltildi (önce 28'e göre hesaplanmış, tuşlar üst üste biniyordu).
+
+**⚠ 22.09 — HAREKETİN TAMAMI BOZULMUŞTU (bulundu, düzeltildi):** bir yardımcı metot
+silinirken üstündeki `@staticmethod` satırı geride kalıp hareket kapısının
+(`_aci_hareket`) üstüne yapışmıştı → klavye, D-pad, gamepad ve otonom hareketin HEPSİ
+`TypeError` veriyordu (klavyede Qt bunu işlerken uygulama da çöküyordu). Güvenlik
+testleri YEŞİLDİ, çünkü `SahtePencere` metotları sınıftan ödünç alır ve sınıftan okunan
+`staticmethod` düz fonksiyon olarak orada normal çalışır. Kapı testi eklendi:
+`test_odunc_kapilar_gercek_pencerede_de_metot` (eski hâlde kırmızıya düştüğü doğrulandı).
+Ayrıca **ok tuşları hiç çalışmıyordu:** arayüz QGraphicsView içinde olduğundan görünüm
+okları kaydırma için yutuyordu (W/A/S/D ulaşıyordu). Tuşlar artık görünüme gitmeden
+`eventFilter`'da yakalanır (`_tus_bas`/`_tus_birak`); odak bir sayı kutusundaysa oklar
+kutuyu ayarlar. Gerçek pencerede doğrulandı: 7 tuşun her biri ekranı VE kart hedefini
+1° oynatıyor, R merkeze alıyor.
+**HEDEFLER kartı kaldırıldı** (takım kararı) — tıklayarak elle kilitleme de onunla gitti;
+otomatik kilit aynen çalışır. **Lazer ⚙** ATEŞ butonunun İÇİNDE (ayrı çocuk buton;
+tıklaması ateşe gitmez — doğrulandı).
+
+**Ayarlar artık KUTUCUK, sayfa değil (22.09, takım kararı):** Atışa/Harekete Yasak ve
+Lazer ⚙ ayarları paneli değiştirmez; tıklanan düğmenin yanında açılan bir kutucukta
+açılır, alttaki panel yerinde kalır (yasak alanlar kapsülün altında, lazer ATEŞ'in
+üstünde). Kutucuklar `self.content`'in çocuğu (`_pencere_ac`/`_pencere_kapat`/
+`_pencere_yerlestir`); zemin görüntü işleme paneliyle aynı opak `#ayarpanel`
+(yarı saydam + bulanık cam denendi, arkadaki yazılar okunmayı bozdu — kullanıcı
+istemedi). Dışarı tıklamak / ✕ / Otonom'a geçmek = **kaydetmeden** kapat.
+D-pad tuşları 58×28 → **68×34** (`DPAD_EN/DPAD_BOY`).
+**Gerçek hata:** `slider_stil`'de `:disabled::handle` sırası Qt'de kuralı kaydırıcının
+GÖVDESİNE uygulatıyordu → etkin kaydırıcıların arkasında %25 beyaz kutu. Doğru sıra
+`::handle:horizontal:disabled` (bütün `ayarsl` kaydırıcıları düzeldi).
+
+Kapı testleri 24 (yeni: E-Stop'ta R, lazer ışığı gerçek durumu, dikey pencere kullanıcı
+örneği, yatay arkadan dolanma, dikey atış penceresi); pencere testlerinin koruma
+kaldırılınca kırmızıya düştüğü doğrulandı.
 
 ---
 

@@ -71,20 +71,22 @@ TILT_STEP_DER = STEP_TUR * TILT_DISLI / 360.0   # ≈ 17.78 step/derece
 # firmware de kendi tarafinda ayni degerle kirpar.
 MAKS_STEP_SN = 8000.0
 
-# 0° = ufuk, + = yukari (negatif tilt YOK). TILT_MAX = MEKANIK tavan; operator ayrica
-# arayuzden kendi calisma sinirini (max_tilt_limit) bunun ALTINDA secebilir.
-# ⚠ 07.08: 60° -> 90° -> **180°**. Arayuzdeki kaydirici bir ara 90'a kadar gidiyordu ama
-#   burasi 60'ta kirptigi icin gimbal 60'ta takili kaliyordu (iki taraf farkli tavan
-#   tanimliyordu). Kaydiricinin tavani artik BURADAN turer, tek kaynak.
-# ⚠ TILT_MAX bir MEKANIK tavandir, gercek aciyi GARANTI ETMEZ: TILT_DISLI hala 1:1
-#   varsayimi oldugu icin "90°" komutu gercekte 90/oran kadar dondurur. Oran olculup
-#   duzeltilene kadar buradaki sayilar komut acisidir, fiziksel aci degil.
-TILT_MIN, TILT_MAX = 0.0, 180.0
+# Tilt SISTEM acisi: 0..TILT_MAX, negatif yok. [KESIN — kullanici bilgisi 21.09.2026]
+# Dikey eksenin MEKANIK hareket araligi toplam 60°: fiziksel olarak yere gore
+# −30°..+30° (sistem 0° = namlu 30° asagi, 30° = yere paralel, 60° = 30° yukari).
+# "Istesek de daha fazla olamaz" — bu yuzden tavan 60; operator bunu ASAMAZ,
+# yalniz ⚙ panelindeki hareket penceresiyle daraltabilir (bkz. app/bolge.py).
+# ⚠ Gecmis: 07.08'de 60 -> 90 -> 180'e cikarilmisti; mekanik 60° oldugu icin 60'in
+#   ustundeki her komut motoru fiziksel duraga zorluyordu. Firmware'deki TILT_MAX da
+#   60'a cekildi — kart YENIDEN YUKLENENE kadar kontrol katmani acilis banner'indaki
+#   farki gorup "firmware uyumsuz" uyarisi verir (kontrol._kart_yaziyor).
+# ⚠ Bu sayilar KOMUT acisidir: TILT_DISLI ve sistem 0°'nin fiziksel alt durakla
+#   cakismasi (acilis/homing konumu) dogru oldugu surece fiziksel aciya esittir.
+TILT_MIN, TILT_MAX = 0.0, 60.0
 
-# Arayuzun ACILIS calisma siniri (operator ⚙ panelinden TILT_MAX'a kadar yukseltir).
-# Tavan 180'e cikarildi ama varsayilan 90'da birakildi: kimse istemeden namluyu arkaya
-# devirmesin. "Daha yukari cikmam lazim" diyen operator bilincli olarak yukseltir.
-TILT_CALISMA_VARSAYILAN = 90.0
+# Arayuzun acilistaki calisma siniri = mekanik tavan (ayri bir "maks yukselis"
+# ayari kaldirildi; daraltmak isteyen hareket penceresini kullanir).
+TILT_CALISMA_VARSAYILAN = TILT_MAX
 
 # ---- LAZER GUCU (PWM duty %) — firmware LAZER_GUC_VARSAYILAN ile AYNI olmali ----
 # Lazer surucusunun PWM girisi duty oraniyla gucu belirler; tam guc kullanilmiyor.
