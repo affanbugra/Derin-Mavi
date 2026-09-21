@@ -363,12 +363,24 @@ class KameraOkuyucu:
         self.cap_degistir(None)
 
 
-def _grab_gercek(cap):
-    """Kameradan gercek (siyah olmayan) kare gelip gelmedigini hizlica test eder."""
-    for _ in range(5):
+ISINMA_SURESI = 1.5   # sn — kameranin ilk gercek kareyi vermesi icin taninan sure
+
+
+def _grab_gercek(cap, sure=ISINMA_SURESI):
+    """Kameradan gercek (siyah olmayan) kare gelip gelmedigini test eder.
+
+    Sinir KARE SAYISI degil SURE: MacBook dahili kamerasi acilir acilmaz bir
+    sure tamamen siyah (ortalama 0.0) kare verebiliyor — olculdu: ust uste 12
+    kare. Eskiden 5 kareye (~0.15 sn) bakilip vazgeciliyordu, saglam kamera
+    "bulunamadi" diye reddediliyordu. Asil amac (hic goruntu vermeyen sanal /
+    bozuk kamerayi atlamak) 1.5 sn'lik pencereyle de korunuyor."""
+    bitis = time.monotonic() + sure
+    while time.monotonic() < bitis:
         ok, frame = cap.read()
         if ok and frame is not None and frame.mean() > 3:
             return True
+        if not ok:
+            time.sleep(0.02)   # okuma hic basarisizsa donguyu bosa dondurme
     return False
 
 
