@@ -2,9 +2,10 @@
 
 > Bu dosya projenin **beynidir** ve her oturumda otomatik yüklenir. Önemli her karar, gerçek,
 > context ve teknik çalıştırma notu **tek yerde** burada tutulur. **Yaşayan dokümandır** — bir şey
-> netleştikçe/değiştikçe güncellenir. Repoda yalnızca **iki doküman** vardır: bu CLAUDE.md (proje
-> beyni, teknik derinlik) ve [README.md](README.md) (ekibin okuyup kurması için özet). İkisi de
-> repoda açıktır.
+> netleştikçe/değiştikçe güncellenir. Repoda **üç doküman** vardır: bu CLAUDE.md (proje
+> beyni, teknik derinlik), [README.md](README.md) (ekibin okuyup kurması için özet) ve
+> [ACIK_ISLER.md](ACIK_ISLER.md) (karar/donanım bekleyen işler — kapanan madde silinir).
+> Hepsi repoda açıktır.
 
 ---
 
