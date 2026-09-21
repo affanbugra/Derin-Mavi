@@ -169,6 +169,7 @@ AC = "E\n"          # kontrolu ac
 KAPAT = "D\n"       # durdur + kontrolu kapat
 DUR = "X\n"         # durdur, bekleyen hedefi iptal et
 CANLI = "H\n"       # heartbeat
+SORGU = "Q\n"       # yetenek sorgusu: OK,Q = hareket halinde durmadan yeniden planlar
 
 
 def git(derece):
@@ -273,7 +274,10 @@ class MockTiltKart:
     UST_DARBE = 6400
     MAKS_HIZ = 3200.0       # darbe/s — MotionCore::MAX_SPEED_VARSAYILAN
 
-    def __init__(self, kalibre=True, simdi=None):
+    def __init__(self, kalibre=True, simdi=None, yeniden_planlama=False):
+        # yeniden_planlama=True: yeni firmware (Q'ya OK der, hareket halinde yeni
+        # hedefi durmadan uygular). False: eski firmware (tek bekleme yuvasi).
+        self.yeniden_planlama = yeniden_planlama
         self.pos = 0
         self.hedef = 0
         self.acik = False
@@ -318,6 +322,8 @@ class MockTiltKart:
             if self.acik:
                 self.son_canli = simdi
             return None                     # firmware H'ye yanit YAZMAZ
+        if s == "Q":
+            return "OK,Q" if self.yeniden_planlama else "ERR,Q,UNKNOWN_COMMAND"
         if s == "R":
             # Firmware: hareket halindeyse reddet; degilse sayac 0, kalibrasyon korunur.
             if self.pos != self.hedef:
@@ -362,10 +368,10 @@ class MockTiltKart:
                 return f"ERR,{s},CAL_REQUIRED"
             self.son_canli = simdi
             t = self._darbe(a)
-            if self.pos != self.hedef:
+            if self.pos != self.hedef and not self.yeniden_planlama:
                 self.bekleyen = t           # TEK YUVA — mevcut hedef once bitecek
             else:
-                self.hedef = t
+                self.hedef = t              # yeni firmware: durmadan yeni hedefe
             return f"OK,{s}"
         return f"ERR,{s},UNKNOWN_COMMAND"
 
@@ -438,11 +444,17 @@ class TiltSurucu:
         self._ac_denendi_t = 0.0
         self._son_pos = 0
         self.hiz_seviye = HIZ_VARSAYILAN
+        self._aci_gecmisi = []          # [(zaman, aci), ...] — her STATE3'te bir kayit
         self._gonderilen_hiz = None     # karta en son giden (hiz, ivme) — None = gonderilmedi
         # Karttaki firmware "Z" komutunu tanimiyorsa (eski surum yuklu) hiz kademesi
         # calismaz. Hareketin geri kalani calismaya DEVAM EDER: G/E/H/X/D eski
         # surumde de var. Bu yuzden bu durum bir HATA degil, bir UYARIDIR.
         self.hiz_desteklenmiyor = False
+        # Firmware hareket halinde yeni hedefi DURMADAN uygular mi (retarget)?
+        # Aciliste "Q" ile sorulur: OK,Q -> True; eski surum UNKNOWN_COMMAND -> False.
+        # None = henuz bilinmiyor (o sure eski, guvenli davranis kullanilir).
+        self.yeniden_planlama = None
+        self._q_soruldu = False
         self.kalibrasyon_uyarildi = False
         # Kart RESET ATTI mi? (bkz. _kart_yaziyor) — arayuz bunu operatore GORUNUR
         # sekilde soylemeli; sessiz kalirsa aci referansi bozulmus olarak devam eder.
@@ -567,6 +579,28 @@ class TiltSurucu:
         BU olmalidir: komut kaybolur/gecikirse fark buradan kapanir."""
         return self.durum["aci"] if (self.taze and self.durum["kalibre"]) else None
 
+    def aci_zamaninda(self, t):
+        """Kolun `t` anindaki acisi (STATE3 gecmisinden dogrusal ara deger).
+
+        NEDEN: takip, kameranin gordugu HATAYI kolun acisina ekler. Kare ~60 ms
+        gec gelir (olculdu: komut -> goruntu kaymasi ~92 ms, bunun ~30 ms'si kolun
+        gorulebilir kadar hareketi). Hata SIMDIKI aciya eklenirse, kolun o arada
+        zaten kapattigi kisim IKINCI KEZ sayilir ve kol hedefi asar; kazanc
+        arttikca bu salinima doner (gercek kartta kp 0.9'da olculdu). Hata, karenin
+        CEKILDIGI andaki aciya eklenirse ayni hata iki kez sayilmaz.
+        Gecmis yoksa (eski durum) simdiki aciya doner."""
+        g = self._aci_gecmisi
+        if not g or not self.taze:
+            return self.aci
+        if t <= g[0][0]:
+            return g[0][1]
+        if t >= g[-1][0]:
+            return g[-1][1]
+        for (t0, a0), (t1, a1) in zip(g, g[1:]):
+            if t0 <= t <= t1:
+                return a0 + (a1 - a0) * (t - t0) / max(1e-9, t1 - t0)
+        return g[-1][1]
+
     @property
     def hedef_aci(self):
         return self.durum["hedef"] if (self.taze and self.durum["kalibre"]) else None
@@ -673,15 +707,26 @@ class TiltSurucu:
                 # Kart acilis degerlerine dondu: hiz profili yeniden bildirilmeli,
                 # yoksa kol sessizce firmware varsayilaninda kalir.
                 self._gonderilen_hiz = None
+                self._q_soruldu = False
+                self.yeniden_planlama = None
             self._son_pos = d["pos"]
             self.durum = d
             self.son_durum_t = self._saat()
+            if d["kalibre"]:
+                self._aci_gecmisi.append((self.son_durum_t, d["aci"]))
+                del self._aci_gecmisi[:-40]            # ~4 sn yeter
             return
         self.satirlar.append(s)
         self._yeni.append(s)
         del self.satirlar[:-20]
+        if s == "OK,Q":
+            self.yeniden_planlama = True
+            return
         if s.startswith("ERR,"):
             sebep = s.split(',')[-1]
+            if s.startswith("ERR,Q,"):
+                self.yeniden_planlama = False       # eski firmware: hata DEGIL
+                return
             # ESKI FIRMWARE: "Z" komutu yok. Hiz kademesi calismaz ama hareketin
             # geri kalani calisir (G/E/H/X/D eski surumde de var). Bir kez soylenir
             # ve bir daha DENENMEZ — yoksa her kademe degisiminde ayni hata dusuerdi.
@@ -745,6 +790,9 @@ class TiltSurucu:
         if self.taze and not self.durum["acik"] and (simdi - self._ac_denendi_t) > 0.3:
             self._ac_denendi_t = simdi
             self._yaz(AC)
+        if self.hazir and not self._q_soruldu:
+            self._q_soruldu = True
+            self._yaz(SORGU)
         # Hiz profili HEDEFTEN ONCE gider: hedef once gonderilirse kart hareketi
         # eski profille baslatir ve Z artik "hareket halinde" diye reddedilir.
         self._hiz_bosalt()
@@ -778,7 +826,11 @@ class TiltSurucu:
         """
         if self._bekleyen_hedef is None or not self.hazir:
             return None
-        if self.durum["hareket"]:
+        # ESKI FIRMWARE: hareket halindeyken gelen hedef once eski hedefe gidip
+        # DURMAYA yol acar; kart bosalana kadar beklenir (tek yuvali kuyruk).
+        # YENI FIRMWARE (retarget): hedef hareket halinde DURMADAN uygulanir —
+        # beklemek tam da giderilen dur-kalk titremesini geri getirirdi.
+        if self.durum["hareket"] and not self.yeniden_planlama:
             return None
         hedef = self._bekleyen_hedef
         # Kartin BILDIRDIGI aciya yeterince yakinsak komut gonderme. Esik kartin
@@ -793,8 +845,9 @@ class TiltSurucu:
         # "bos" gorunur; bu arada gelen her git() ayni G'yi yeniden yollardi.
         # Kara kutuda goruldu: 100 ms'de 10 adet ayni "G0.0000".
         if (self._gonderilen_hedef is not None
-                and abs(hedef - self._gonderilen_hedef) < 1e-6
-                and self.son_durum_t <= getattr(self, "_gonderim_t", 0.0)):
+                and abs(hedef - self._gonderilen_hedef) < 0.05
+                and (self.durum["hareket"]
+                     or self.son_durum_t <= getattr(self, "_gonderim_t", 0.0))):
             self._bekleyen_hedef = None
             return None
         self._bekleyen_hedef = None
@@ -1137,6 +1190,40 @@ if __name__ == "__main__":
     z.git(40.0); saat[0] += 0.12; z.yokla()
     z.sifirla(); saat[0] += 0.05; z._oku()
     assert z.aci > 0.5, "hareket ortasinda sifirlama kabul edildi"
+
+    # 17. ⭐ YENIDEN PLANLAMA (retarget). Sahada takip ederken namlu titriyordu:
+    #     kart hareket halinde yeni hedefi bekletiyor, kol her duzeltmede DURUP
+    #     yeniden kalkiyordu (~1 sn'lik yaklasmada 6 dur-kalk olculdu).
+    #     Yeni firmware Q'ya OK der; surucu o zaman hedefi BEKLETMEDEN gonderir.
+    saat[0] += 1.0
+    y = TiltSurucu("mock", _saat=lambda: saat[0])
+    y.mock = MockTiltKart(simdi=saat[0], yeniden_planlama=True)
+    for _ in range(3):
+        saat[0] += 0.25; y.yokla()
+    assert y.yeniden_planlama is True, "yeni firmware tanınmadı"
+    y.git(30.0); saat[0] += 0.1; y.yokla()
+    assert y.hareket
+    y.git(45.0)                                   # hareket halinde — BEKLETILMEMELI
+    assert y.mock.hedef == y.mock._darbe(45.0), "hedef hareket halinde bekletildi"
+    assert y._bekleyen_hedef is None
+    #     ayni hedef tekrar tekrar gelirse karta yeniden gitmez (seri hat bogulmasin)
+    n = len([k for k in y.mock.kayit if k.startswith("G")])
+    for _ in range(5):
+        y.git(45.02)
+    assert len([k for k in y.mock.kayit if k.startswith("G")]) == n
+    #     eski firmware'de ise Q hata DEGIL, sessizce eski davranis
+    assert s.yeniden_planlama is False and "tanımadı" not in (s.hata or ""), s.hata
+
+    # 18. aci_zamaninda: gecmisten ara deger (gecikme telafisi bunun ustune kurulu)
+    saat[0] += 1.0
+    g = TiltSurucu("mock", _saat=lambda: saat[0])
+    for _ in range(3):
+        saat[0] += 0.25; g.yokla()
+    g._aci_gecmisi = [(10.0, 20.0), (10.1, 22.0), (10.2, 26.0)]
+    g.son_durum_t = saat[0] = 10.2
+    assert abs(g.aci_zamaninda(10.05) - 21.0) < 1e-9
+    assert abs(g.aci_zamaninda(10.15) - 24.0) < 1e-9
+    assert g.aci_zamaninda(9.0) == 20.0 and g.aci_zamaninda(11.0) == 26.0
 
     # 12. mock kaynagi seri port acmaya CALISMAMALI (otomatik-bulma dali eklenince
     #     mock, seri acma koduna dusup "port acilamadi" hatasi uretmisti).
