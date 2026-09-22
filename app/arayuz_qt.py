@@ -241,13 +241,18 @@ class _AciKarosu(QWidget):
     ARALIK = (-180.0, 180.0)                 # eksenin tum araligi (operator acisi)
     DILIM_RENK = {"hareket": T.SARI, "atis": T.KIRMIZI, "izin": T.YESIL}
     DILIM_ALFA = {"hareket": 0.15, "atis": 0.15, "izin": 0.07}
+    # Dolgunun yaricap boyunca alfa carpani ve dis yay cizgisi (carpan, kalinlik).
+    # Her karo kendi dengesini tanimlar: azimut TAM DAIRE oldugu icin net bir
+    # kadran kenari tasiyabilir; yukselis dar bir yelpaze oldugundan ayni cizgi
+    # orada yapiskan bir etiket gibi duruyordu (kullanici bildirdi, 22.09).
+    DILIM_DURAK = ((0.0, 0.0), (0.35, 0.15), (1.0, 1.0))
+    DILIM_KENAR = (2.2, 1.5)
 
     def qt_aci(self, a):
         raise NotImplementedError
 
     def dilim_merkezi(self):
-        """(merkez, dis yaricap, ic yaricap) — karo koordinatinda. Ic yaricap 0 ise
-        dilim tam pasta; degilse yalniz halka bandi. Alt siniflar tanimlar."""
+        """(merkez, yaricap) — karo koordinatinda. Alt siniflar tanimlar."""
         raise NotImplementedError
 
     def dilimler(self):
@@ -275,44 +280,34 @@ class _AciKarosu(QWidget):
         dilimler = self.dilimler()
         if not dilimler:
             return
-        merkez, r, r_ic = self.dilim_merkezi()
+        merkez, r = self.dilim_merkezi()
         kutu = QRectF(merkez.x() - r, merkez.y() - r, 2 * r, 2 * r)
-        ic_kutu = QRectF(merkez.x() - r_ic, merkez.y() - r_ic, 2 * r_ic, 2 * r_ic)
-        bas = r_ic / r if r > 0 else 0.0
         p.save()
         p.setRenderHint(QPainter.Antialiasing)
         for tur, x, y in dilimler:
             renk, alfa = QColor(self.DILIM_RENK[tur]), self.DILIM_ALFA[tur]
-            if r_ic > 0:                                # halka bandi
-                yol = QPainterPath()
-                yol.arcMoveTo(kutu, self.qt_aci(y))
-                yol.arcTo(kutu, self.qt_aci(y), y - x)
-                yol.arcTo(ic_kutu, self.qt_aci(x), -(y - x))
-                yol.closeSubpath()
-            else:                                       # tam pasta dilimi
-                yol = QPainterPath(merkez)
-                yol.arcTo(kutu, self.qt_aci(y), y - x)  # qt_aci azalan: y'den x'e CCW
-                yol.closeSubpath()
-            # Merkeze dogru sonen dolgu: arac okunur kalir, renk kenarda belirginlesir.
+            yol = QPainterPath(merkez)
+            yol.arcTo(kutu, self.qt_aci(y), y - x)      # qt_aci azalan: y'den x'e CCW
+            yol.closeSubpath()
+            # Merkeze dogru sonen dolgu: arac okunur kalir, renk disa dogru belirginlesir.
             g = QRadialGradient(merkez, r)
-            duraklar = (((0.0, 0.0), (bas, 0.5), (1.0, 1.0)) if r_ic > 0
-                        else ((0.0, 0.0), (0.35, 0.15), (1.0, 1.0)))
-            for konum, carpan in duraklar:
+            for konum, carpan in self.DILIM_DURAK:
                 c = QColor(renk)
                 c.setAlphaF(alfa * carpan)
                 g.setColorAt(konum, c)
             p.setPen(Qt.NoPen)
             p.setBrush(g)
             p.drawPath(yol)
-            # dis yay: dilimin sinirini netlestiren ince cizgi
-            c = QColor(renk)
-            c.setAlphaF(min(1.0, alfa * 2.2))
-            kalem = QPen(c, 1.5)
-            kalem.setCapStyle(Qt.FlatCap)
-            p.setPen(kalem)
-            p.setBrush(Qt.NoBrush)
-            ic = kutu.adjusted(1, 1, -1, -1)
-            p.drawArc(ic, int(self.qt_aci(y) * 16), int((y - x) * 16))
+            if self.DILIM_KENAR:                        # kadran kenari (yalniz azimut)
+                carpan, kalinlik = self.DILIM_KENAR
+                c = QColor(renk)
+                c.setAlphaF(min(1.0, alfa * carpan))
+                kalem = QPen(c, kalinlik)
+                kalem.setCapStyle(Qt.FlatCap)
+                p.setPen(kalem)
+                p.setBrush(Qt.NoBrush)
+                p.drawArc(kutu.adjusted(1, 1, -1, -1),
+                          int(self.qt_aci(y) * 16), int((y - x) * 16))
         p.restore()
 
     def paintEvent(self, e):
@@ -376,6 +371,11 @@ class AracAciGostergesi(_AciKarosu):
         return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
     ARALIK = (FIZIKSEL_ALT, FIZIKSEL_ALT + MEKANIK_ARALIK)   # fiziksel −30..+30
+    # Dar bir yelpaze: keskin kenar cizgisi arayuze yapistirilmis bir etiket gibi
+    # duruyordu. Dolgu namlunun otesinde belirir, dis kenarda yeniden soner —
+    # sinir hissi cizgiyle degil ISIKLA verilir.
+    DILIM_DURAK = ((0.0, 0.0), (0.45, 0.0), (0.88, 0.95), (1.0, 0.30))
+    DILIM_KENAR = None
 
     def ciz(self, p, hedef, aci):
         return self.ciz_saf(p, hedef, self._govde, self._namlu, aci)
@@ -395,10 +395,10 @@ class AracAciGostergesi(_AciKarosu):
         oy = hedef.y() + (hedef.height() - kutu.height() * olcek) / 2
         merkez = QPointF(ox + (self.GOVDE_PIVOT[0] - kutu.x()) * olcek,
                          oy + (self.GOVDE_PIVOT[1] - kutu.y()) * olcek)
-        # Dilim namlu AGZININ OTESINDE bir halka bandi: pasta olsaydi namlu ve govdenin
-        # arkasinda kalip gorunmezdi (denendi).
+        # Yaricap namlu boyunun biraz otesi: dolgu (DILIM_DURAK) zaten namlunun
+        # bittigi yerde belirdigi icin govdenin arkasinda kaybolmaz.
         namlu = (self.NAMLU_PIVOT[0] - self.NAMLU_AGZI[0]) * olcek
-        return merkez, min(namlu * 1.32, merkez.x() - 4), namlu * 1.02
+        return merkez, min(namlu * 1.32, merkez.x() - 4)
 
     @classmethod
     def ciz_saf(cls, p, hedef, govde, namlu, aci):
@@ -475,7 +475,7 @@ class AracYonGostergesi(_AciKarosu):
         tum karonun %80'i oldugu icin dilimler aracin cevresinde bir halka gibi durur."""
         merkez = self.resim_alani().center()
         w, h = self.width(), self.height() - self.YAZI_BOYU - 2
-        return merkez, min(w, h) / 2 - 3, 0.0
+        return merkez, min(w, h) / 2 - 3
 
     @classmethod
     def ciz_saf(cls, p, hedef, resim, aci, yaricap):
