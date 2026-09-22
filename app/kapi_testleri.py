@@ -119,6 +119,14 @@ class SahtePencere:
     _ates_bas = A.MainWindow._ates_bas
     _ates_kes = A.MainWindow._ates_kes
     _ates_kisayolu = A.MainWindow._ates_kisayolu
+    _ates_tusu = A.MainWindow._ates_tusu
+    _ates_kurma_bitti = A.MainWindow._ates_kurma_bitti
+    _ates_kurma_iptal = A.MainWindow._ates_kurma_iptal
+    _tus_bas = A.MainWindow._tus_bas
+    _tus_birak = A.MainWindow._tus_birak
+    _tus_yonu = A.MainWindow._tus_yonu
+    ATES_TUSLARI = A.MainWindow.ATES_TUSLARI
+    ATES_KURMA_MS = A.MainWindow.ATES_KURMA_MS
     atis_yasak_mi = A.MainWindow.atis_yasak_mi
     _gamepad_tik = A.MainWindow._gamepad_tik
     _gamepad_durum_yaz = A.MainWindow._gamepad_durum_yaz
@@ -160,6 +168,8 @@ class SahtePencere:
         self._son_tekrar_t = 0.0
         self._tekrar_gecikme = SahteTimer()
         self._tekrar_timer = SahteTimer()
+        self._ates_tuslari = set()
+        self._ates_kurma = SahteTimer()
         self.gamepad = SahteGamepad()
         self._gp_son_t = time.time()
         self._gp_tarama = 0
@@ -439,32 +449,81 @@ def test_basili_tutma_motor_hizini_asmaz():
     assert w.pan_aci > once_pan and w.tilt_aci > once_tilt, (w.pan_aci, w.tilt_aci)
 
 
-def test_l_kisayolu_ates_kapisindan_gecer():
-    """[L] tuşu ATEŞ butonuyla BİREBİR aynı davranmalı — kendi yolunu açmamalı.
+class SahteTus:
+    """QKeyEvent'in kapilarin okudugu kadari."""
 
-    Kısayolun butondan fazla yetkisi olamaz: E-Stop'ta buton kilitliyse [L] de
-    geçmemeli, yoksa şartnamenin E-Stop'u klavyeden aşılabilir olurdu (Yetenek 4)."""
+    def __init__(self, tus, tekrar=False):
+        self._tus, self._tekrar = tus, tekrar
+
+    def key(self):
+        return self._tus
+
+    def isAutoRepeat(self):
+        return self._tekrar
+
+
+def test_klavye_atesi_space_b_basili_tutma():
+    """Klavyeden ateş: [Space]+[B] birlikte 3 sn basılı → aç; [Esc] → kes.
+
+    Tek tuş, erken bırakma, E-Stop ve atışa yasak bölge ateşi AÇAMAZ. Klavyenin
+    butondan fazla yetkisi olamaz — yoksa E-Stop klavyeden aşılabilirdi (Yetenek 4)."""
+    Qt = A.Qt
     w = SahtePencere()
     w.thread = A.VideoThread(None, None, None)
 
-    w._ates_kisayolu()                      # aç
+    def bas(*tuslar):
+        for t in tuslar:
+            w._tus_bas(SahteTus(t))
+
+    def birak(*tuslar):
+        for t in tuslar:
+            w._tus_birak(SahteTus(t))
+
+    # Tek tus kurma baslatmaz
+    bas(Qt.Key_Space)
+    assert not w._ates_kurma.isActive(), "yalniz Space ile kurma basladi"
+    birak(Qt.Key_Space)
+
+    # Iki tus: kurma baslar; sure dolmadan birakilirsa ates ACILMAZ
+    bas(Qt.Key_Space, Qt.Key_B)
+    assert w._ates_kurma.isActive()
+    birak(Qt.Key_B)
+    assert not w._ates_kurma.isActive()
+    w._ates_kurma_bitti()                    # gec gelen zamanlayici da acamaz
+    assert w.kontrol.mock.lazer is False, "erken birakilinca ates acildi"
+
+    # Tam basili tutma: sure dolunca ates acilir
+    bas(Qt.Key_Space, Qt.Key_B)
+    w._ates_kurma_bitti()
     assert w.fire_btn.isChecked() and w.kontrol.mock.lazer is True
-    w._ates_kisayolu()                      # kapat
+    birak(Qt.Key_Space, Qt.Key_B)
+    assert w.kontrol.mock.lazer is True, "tus birakinca ates kendiliginden kesildi"
+
+    # ESC keser
+    bas(Qt.Key_Escape)
     assert not w.fire_btn.isChecked() and w.kontrol.mock.lazer is False
 
-    # E-Stop: buton kilitlenir → kısayol da geçmez
+    # E-Stop: buton kilitli -> klavye de acamaz
     w.thread.estop = True
     w.fire_btn.setEnabled(False)
-    w._ates_kisayolu()
-    assert w.kontrol.mock.lazer is False, "E-Stop'ta [L] ile ateş açıldı"
-    assert not w.fire_btn.isChecked()
+    bas(Qt.Key_Space, Qt.Key_B)
+    w._ates_kurma_bitti()
+    assert w.kontrol.mock.lazer is False, "E-Stop'ta Space+B ile ates acildi"
+    birak(Qt.Key_Space, Qt.Key_B)
 
-    # Atışa yasak bölgede de reddedilmeli (ateşin tek kapısı ortak)
+    # Atisa yasak bolge de reddedilir (ates kapisi ortak)
     w.thread.estop = False
     w.fire_btn.setEnabled(True)
     w.bolge.atis_pan = B.Pencere(True, 40.0, 60.0)   # pan 0 -> pencere DISI (yasak)
-    w._ates_kisayolu()
-    assert w.kontrol.mock.lazer is False, "yasak bölgede [L] ile ateş açıldı"
+    bas(Qt.Key_Space, Qt.Key_B)
+    w._ates_kurma_bitti()
+    assert w.kontrol.mock.lazer is False, "yasak bolgede Space+B ile ates acildi"
+
+    # [L] artik ates acmaz (tek tusla ates = 3 sn kuralini delerdi)
+    w.bolge.atis_pan = B.Pencere(False, -180.0, 180.0)
+    birak(Qt.Key_Space, Qt.Key_B)
+    bas(Qt.Key_L)
+    assert w.kontrol.mock.lazer is False, "[L] hala ates aciyor"
 
 
 def test_gamepad_ayni_kapilardan_gecer():
@@ -737,7 +796,7 @@ if __name__ == "__main__":
     test_estopta_iki_eksen_de_oldugu_yerde_donar()
     test_devam_edince_referans_korunur()
     test_basili_tutma_motor_hizini_asmaz()
-    test_l_kisayolu_ates_kapisindan_gecer()
+    test_klavye_atesi_space_b_basili_tutma()
     test_gamepad_ayni_kapilardan_gecer()
     test_lazer_gucu_arayuzden_karta_gider()
     test_ates_tazelemesi_kesilirse_lazer_soner()
@@ -753,4 +812,4 @@ if __name__ == "__main__":
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
-          "[L] kisayolu, gamepad, lazer gucu, ates olu adam anahtari")
+          "Space+B/ESC klavye atesi, gamepad, lazer gucu, ates olu adam anahtari")

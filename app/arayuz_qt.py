@@ -1688,6 +1688,10 @@ class MainWindow(QMainWindow):
         # tuslari pencereye hic ulasmiyordu (W/A/S/D ulasiyordu cunku gorunum harfleri
         # kullanmaz). Bizim tuslarimizi gorunume gitmeden burada yakalariz.
         if (obj is getattr(self, "view", None)
+                and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape):
+            self._tus_bas(event)                       # ESC ates keser — odak nerede olursa olsun
+            return True
+        if (obj is getattr(self, "view", None)
                 and event.type() in (QEvent.KeyPress, QEvent.KeyRelease)
                 and not self._metin_girisi_odakta()):
             if event.type() == QEvent.KeyPress:
@@ -1986,6 +1990,13 @@ class MainWindow(QMainWindow):
         self._tekrar_timer = QTimer(self)
         self._tekrar_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._tekrar_timer.timeout.connect(self._tekrar_tik)
+
+        # Klavyeden ATES: [Space]+[B] birlikte ATES_KURMA_MS basili tutulmali. Kaza
+        # ile tek tusa basmak lazeri acmasin diye kasitli olarak zor bir hareket.
+        self._ates_tuslari = set()
+        self._ates_kurma = QTimer(self)
+        self._ates_kurma.setSingleShot(True)
+        self._ates_kurma.timeout.connect(self._ates_kurma_bitti)
 
     # ---- Ic sayfa 0: D-pad ----
     def _dpad_sayfasi(self):
@@ -2389,6 +2400,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "_tekrar_timer"):
             return
         self._tekrar_durdur()
+        self._ates_kurma_iptal()                       # odak gitti: yarim kalan kurma sayilmaz
         for ad, _, _ in self.YON_TABLO.values():
             b = getattr(self, ad, None)
             if b is not None and hasattr(self, "_key_normal_style"):
@@ -2878,7 +2890,7 @@ class MainWindow(QMainWindow):
         return TUS_YON.get(event.key())
 
     def _ates_kisayolu(self):
-        """[L] tusu — ATES butonuyla BIREBIR ayni sey (atesin tek kapisi `_ates_bas`).
+        """Gamepad A tusu — ATES butonuyla BIREBIR ayni sey (atesin tek kapisi `_ates_bas`).
 
         Buton devre disiysa (E-Stop) kisayol da gecmez: kisayolun butondan daha fazla
         yetkisi olamaz, yoksa E-Stop klavyeden asilabilir olurdu."""
@@ -2887,14 +2899,54 @@ class MainWindow(QMainWindow):
         self.fire_btn.setChecked(not self.fire_btn.isChecked())
         self._ates_bas()
 
+    ATES_TUSLARI = frozenset({Qt.Key_Space, Qt.Key_B})
+    ATES_KURMA_MS = 3000
+
+    def _ates_kurma_iptal(self):
+        if hasattr(self, "_ates_kurma"):
+            self._ates_kurma.stop()
+            self._ates_tuslari.clear()
+
+    def _ates_kurma_bitti(self):
+        """3 sn doldu: iki tus HALA basiliysa ateş acilir — yine TEK kapidan (`_ates_bas`).
+        Buton devre disiysa (E-Stop) gecmez: klavyenin butondan fazla yetkisi olamaz."""
+        if self._ates_tuslari != self.ATES_TUSLARI:
+            return
+        if not hasattr(self, "fire_btn") or not self.fire_btn.isEnabled() \
+                or self.fire_btn.isChecked():
+            return
+        self.fire_btn.setChecked(True)
+        self._ates_bas()
+
+    def _ates_tusu(self, event, basildi):
+        """[Space]+[B] basili tutma. HER MODDA calisir (ATES butonu Otonom'da gorunmez
+        ama klavye yolu moda bagli degildir). Doner: tus bizimse True."""
+        if event.key() not in self.ATES_TUSLARI:
+            return False
+        if event.isAutoRepeat():
+            return True
+        if not basildi:
+            if self._ates_kurma.isActive():
+                self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;'
+                                    f'Ateş iptal — tuş erken bırakıldı')
+            self._ates_kurma_iptal()
+            return True
+        self._ates_tuslari.add(event.key())
+        if self._ates_tuslari == self.ATES_TUSLARI and not self.fire_btn.isChecked():
+            self._ates_kurma.start(self.ATES_KURMA_MS)
+            self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;'
+                                f'ATEŞ: Space + B basılı tut… (3 sn)')
+        return True
+
     def _tus_bas(self, event):
         """Klavyenin TEK kapisi (basma). Doner: tus bizimse True.
         Hareket `_dpad_press` -> `_aci_hareket` ile gider: ekran + KART (motor) birlikte."""
-        # [L] = ates ac/kes. HER MODDA calisir: ATES butonu manuel panelde durdugu icin
-        # otonom modda gorunmez, ama lazeri kesme yolu moda bagli OLMAMALIDIR.
-        if event.key() == Qt.Key_L:
-            if not event.isAutoRepeat():
-                self._ates_kisayolu()
+        # [Esc] = ateşi kes. Her modda ve her durumda; kesmek her zaman guvenlidir.
+        if event.key() == Qt.Key_Escape:
+            self._ates_kurma_iptal()
+            self._ates_kes("ESC")
+            return True
+        if self._ates_tusu(event, basildi=True):
             return True
         yon = self._tus_yonu(event)
         if yon is None:
@@ -2903,9 +2955,13 @@ class MainWindow(QMainWindow):
         return True
 
     def _tus_birak(self, event):
+        if event.key() == Qt.Key_Escape:
+            return True
+        if self._ates_tusu(event, basildi=False):
+            return True
         yon = self._tus_yonu(event)
         if yon is None:
-            return event.key() in TUS_YON or event.key() == Qt.Key_L
+            return event.key() in TUS_YON
         self._dpad_release(yon)
         return True
 
