@@ -241,12 +241,12 @@ class _AciKarosu(QWidget):
     ARALIK = (-180.0, 180.0)                 # eksenin tum araligi (operator acisi)
     DILIM_RENK = {"hareket": T.SARI, "atis": T.KIRMIZI, "izin": T.YESIL}
     DILIM_ALFA = {"hareket": 0.15, "atis": 0.15, "izin": 0.07}
-    # Dolgunun yaricap boyunca alfa carpani ve dis yay cizgisi (carpan, kalinlik).
-    # Her karo kendi dengesini tanimlar: azimut TAM DAIRE oldugu icin net bir
-    # kadran kenari tasiyabilir; yukselis dar bir yelpaze oldugundan ayni cizgi
-    # orada yapiskan bir etiket gibi duruyordu (kullanici bildirdi, 22.09).
-    DILIM_DURAK = ((0.0, 0.0), (0.35, 0.15), (1.0, 1.0))
-    DILIM_KENAR = (2.2, 1.5)
+    # Dolgunun yaricap boyunca alfa carpani. Iki karoda da renk ARACIN CEVRESINDE
+    # belirip her iki uca dogru soner: ne merkezde araci boyar ne de disarida
+    # kesik bir kenar birakir. Keskin kadran cizgisi denendi ve KALDIRILDI —
+    # renkten cok cizgi one cikiyor, arayuze yapistirilmis gibi duruyordu
+    # (kullanici iki karo icin de ayni seyi soyledi, 22.09).
+    DILIM_DURAK = ((0.0, 0.0), (0.5, 0.0), (0.9, 1.0), (1.0, 0.0))
 
     def qt_aci(self, a):
         raise NotImplementedError
@@ -298,16 +298,6 @@ class _AciKarosu(QWidget):
             p.setPen(Qt.NoPen)
             p.setBrush(g)
             p.drawPath(yol)
-            if self.DILIM_KENAR:                        # kadran kenari (yalniz azimut)
-                carpan, kalinlik = self.DILIM_KENAR
-                c = QColor(renk)
-                c.setAlphaF(min(1.0, alfa * carpan))
-                kalem = QPen(c, kalinlik)
-                kalem.setCapStyle(Qt.FlatCap)
-                p.setPen(kalem)
-                p.setBrush(Qt.NoBrush)
-                p.drawArc(kutu.adjusted(1, 1, -1, -1),
-                          int(self.qt_aci(y) * 16), int((y - x) * 16))
         p.restore()
 
     def paintEvent(self, e):
@@ -371,11 +361,9 @@ class AracAciGostergesi(_AciKarosu):
         return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
     ARALIK = (FIZIKSEL_ALT, FIZIKSEL_ALT + MEKANIK_ARALIK)   # fiziksel −30..+30
-    # Dar bir yelpaze: keskin kenar cizgisi arayuze yapistirilmis bir etiket gibi
-    # duruyordu. Dolgu namlunun otesinde belirir, dis kenarda yeniden soner —
-    # sinir hissi cizgiyle degil ISIKLA verilir.
+    # Yelpaze dar oldugu icin renk namlunun hemen otesinde baslar (tabandaki
+    # rampa daha erken acilsa govdenin arkasinda harcanirdi).
     DILIM_DURAK = ((0.0, 0.0), (0.45, 0.0), (0.88, 0.95), (1.0, 0.30))
-    DILIM_KENAR = None
 
     def ciz(self, p, hedef, aci):
         return self.ciz_saf(p, hedef, self._govde, self._namlu, aci)
@@ -466,6 +454,10 @@ class AracYonGostergesi(_AciKarosu):
 
     def ciz(self, p, hedef, aci):
         return self.ciz_saf(p, hedef, self._resim, aci, self._yaricap)
+
+    # Tam daire: renk arac siluetinin cevresinde bir hale olarak durur; taban
+    # rampasi biraz daha guclu, cunku alan genis ve renk her iki uca soner.
+    DILIM_ALFA = {"hareket": 0.19, "atis": 0.19, "izin": 0.09}
 
     def qt_aci(self, a):
         return 90.0 - a                       # on = yukari, + = saat yonu

@@ -1109,10 +1109,11 @@ Merkeze alma yalnız **[R]** (Space/C kaldırıldı) + MERKEZ butonu.
 olarak çizilir — **sarı** = harekete yasak (hareket penceresinin dışı), **kırmızı** =
 atışa yasak (hareket içinde, atış dışında), **soluk yeşil** = atış izni. Dilimler dünyaya
 sabittir (araç döner, dilim dönmez), aracın ARKASINDA kalır, merkeze doğru söner.
-Azimutta tam daire + ince kadran kenarı; yükselişte yalnız mekanik aralık (−30…+30) ve
-**kenar çizgisiz**, namlu ağzının ötesinde belirip dışa doğru yeniden sönen bir yelpaze —
-dar bir dilimde net kenar "yapıştırılmış etiket" gibi duruyordu (kullanıcı bildirdi).
-Her karo kendi dengesini `DILIM_DURAK` (alfa rampası) ve `DILIM_KENAR` ile tanımlar. Kaydedilmemiş düzenleme
+Azimutta tam daire, yükselişte yalnız mekanik aralık (−30…+30). **Kadran kenarı çizgisi
+denendi ve kaldırıldı** (iki karoda da): dar/parlak bir çizgi renkten önce göze çarpıyor,
+arayüze yapıştırılmış gibi duruyordu — kullanıcı ikisi için de aynı şeyi söyledi. Sınır
+artık çizgiyle değil ışıkla veriliyor: renk aracın çevresinde belirir, hem içe hem dışa
+tamamen söner (`DILIM_DURAK` alfa rampası; karo başına ayarlanır). Kaydedilmemiş düzenleme
 yansımaz (`_bolge_karolari_yenile`, `_AciKarosu.dilimler`; test:
 `test_aci_karosu_yasak_alan_dilimleri`).
 **⚠ GERÇEK HATA (22.09, kullanıcı bildirdi):** bir ayar kutucuğundaki sayı kutusuna
