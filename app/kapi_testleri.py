@@ -871,6 +871,35 @@ def test_merkeze_alma_kademeli_ve_kesilebilir():
     assert not w._merkez_timer.isActive(), "E-Stop merkeze almayi durdurmadi"
 
 
+def test_ekrandaki_merkez_kol_yoklamasindan_etkilenmez():
+    """⚠ GERÇEK HATA (22.09, kullanıcı bildirdi): kol takılıyken ekrandaki MERKEZ
+    butonunu basılı tutmak İŞE YARAMIYORDU.
+
+    Sebep: gamepad 50 ms'de bir yoklanıyor ve "L1/R1 basılı değil" diyerek merkez
+    sayacını iptal ediyordu — sayacı KİMİN başlattığına bakılmıyordu. Artık sayacı
+    yalnız başlatan kaynak iptal edebilir."""
+    w = SahtePencere()
+    w.thread = A.VideoThread(None, None, None)
+
+    w._dpad_press("center")                       # ekrandaki MERKEZ basılı tutuluyor
+    assert w._merkez_kurma.isActive()
+    for _ in range(5):                            # kol yoklaması akıp gidiyor
+        w.gamepad = SahteGamepad(basili=())
+        w._gamepad_tik()
+    assert w._merkez_kurma.isActive(), "kol yoklaması ekrandaki merkez sayacını iptal etti"
+    w._merkez_kurma_bitti()
+    assert w._merkez_timer.isActive(), "2 sn dolunca merkeze alma başlamadı"
+
+    # Tersi de doğru: koldan başlatılan sayacı ekrandaki tuşu bırakmak iptal etmez
+    w._merkez_durdur()
+    w._merkez_kurma_iptal()
+    w.gamepad = SahteGamepad(basili=("l1",))
+    w._gamepad_tik()
+    assert w._merkez_kurma.isActive()
+    w._dpad_release("center")
+    assert w._merkez_kurma.isActive(), "ekrandaki bırakma kolun sayacını iptal etti"
+
+
 def test_estopta_r_merkeze_almaz():
     """[R] (ve gamepad Y) E-Stop'ta HICBIR sey yapmamali.
 
@@ -1013,6 +1042,7 @@ if __name__ == "__main__":
     test_basili_tutma_estopta_kesilir()
     test_estopta_r_merkeze_almaz()
     test_merkeze_alma_kademeli_ve_kesilebilir()
+    test_ekrandaki_merkez_kol_yoklamasindan_etkilenmez()
     test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar()
     test_dikey_hareket_penceresi_kullanici_ornegi()
     test_yatay_pencere_arkadan_dolanilamaz()

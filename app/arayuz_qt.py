@@ -301,30 +301,6 @@ class _AciKarosu(QWidget):
             p.setBrush(g)
             p.drawPath(yol)
 
-        # Aktif pencerelerin SINIR CIZGILERI. Neden gerekli: pencere tum erisilebilir
-        # aralikla ayni oldugunda (or. hareket ±90 = yapisal tavan) yasak alan
-        # KALMAZ, dolayisiyla renkli dilim de cizilmez — operator anahtari aciyor ve
-        # ekranda hicbir sey degismiyor sanıyordu (kullanici bildirdi 22.09).
-        # Sinir cizgisi "bu kural ACIK ve siniri burasi" der.
-        for tur, pencere in (("hareket", self.hareket), ("atis", self.atis)):
-            if not pencere or not pencere[0]:
-                continue
-            renk = QColor(self.DILIM_RENK[tur])
-            renk.setAlphaF(0.55)
-            kalem = QPen(renk, 1.6)
-            kalem.setCapStyle(Qt.RoundCap)
-            p.setPen(kalem)
-            p.setBrush(Qt.NoBrush)
-            lo, hi = self.ARALIK
-            for aci in pencere[1:]:
-                if not (lo - 0.01 <= aci <= hi + 0.01):
-                    continue
-                yon = math.radians(self.qt_aci(aci))
-                ic, dis = r * 0.72, r * 1.0
-                p.drawLine(QPointF(merkez.x() + math.cos(yon) * ic,
-                                   merkez.y() - math.sin(yon) * ic),
-                           QPointF(merkez.x() + math.cos(yon) * dis,
-                                   merkez.y() - math.sin(yon) * dis))
         p.restore()
 
     def paintEvent(self, e):
@@ -2172,6 +2148,7 @@ class MainWindow(QMainWindow):
         self._merkez_timer = QTimer(self)
         self._merkez_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._merkez_timer.timeout.connect(self._merkez_tik)
+        self._merkez_kurma_kim = None              # sayaci baslatan kaynak ("ui"/"kol")
         self._merkez_kurma = QTimer(self)
         self._merkez_kurma.setSingleShot(True)
         self._merkez_kurma.timeout.connect(self._merkez_kurma_bitti)
@@ -2504,8 +2481,8 @@ class MainWindow(QMainWindow):
         if direction in ("home", "center"):
             if hasattr(self, "btn_center"):
                 self.btn_center.setStyleSheet(self._key_center_active_style)
-            self._merkez_kurma_baslat("MERKEZ")   # 2 sn basili tut (kaza ile merkeze
-            return                                #  donus gimbal'i bastan alir)
+            self._merkez_kurma_baslat("MERKEZ", kim="ui")   # 2 sn basili tut (kaza ile
+            return                                          # merkeze donus gimbal'i bastan alir)
         ad, kpan, ktilt = self.YON_TABLO[direction]
         getattr(self, ad).setStyleSheet(self._key_active_style)
         self._kol_isik(direction, True)
@@ -2518,7 +2495,7 @@ class MainWindow(QMainWindow):
         if direction in ("home", "center"):
             if hasattr(self, "btn_center"):
                 self.btn_center.setStyleSheet(self._key_center_normal_style)
-            self._merkez_kurma_iptal(erken=True)
+            self._merkez_kurma_iptal(erken=True, kim="ui")
             return
         getattr(self, self.YON_TABLO[direction][0]).setStyleSheet(self._key_normal_style)
         self._kol_isik(direction, False)
@@ -2570,7 +2547,14 @@ class MainWindow(QMainWindow):
         # E-STOP her kosulda islenir (digerlerinden ONCE): acil durdurma bir moda ya da
         # baska bir kosula bagli olamaz. Ayni buton DEVAM icin de kullanilir.
         # Koldaki gercek tuslar ekrandaki kol resminde yanar (durum gostergesi).
-        self._kol_gamepad_isik(d.basili)
+        # Cubuklar analogdur (dugme degil): sapinca kendi daireleri yanar — yoksa
+        # sag cubukla yukari/asagi surerken ekranda hicbir sey degismiyordu.
+        isiklar = set(d.basili)
+        if d.pan:
+            isiklar.add("sol_cubuk")
+        if d.tilt:
+            isiklar.add("sag_cubuk")
+        self._kol_gamepad_isik(isiklar)
         self._gp_ates_basili = d.ates_basili
 
         if d.estop:
@@ -2596,9 +2580,9 @@ class MainWindow(QMainWindow):
         # MERKEZ: L1/R1 **2 sn basili** (ates gibi). Tek dokunusla merkeze donmek
         # gimbal'i bastan alir; kazara dokunmak pahaliya mal olurdu.
         if d.merkez:
-            self._merkez_kurma_baslat("L1/R1")
+            self._merkez_kurma_baslat("L1/R1", kim="kol")
         elif not d.merkez_basili:
-            self._merkez_kurma_iptal(erken=True)
+            self._merkez_kurma_iptal(erken=True, kim="kol")
 
         # HAREKET: adim = tavan hiz x gecen sure x cubugun sapmasi. Basili tutma
         # (`_tekrar_tik`) ile ayni matematik — tek farki analog carpan. Sabit adim
@@ -2969,18 +2953,25 @@ class MainWindow(QMainWindow):
 
     MERKEZ_KURMA_MS = 2000       # MERKEZ butonu / L1-R1: basili tutma suresi
 
-    def _merkez_kurma_baslat(self, kaynak):
+    def _merkez_kurma_baslat(self, kaynak, kim="ui"):
         """Merkeze alma 2 sn basili tutmayi ister: kaza ile dokunmak gimbal'i
         bastan almasin (ates kurmasiyla ayni desen)."""
         if self._hareket_kilitli() or self._merkez_kurma.isActive():
             return
+        self._merkez_kurma_kim = kim
         self._kol_isik("l1", True)
         self._kol_isik("r1", True)
         self._merkez_kurma.start(self.MERKEZ_KURMA_MS)
         self.sb_msg.setText(f'<span style="color:{BLUE}">●</span>&nbsp;'
                             f'MERKEZ: {kaynak} basılı tut… (2 sn)')
 
-    def _merkez_kurma_iptal(self, erken=False):
+    def _merkez_kurma_iptal(self, erken=False, kim=None):
+        """⚠ `kim`: sayaci YALNIZ baslatan kaynak iptal edebilir. Gamepad yoklamasi
+        50 ms'de bir "L1/R1 basili degil" diyor; kaynak ayrimi olmadan ekrandaki
+        MERKEZ butonunu basili tutmak HICBIR ZAMAN 2 sn'yi dolduramiyordu — kol
+        takiliyken ekrandaki merkez islevsiz kaliyordu (kullanici bildirdi)."""
+        if kim is not None and getattr(self, "_merkez_kurma_kim", None) != kim:
+            return
         sonlandi = self._merkez_kurma.isActive()
         self._merkez_kurma.stop()
         self._kol_isik("l1", False)
@@ -3499,11 +3490,14 @@ class MainWindow(QMainWindow):
         "hedef" diye soyler; olcum gibi gostermek en yaniltici hata olurdu."""
         if not d:
             return
-        renk = {"Hazır": GRN, "ATEŞ": RED, "E-STOP": RED}.get(d["durum_ad"], BD2)
-        ek = " · mock" if self.kontrol.mock_mu else ""
-        self._ci("ESP32", renk,
-                 f'· {d["durum_ad"]} · hedef yatay {d["pan"]:.1f}° dikey {d["tilt"]:.1f}°'
-                 f' · {d["hiz_ad"]}{ek}')
+        # ⚠ MOCK YESIL GORUNMEZ: sahte cihazda "Hazır" yazip yesil yanmak "kart takili"
+        # demektir — operator kablosuz bir sistemi hazir saniyordu (kullanici sordu).
+        # Sahte cihaz her zaman SARI ve acikca "sahte" yazar.
+        if self.kontrol.mock_mu:
+            self._ci("ESP32", AMB, "· sahte cihaz (kart takılı değil)")
+        else:
+            renk = {"Hazır": GRN, "ATEŞ": RED, "E-STOP": RED}.get(d["durum_ad"], BD2)
+            self._ci("ESP32", renk, f'· {self.kontrol.kaynak} · {d["durum_ad"]}')
         self._ci("Lazer", RED if d["lazer"] else BD2,
                  f'· AKTİF %{d["lazer_guc"]}' if d["lazer"] else f'· kapalı · %{d["lazer_guc"]}')
         self._lazer_bilgi_yaz()          # LAZER kartinin basligi da ates durumunu gostersin

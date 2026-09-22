@@ -57,7 +57,8 @@ DOKUNMATIK = QRectF(82, 38, 36, 28)          # orta dokunmatik yüzey (tuş değ
 
 # Sistemin gerçekten kullandığı tuşlar; kalanları soluk çizilir ki göz ilgisizleri
 # aramasın (video anlatımında "bunlar çalışıyor" demek kolay olsun).
-ETKIN = ("up", "down", "left", "right", "l1", "r1", "l2", "r2", "start")
+ETKIN = ("up", "down", "left", "right", "l1", "r1", "l2", "r2", "start",
+         "sol_cubuk", "sag_cubuk")   # cubuklar da komut verir: sol=yatay, sag=dikey
 
 ISIK_RENK = {"l2": T.KIRMIZI, "r2": T.KIRMIZI, "start": T.KIRMIZI}   # geri kalanı AKSAN
 

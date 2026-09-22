@@ -1117,11 +1117,10 @@ ayar kutularına ±90'dan büyük değer **yazılamaz**. Pan sarmasız hesapland
 arkadan dolanmak da mümkün değildir. Açı karosunda **yalnız ön yarı boyanır** — arka yarı
 erişilemez olduğu için orayı sarıya boyamak "yasak alan" değil "olmayan alan" gösterirdi.
 Kapı testi: `test_yatay_on_yariyi_gecemez`.
-**Aktif pencerenin SINIR ÇİZGİLERİ (22.09):** pencere tüm erişilebilir aralıkla aynıysa
-(ör. hareket ±90 = yapısal tavan) yasak alan kalmaz, dolayısıyla renkli dilim de
-çizilmez — operatör anahtarı açıyor, ekranda hiçbir şey değişmiyordu ("harekete yasak
-alan çalışmıyor" şikâyeti). Artık aktif her pencerenin iki sınırına renkli ince bir
-çizgi çizilir: kuralın AÇIK olduğu ve sınırın nerede olduğu her durumda görünür.
+**Sınır çizgisi DENENDİ ve KALDIRILDI (22.09):** pencere tüm erişilebilir aralıkla
+aynıyken (ör. hareket ±90 = yapısal tavan) yasak alan kalmadığı için renk de çizilmez;
+bunu görünür kılmak üzere sınırlara ince çizgi eklendi, takım beğenmedi — çizgi yine
+öne çıkıyordu. Geri alındı: pencere daraltılınca renk zaten görünür.
 **Hazır ayarlar (22.09):** pencereler KAPALI gelir ama kutular dolu: hareket yatay ±90 /
 dikey ±30, **atış yatay ±30 / dikey ±15** — ateş alanı hareket alanından DAR başlar
 (gidilebilen her yere ateş izni vermek güvenli taraf değildir).
@@ -1183,6 +1182,20 @@ doğrulandı (kutucuk sonrası ok tuşu: eski 0°, yeni 1°).
 - **Aşama kartı:** bütün yazılar solda (içerik + altında aşama adı ve tek satır kural).
 - Boşalan dikey alan açı karolarına verildi (resimler büyüdü); D-pad ızgarası 30 px'lik
   tuşlara göre düzeltildi (önce 28'e göre hesaplanmış, tuşlar üst üste biniyordu).
+
+**⚠ GERÇEK HATA (22.09, kullanıcı bildirdi): kol takılıyken ekrandaki MERKEZ
+butonu işlevsizdi.** Gamepad 50 ms'de bir yoklanıp "L1/R1 basılı değil" diyerek merkez
+sayacını iptal ediyordu; sayacı KİMİN başlattığına bakılmıyordu, yani ekrandaki tuş
+2 sn'yi hiç dolduramıyordu. Artık sayacı yalnız başlatan kaynak iptal edebiliyor
+(`_merkez_kurma_kim`). Kapı testi: `test_ekrandaki_merkez_kol_yoklamasindan_etkilenmez`.
+
+**Alt çubuk — ESP32 mock artık YEŞİL YANMIYOR (22.09):** sahte cihazda "Hazır" yazıp
+yeşil yanmak "kart takılı" demekti; operatör kablosuz bir sistemi hazır sanıyordu
+(kullanıcı sordu). Sahte cihaz SARI ve açıkça "sahte cihaz (kart takılı değil)" yazar.
+Hedef açı/hız metni de kaldırıldı — aynı bilgi zaten açı karolarında.
+
+**Kol göstergesinde ÇUBUKLAR da yanar:** çubuklar analogdur (düğme değil); sağ çubukla
+yukarı/aşağı sürerken ekranda hiçbir şey değişmiyordu, artık sapan çubuğun dairesi yanar.
 
 **⚠ 22.09 — HAREKETİN TAMAMI BOZULMUŞTU (bulundu, düzeltildi):** bir yardımcı metot
 silinirken üstündeki `@staticmethod` satırı geride kalıp hareket kapısının
