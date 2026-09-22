@@ -1231,6 +1231,85 @@ hedef 2.8→0.7 px ve 138→0 dur-kalk. Otonomdan çıkışta X ile anında durd
 yatay 43 px, 34 ID değişimi · sürekli takip + kamera açısı → **%99, dikey 5.5 px, yatay 5 px,
 0 ID değişimi**. Zor senaryo (uzaklaşma, hızlı, kapatma, 45 sn): %92, 3 ROI kurtarma.
 
+### 14.2 Takip doğrulaması + UZAK TESPİT: renkle yönlendirilen tarama (22.09 gece)
+
+**3 bölümlü canlı test (araç elle 0/0'a getirildi, `R`+`PR`):**
+| Bölüm | Hedef hızı | |hata| medyan | Sarsıntı | Kilit |
+|---|---|---|---|---|
+| Sabit 20 sn | 0 | **0.6 px** (ort) | 2 °/s² | %100, 0 ID değişimi |
+| Yavaş 30 sn | ort 7.5 °/s | **6.5 px** | 47 °/s² | %100, 0 ID değişimi |
+| Normal 30 sn | ort 20, tepe 168 °/s | 34 px | 250 °/s² | %98, 10 ID değişimi |
+
+Titreme ve dur-kalk şikâyeti **kapandı**. Hızlı bölümdeki hatanın kaynağı motor değil:
+hız tavanına kareler %6'sında, ivme tavanına %3'ünde dayandı; ölçülen etkin gecikme 99 ms
+ve hedefin o sürede aldığı yol hatanın ~%90'ını açıklıyor (medyan 41 px'in 37.5'i).
+Komut hızı da sınırlayıcı değil: tavan 25 Hz iken gerçekleşen **19 Hz** — asıl sınır
+modelin kare hızı. ⚠ Bu bölümde hedef 2–3 m'de elle sallandı; 10 m'de aynı fiziksel hız
+açısal olarak 4–5 kat yavaştır, yani görev senaryosu **yavaş bölüme** benzer.
+
+**Denenip ELENEN iki iyileştirme (ikisi de ölçülerek):**
+- *Yörüngede ileri öngörü* (hedefin gideceği yere bakmak): gerçek el hareketi izinde
+  hata 22.5 → 27 px. Elin ani yön dönüşlerinde öngörü namluyu yanlış tarafa savuruyor.
+  Koda **girmedi**.
+- *Kart içi kazanç K 8 → 30*: yavaş hedefte 9.9 → 6.6 px ama sarsıntı 154 → 248.
+  Titreşim şikâyeti yeni kapandığı için **alınmadı**.
+
+⭐ **UZAK TESPİT — renk nereye bakılacağını söyler (`algi.kirmizi_oneri`).** Hedeflerin
+tamamı kırmızıdır (A1/A2 hepsi, A3'te zaten yalnız düşman kilitlenir). Kareyi eşit
+karolara bölüp hepsini taramak yerine **kırmızı lekelerin çevresi** taranır.
+Ölçüm (271 gerçek kare + küçültülmüş gerçek drone, 40 örnek/boy):
+
+| Yöntem | 15 m | 20 m | 26 m | yanlış kutu/kare | süre |
+|---|---|---|---|---|---|
+| 12 karo 2× (eski) | %70 | %38 | %15 | 2.48 | 198 ms |
+| 40 karo 3× | %82 | %80 | %58 | 2.19 | 454 ms |
+| **kırmızı öneri + 214 px pencere** | **%82** | **%70** | **%52** | **1.15** | **151 ms** |
+
+Yani her ölçüde daha isabetli, yanlış alarmı yarısı ve daha hızlı. Uçtan uca (gerçek
+model + ByteTrack, 20 dizi × 25 kare): 16 px hedefte kilit **7/20 → 13/20**, ilk kilit
+10.4 → 6.8 karede; yanlış kilit değişmedi (2/20). Ayarlar ölçülerek seçildi:
+- Leke eşikleri **S≥60 / V≥40** + hafif bulanıklaştırma. Varsayılan renk eşikleriyle
+  (S≥110) 21 px hedefin ancak %35'i yakalanıyordu → %88. Uzakta hedef bulanıklaşır,
+  rengi arka planla karışır, doygunluk düşer.
+- Skor = **dolgunluk × √alan** → kırmızı tişört/kutu gibi büyük yüzeyler değil, küçük
+  kompakt cisimler öne çıkar. Kare başına en çok 12 pencere.
+- ⚠ **Pencereyi küçültüp büyütmeyi artırmak ters tepiyor:** 96 px pencere (~6.7×) 21 px
+  hedefte %60, 214 px (~3×) %77. Model 640'ta sahnenin içinde eğitildi; aşırı büyütme
+  bağlamı yok ediyor.
+- Renk hiç aday vermezse (loş ışık) **eski eşit karo taraması** devreye girer. Ayar
+  `uzak_kirmizi` (0 = eski davranış).
+
+**"Model kaçırdı" kare kaydı.** `_zor_ornek` artık **kilit yokken de** çalışıyor: hedef
+renginde küçük/kompakt bir leke varken hiçbir tespit onu kapsamıyorsa kare `kacirma_*`
+olarak **etiketsiz** kaydedilir (kırmızı her leke hedef değildir — etiketi insan koyar).
+Sahada ilk denemede doğrulandı: masanın arkasında yarı kapalı kalan kırmızı drone
+kaydedildi. ⚠ Leke araması 8.5 ms/kare; kaydedilmese de çalışırdı, bu yüzden bakış da
+saniyede bire sınırlandı.
+
+**Yeni araç `app/uzak_mesafe_testi.py`** — motor kullanmaz, yalnız kamera + model:
+`--mesafe 15 --sure 30`. Görülen kare %, kilitli kare %, güven, kutu boyu (px) ve
+beklenen boy hesabını yazar; kaçırılan kareleri `veri_toplama/`'ya toplar.
+
+### 14.3 Dört hedef tipi seçimi + tilt −30/+30 operatör açısı (22.09.2026)
+
+**Hedef tipi seçimi:** HEDEFLER kartında Füze / Heli / F-16 / İHA çoklu seçim
+butonları var. Hiçbiri seçili değilse **hepsi** aranır; Aşama 2 için Füze+İHA
+birlikte seçilebilir, Aşama 3'te turun bildirilen tipi tek başına seçilebilir.
+Seçim otomatik ilk kilidi, uzak edinimi, güçlü-aday kapısını ve elle listeden
+kilitlemeyi aynı anda süzer. Tip değişince uygun olmayan mevcut kilit ve yarım kalmış
+uzak aday bırakılır. Tüm kutular ekranda gösterilmeye devam eder; namlu yalnız seçilen
+tipe kilitlenir. `uzak_mesafe_testi.py --tip drone|fuze|f16|helikopter --suz 1`
+seçilen sınıfın 10–15 m tespit/kilit oranını motorsuz ölçer.
+
+**Tilt açı çerçevesi:** firmware ve kalibrasyon fiziksel kol açısını **0…60°**
+olarak korur; Python/arayüz dışarıya **−30…+30° operatör açısı** verir.
+`operator 0° = fiziksel kol 30°`; dönüşümün tek kaynağı
+`tilt_surucu.kol_karsiligi/aci_karsiligi`dir. Uygulama ilk geçerli konumu aldığında
+kol en alttaysa bir kez fiziksel 30°'ye gider ve orayı ekranda 0° gösterir.
+Bu açılış hareketi hareketin tek kapısından geçer; E-Stop, yasak alan ve limitler
+aynen uygulanır. Kart sonradan resetlenirse otomatik yükseliş **tekrarlanmaz** — fiziksel
+referans bilinmediği için operatör kolu en alta getirip `R` ile doğrulamalıdır.
+
 ---
 
 ## 11. Takım (KTR'den)

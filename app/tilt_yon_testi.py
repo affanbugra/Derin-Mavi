@@ -67,8 +67,8 @@ def aralik_olc(s, cap, dpp, a_bas, a_son, tekrar=2):
     return float(np.mean(oranlar)), float(np.mean(dyler)), guven
 
 
-def tarama(araliklar=((5, 13), (25, 33), (45, 53))):
-    """Orani kol boyunca birkac bolgede olcer: kol-biyel mekanizmasi DOGRUSAL
+def tarama(araliklar=((-25, -17), (-5, 3), (15, 23))):
+    """Orani operator araliginin birkac bolgesinde olcer: kol-biyel mekanizmasi DOGRUSAL
     olmayabilir, tek noktadaki olcum butun araliga genellenemez."""
     import tilt_takip_testi as tt
     kaynak = tt.kayitli_ayarlari_yukle()      # uygulamanin kullandigi FOV ile olc
@@ -85,15 +85,17 @@ def tarama(araliklar=((5, 13), (25, 33), (45, 53))):
     for a, b in araliklar:
         oran, dy, g = aralik_olc(s, cap, dpp, a, b)
         sonuc.append(oran)
-        print(f"  kol {a:>2}->{b:<2} derece: dy {dy:+6.1f} px, oran {oran:.3f} (guven {g:.2f})")
-    git_bekle(s, 20.0)
+        print(f"  operator {a:>3}->{b:<3} derece: dy {dy:+6.1f} px, "
+              f"oran {oran:.3f} (guven {g:.2f})")
+    git_bekle(s, 0.0)                 # test sonunda operator merkezine don
     s.kapat(kalici=True); cap.release()
     print(f"ortalama oran {np.mean(sonuc):.3f}, en kucuk {min(sonuc):.3f}, en buyuk {max(sonuc):.3f}")
     return sonuc
 
 
-def egri(bas=0.0, son=60.0, adim=4.0, tekrar=2, foto_dizin=None, foto_her=12.0):
-    """Komut acisi -> KAMERA acisi egrisini kucuk adimlarla cikarir.
+def egri(bas=T.ACI_MIN, son=T.ACI_MAX, adim=4.0, tekrar=2,
+         foto_dizin=None, foto_her=12.0):
+    """Operator komut acisi (-30..+30) -> KAMERA acisi egrisini cikarir.
 
     Kucuk adim: faz korelasyonu ancak iki kare yeterince ORTUSURSE guvenilir.
     8 derecelik adim ust bolgede goruntuyu fazla kaydirdi (guven 0.04).
@@ -148,7 +150,7 @@ def egri(bas=0.0, son=60.0, adim=4.0, tekrar=2, foto_dizin=None, foto_her=12.0):
         onceki_a, onceki_k = b, k
         if b - son_foto >= foto_her - 1e-6:
             foto(b); son_foto = b
-    git_bekle(s, 20.0)
+    git_bekle(s, 0.0)                 # test sonunda operator merkezine don
     s.kapat(kalici=True); cap.release()
     return noktalar
 
@@ -170,7 +172,7 @@ def main(adim=8.0):
     bas = s.aci
     ust = min(T.ACI_MAX - 2.0, bas + adim)
     if ust - bas < 3.0:                     # yukarida yer yoksa asagidan olc
-        bas = git_bekle(s, max(2.0, bas - adim))
+        bas = git_bekle(s, max(T.ACI_MIN + 2.0, bas - adim))
         ust = min(T.ACI_MAX - 2.0, bas + adim)
     w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     dpp = nisan.derece_per_piksel(w, algi.AYAR.get("fov", 60.0))

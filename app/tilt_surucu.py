@@ -25,6 +25,10 @@ PROTOKOL (ws_motor_test/esp32_ws_test, 115200 baud, ASCII satir + LF):
     Kart -> laptop, 100 ms'de bir:
     STATE3,pos,target,upper,cal,moving,armed,commissioning,angle,goal,count,last_angle,speed
 
+Bu ham protokol fiziksel KOL acisi (0..60) konusur. Modulun Python API'si ise
+operator acisi (-30..+30) konusur: operator 0 = fiziksel kol 30. Donusum yalniz
+bu dosyada yapilir; disaridaki kod G/STATE3'un ham acisini kullanmaz.
+
 ⚠ KALIBRASYON KOMUTLARI (K/C) BU MODULDE YOK — BILEREK.
   `K` kartta KAYITLI TABLOYU SILER. Kalibrasyon, kolun fiziksel olarak 0
   konumunda olmasini ve operatorun aciyi haricen olcmesini gerektiren bir
@@ -55,7 +59,30 @@ import os
 import time
 
 # ---- Kart sabitleri (ws_motor_test/esp32_ws_test/motion_core.h ile AYNI olmali) ----
-ACI_MIN, ACI_MAX = 0.0, 60.0        # kol calisma araligi — MEKANIK, 180 DEGIL
+# IKI ACI CERCEVESI VAR — karistirilmamali:
+#   KOL acisi   : kartin/mekanizmanin acisi, 0..60. Kalibrasyon tablosu, STATE3'teki
+#                 `angle`, G/Y komutlari ve darbe sayaci HEP bu cercevededir.
+#   OPERATOR acisi: -30..+30. Sistem acilinca kol KULLANICI_SIFIR'a (30) yukselir ve
+#                 orasi 0 kabul edilir. NEDEN: kol en alttayken kamera yere/masaya
+#                 bakiyor, ilk goruntu ise yaramiyordu; operator "0" deyince namlu
+#                 calisma araliginin ORTASINDA olmali, ucunda degil.
+# Modulun DISARI actigi her aci (aci_kirp, kamera_acisi, kol_acisi, durum sozlugunun
+# `aci`/`hedef` alanlari) OPERATOR cercevesindedir; kola cevirim burada yapilir.
+KOL_MIN, KOL_MAX = 0.0, 60.0        # kol calisma araligi — MEKANIK, 180 DEGIL
+KULLANICI_SIFIR = 30.0              # operatorun 0 kabul ettigi KOL acisi
+ACI_MIN, ACI_MAX = KOL_MIN - KULLANICI_SIFIR, KOL_MAX - KULLANICI_SIFIR   # -30..+30
+
+
+def kol_karsiligi(aci):
+    """Operator acisi -> kol acisi (karta giden)."""
+    return float(aci) + KULLANICI_SIFIR
+
+
+def aci_karsiligi(kol):
+    """Kol acisi (karttan gelen) -> operator acisi."""
+    return float(kol) - KULLANICI_SIFIR
+
+
 BAUD = 115200
 NOKTA_MAKS = 16                     # MotionCore::CAPACITY
 ZAMAN_ASIMI_MS = 350                # MotionCore::TIMEOUT_MS — bu sure sessizlikte kart kilitlenir
@@ -125,8 +152,8 @@ KAMERA_PPD_REF = 18.7
 def _kamera_tablosu(adim=0.1):
     kol, kam, acc = [0.0], [0.0], 0.0
     x = 0.0
-    while x < ACI_MAX - 1e-9:
-        y = min(ACI_MAX, x + adim)
+    while x < KOL_MAX - 1e-9:
+        y = min(KOL_MAX, x + adim)
         acc += 0.5 * (_ppd_kol(x) + _ppd_kol(y)) * (y - x) / KAMERA_PPD_REF
         kol.append(y)
         kam.append(acc)
@@ -158,14 +185,18 @@ def _ara(xs, ys, x):
 _KOL, _KAM = _kamera_tablosu()
 
 
-def kamera_acisi(kol):
-    """Kol acisi (kartin derecesi) -> kameranin gercek yukselis acisi (derece, 0'dan)."""
-    return None if kol is None else _ara(_KOL, _KAM, float(kol))
+def kamera_acisi(aci):
+    """OPERATOR acisi -> kameranin gercek yukselis acisi (derece).
+
+    ⚠ Kamera olceginin sifiri KOLUN EN ALTIDIR (fiziksel taban), operatorun sifiri
+    degil: olculen tablo (KAMERA_PPD_TABLO) kol acisinda kuruldu ve takip kodu bu
+    olcegi alt/ust siniri ifade etmek icin de kullaniyor."""
+    return None if aci is None else _ara(_KOL, _KAM, kol_karsiligi(aci))
 
 
 def kol_acisi(kamera):
-    """kamera_acisi'nin tersi (tablo monoton artan)."""
-    return None if kamera is None else _ara(_KAM, _KOL, float(kamera))
+    """kamera_acisi'nin tersi (tablo monoton artan). Doner: OPERATOR acisi."""
+    return None if kamera is None else aci_karsiligi(_ara(_KAM, _KOL, float(kamera)))
 
 
 def pan_kirp(derece):
@@ -277,8 +308,9 @@ def otomatik_port_bul(dinleme=0.8, gunluk=None):
 
 
 def aci_kirp(derece):
-    """Kol araligina kirpar. Kart da kendi tarafinda kirpar/reddeder (BAD_ANGLE);
-    tek tarafa guvenilmez — seri monitorden elle G500 yazan biri de olabilir."""
+    """OPERATOR acisini calisma araligina (-30..+30) kirpar. Kart da kendi tarafinda
+    kirpar/reddeder (BAD_ANGLE); tek tarafa guvenilmez — seri monitorden elle G500
+    yazan biri de olabilir."""
     return max(ACI_MIN, min(ACI_MAX, float(derece)))
 
 
@@ -296,13 +328,14 @@ def yorunge(derece, hiz):
     """Y<derece>,<derece/sn>: tilt YORUNGE kipi (otonom takip). Kart referansi
     derece + hiz*t olarak kendisi ilerletir; 150 ms yeni komut gelmezse yumusak durur."""
     v = max(-YORUNGE_HIZ_SINIRI, min(YORUNGE_HIZ_SINIRI, float(hiz)))
-    return f"Y{aci_kirp(derece):.3f},{v:.3f}\n"
+    return f"Y{kol_karsiligi(aci_kirp(derece)):.3f},{v:.3f}\n"
 
 
 def git(derece):
     """MUTLAK hedef aci. Firmware strtod ile okur; keyboard_control.py ile ayni
-    bicim kullanilir ki kart iki istemciden ayni sayiyi gorsun."""
-    return f"G{aci_kirp(derece):.4f}\n"
+    bicim kullanilir ki kart iki istemciden ayni sayiyi gorsun. Girdi OPERATOR
+    acisidir; karta KOL acisi gider."""
+    return f"G{kol_karsiligi(aci_kirp(derece)):.4f}\n"
 
 
 def hiz_profili(darbe_sn, ivme_darbe_sn2):
@@ -337,9 +370,9 @@ def durum_coz(satir):
         count, last_angle, speed = int(parts[10]), float(parts[11]), int(parts[12])
         if not 1 <= count <= NOKTA_MAKS or speed not in JOG_HIZLAR:
             return None
-        if not math.isfinite(last_angle) or not ACI_MIN <= last_angle <= ACI_MAX:
+        if not math.isfinite(last_angle) or not KOL_MIN <= last_angle <= KOL_MAX:
             return None
-        if cal and (count < 2 or last_angle != ACI_MAX):
+        if cal and (count < 2 or last_angle != KOL_MAX):
             return None
         if any(v not in (0, 1) for v in (cal, moving, armed, commissioning)):
             return None
@@ -350,13 +383,18 @@ def durum_coz(satir):
         if cal:
             if not 0 < upper <= 1000000 or max(pos, target) > upper or commissioning:
                 return None
-            if not ACI_MIN <= angle <= ACI_MAX or not ACI_MIN <= goal <= ACI_MAX:
+            if not KOL_MIN <= angle <= KOL_MAX or not KOL_MIN <= goal <= KOL_MAX:
                 return None
         elif upper != 0 or angle != -1 or goal != -1:
             return None
         return dict(pos=pos, target=target, upper=upper, kalibre=bool(cal),
                     hareket=bool(moving), acik=bool(armed),
-                    kalibrasyonda=bool(commissioning), aci=angle, hedef=goal,
+                    kalibrasyonda=bool(commissioning),
+                    # KOL -> OPERATOR cercevesi. ⚠ Kalibresizken kart -1 ("bilinmiyor")
+                    # bildirir; bu nobetci deger cevrilmez, aynen gecer.
+                    aci=aci_karsiligi(angle) if cal else angle,
+                    hedef=aci_karsiligi(goal) if cal else goal,
+                    # son_aci KALIBRASYON verisidir: kol cercevesinde kalir.
                     nokta=count, son_aci=last_angle, hiz=speed)
     except ValueError:
         return None
@@ -369,7 +407,8 @@ HATALAR = {
                     'ile kolu 0°–60° arasında kalibre et.',
     'CAL_REQUIRES_ZERO_IDLE': 'Tilt kalibrasyonu yalnızca kol 0 konumunda ve dururken başlar.',
     'STOP_FIRST': 'Tilt kartı hareket hâlinde; komut reddedildi.',
-    'BAD_ANGLE': 'Tilt açısı 0–60 arasında olmalı.',
+    'BAD_ANGLE': 'Tilt açısı operator ölçeğinde -30…+30 '
+                 '(fiziksel kol 0…60) arasında olmalı.',
     'BAD_SPEED': 'Tilt jog hızı 100, 400 veya 800 olmalı.',
     'BAD_CAL_POINT': 'Tilt kalibrasyon noktası reddedildi.',
     'CAL_SAVE_FAILED': 'Tilt kalibrasyonu kartın belleğine yazılamadı. Kontrol kapatıldı.',
@@ -428,10 +467,10 @@ class MockTiltKart:
 
     # --- kalibrasyon tablosu (dogrusal varsayim; mock icin yeterli) ---
     def _aci(self, darbe):
-        return darbe * ACI_MAX / self.UST_DARBE
+        return darbe * KOL_MAX / self.UST_DARBE
 
     def _darbe(self, aci):
-        return int(round(aci * self.UST_DARBE / ACI_MAX))
+        return int(round(aci * self.UST_DARBE / KOL_MAX))
 
     def islet(self, satir, simdi=None):
         """Bir komut satirini isler; kartin yazacagi yaniti (yoksa None) doner."""
@@ -448,10 +487,10 @@ class MockTiltKart:
                 a, v = map(float, s[1:].split(","))
             except ValueError:
                 return f"ERR,{s},BAD_ANGLE"
-            if not 0 <= a <= ACI_MAX:
+            if not 0 <= a <= KOL_MAX:
                 return f"ERR,{s},BAD_ANGLE"
             self.hedef, self.bekleyen = self.pos, None
-            self.yor_tilt = (self._darbe(a), v * self.UST_DARBE / ACI_MAX, simdi)
+            self.yor_tilt = (self._darbe(a), v * self.UST_DARBE / KOL_MAX, simdi)
             return None                          # firmware Y'ye yanit YAZMAZ
         if s.startswith("PY") and self.yorunge_destek and self.pan_destek:
             if not self.acik:
@@ -534,7 +573,7 @@ class MockTiltKart:
                 a = float(s[1:])
             except ValueError:
                 return f"ERR,{s},BAD_ANGLE"
-            if not math.isfinite(a) or a < ACI_MIN or a > ACI_MAX:
+            if not math.isfinite(a) or a < KOL_MIN or a > KOL_MAX:
                 return f"ERR,{s},BAD_ANGLE"
             if not self.kalibre:
                 return f"ERR,{s},CAL_REQUIRED"
@@ -645,7 +684,7 @@ class MockTiltKart:
         aci = self._aci(self.pos) if self.kalibre else -1.0
         hed = self._aci(self.hedef) if self.kalibre else -1.0
         nokta = 2 if self.kalibre else 1
-        son = ACI_MAX if self.kalibre else 0.0
+        son = KOL_MAX if self.kalibre else 0.0
         return (f"STATE3,{self.pos},{self.hedef},{ust},{kal},"
                 f"{1 if self.pos != self.hedef else 0},{1 if self.acik else 0},0,"
                 f"{aci:.3f},{hed:.3f},{nokta},{son:.3f},{self.jog}")
@@ -827,7 +866,8 @@ class TiltSurucu:
 
     @property
     def aci(self):
-        """Kartin BILDIRDIGI kol acisi (derece) — komut edilen degil. Durum yoksa None.
+        """Kartin bildirdigi OPERATOR acisi (-30..+30) — komut edilen degil.
+        Durum yoksa None.
 
         Bu, laptopun 'inandigi' aciden farklidir ve arayuzun dikey aci referansi
         BU olmalidir: komut kaybolur/gecikirse fark buradan kapanir."""
@@ -882,7 +922,7 @@ class TiltSurucu:
         kalibre edilirse hiz kademeleri KENDILIGINDEN dogru kalir."""
         if not (self.taze and self.durum["kalibre"]) or self.durum["upper"] <= 0:
             return None
-        return self.durum["upper"] / ACI_MAX
+        return self.durum["upper"] / KOL_MAX
 
     def hiz_ayarla(self, seviye):
         """Hiz kademesini secer (Z komutu). Kart mesgul/hazir degilse BEKLETILIR.
@@ -1130,7 +1170,8 @@ class TiltSurucu:
         return self.ozet()
 
     def git(self, derece):
-        """MUTLAK kol acisi komutu (0..60). Kart mesgulse PC tarafinda BEKLETILIR.
+        """MUTLAK operator acisi komutu (-30..+30). Ham karta fiziksel kol
+        acisi (0..60) gider. Kart mesgulse PC tarafinda BEKLETILIR.
 
         Dondurur: karta o an GIDEN aci, ya da kuyruga alindiysa None.
 
@@ -1317,9 +1358,12 @@ class TiltSurucu:
 
 if __name__ == "__main__":
     # ---- komut bicimi: kart strtod ile okur, keyboard_control.py ile AYNI bicim ----
-    assert git(12.5) == "G12.5000\n"
-    assert git(-5) == "G0.0000\n" and git(500) == f"G{ACI_MAX:.4f}\n"
-    assert aci_kirp(-1) == 0.0 and aci_kirp(61) == 60.0
+    # OPERATOR acisi girer, karta KOL acisi cikar (fark: KULLANICI_SIFIR)
+    assert git(12.5) == f"G{12.5 + KULLANICI_SIFIR:.4f}\n"
+    assert git(0) == f"G{KULLANICI_SIFIR:.4f}\n", "operator 0 = kolun ORTASI"
+    assert git(-500) == f"G{KOL_MIN:.4f}\n" and git(500) == f"G{KOL_MAX:.4f}\n"
+    assert aci_kirp(-31) == ACI_MIN == -30.0 and aci_kirp(31) == ACI_MAX == 30.0
+    assert kol_karsiligi(ACI_MIN) == KOL_MIN and aci_karsiligi(KOL_MAX) == ACI_MAX
     assert jog_hiz(400) == "V400\n"
     try:
         jog_hiz(123)
@@ -1331,7 +1375,8 @@ if __name__ == "__main__":
     iyi = "STATE3,3200,3200,6400,1,0,1,0,30.000,30.000,2,60.000,400"
     d = durum_coz(iyi)
     assert d and d["kalibre"] and d["acik"] and not d["hareket"], d
-    assert d["aci"] == 30.0 and d["pos"] == 3200, d
+    # Kart KOL acisini bildirir (30), surucu OPERATOR acisina cevirir (0)
+    assert d["aci"] == 0.0 and d["pos"] == 3200, d
     assert durum_coz("STATE,1,2") is None                      # eski firmware
     assert durum_coz("OK,E") is None
     assert durum_coz(iyi.replace(",400", ",999")) is None       # gecersiz jog hizi
@@ -1366,7 +1411,8 @@ if __name__ == "__main__":
         return False
 
     def gonderilen_hedefler():
-        return [float(k[1:]) for k in s.mock.kayit if k.startswith("G")]
+        # Karta KOL acisi gider; test OPERATOR acisiyla okunsun diye geri cevrilir.
+        return [aci_karsiligi(float(k[1:])) for k in s.mock.kayit if k.startswith("G")]
 
     tik()
     assert s.taze and s.kalibre, s.durum
@@ -1376,29 +1422,29 @@ if __name__ == "__main__":
     tik()
     assert s.acik, "yokla() kilitli karti kendiliginden acmaliydi"
 
-    # 1. MUTLAK aci komutu kartta hedefe donusur
-    s.git(30.0)
+    # 1. MUTLAK aci komutu kartta hedefe donusur (operator 0 = kolun ORTASI)
+    s.git(0.0)
     tik()
     assert s.mock.hedef == 3200, s.mock.hedef
-    assert s.hareket, "30 dereceye giderken kart HAREKET halinde olmali"
+    assert s.hareket, "ortaya giderken kart HAREKET halinde olmali"
 
     # 2. ⭐ ASIL MESELE: hareket halindeyken gelen hedefler KARTA GIRMEZ, en
     #    tazesi beklerAksi halde firmware'in tek yuvasi BAYAT hedefi uygular.
-    s.git(10.0)
-    s.git(45.0)
-    s.git(20.0)                      # en tazesi bu
+    s.git(-20.0)
+    s.git(25.0)
+    s.git(-10.0)                     # en tazesi bu
     assert s.mock.bekleyen is None, "karta bayat hedef sizdi"
-    assert s._bekleyen_hedef == 20.0
+    assert s._bekleyen_hedef == -10.0
 
     # 3. Kart bosalinca yalniz EN TAZE hedef gider. Karta giden komutlar tam olarak
-    #    [30 (ilk), 20 (en taze)] olmali — arada gelen 10 ve 45 HIC gitmemeli.
+    #    [0 (ilk), -10 (en taze)] olmali — arada gelen -20 ve 25 HIC gitmemeli.
     assert yerles(), "kart yerlesmedi"
-    assert abs(s.aci - 20.0) < 0.5, f"en taze hedefe gidilmedi: {s.aci}"
-    assert gonderilen_hedefler() == [30.0, 20.0], gonderilen_hedefler()
+    assert abs(s.aci - (-10.0)) < 0.5, f"en taze hedefe gidilmedi: {s.aci}"
+    assert gonderilen_hedefler() == [0.0, -10.0], gonderilen_hedefler()
 
     # 4. Olu bolge: ayni aciya tekrar komut gonderilmez
     n = len(gonderilen_hedefler())
-    s.git(20.0)
+    s.git(-10.0)
     tik()
     assert len(gonderilen_hedefler()) == n, "gereksiz komut gitti"
 
@@ -1426,7 +1472,7 @@ if __name__ == "__main__":
     assert abs(s.aci - 5.0) < 0.5, s.aci
 
     # 8. dur(): bekleyen hedefi de iptal eder (E-Stop yolu)
-    s.git(50.0)
+    s.git(-25.0)
     s.dur()
     assert s._bekleyen_hedef is None
     tik()
@@ -1487,7 +1533,7 @@ if __name__ == "__main__":
     h = TiltSurucu("mock", _saat=lambda: saat[0])
     tikh = lambda: (saat.__setitem__(0, saat[0] + 0.25), h.yokla())[1]
     tikh(); tikh()
-    assert h.hazir and abs(h.darbe_per_derece - MockTiltKart.UST_DARBE / ACI_MAX) < 1e-9
+    assert h.hazir and abs(h.darbe_per_derece - MockTiltKart.UST_DARBE / KOL_MAX) < 1e-9
     dpd = h.darbe_per_derece
 
     # 14a. Acilista varsayilan kademe kendiliginden bildirilir
@@ -1583,12 +1629,13 @@ if __name__ == "__main__":
     z = TiltSurucu("mock", _saat=lambda: saat[0])
     for _ in range(3):
         saat[0] += 0.25; z.yokla()
-    z.mock.pos = z.mock.hedef = z.mock._darbe(20.0)        # kart 20 saniyor
+    z.mock.pos = z.mock.hedef = z.mock._darbe(20.0)        # kart KOL 20 saniyor
     saat[0] += 0.25; z.yokla()
-    assert abs(z.aci - 20.0) < 0.1, z.aci
+    assert abs(z.aci - aci_karsiligi(20.0)) < 0.1, z.aci
     assert z.sifirla()
     saat[0] += 0.25; z.yokla()
-    assert abs(z.aci) < 1e-9, f"sifirlama olmadi: {z.aci}"
+    # R = "kol SU AN en altta": kol 0, yani OPERATOR cercevesinde en alt uc.
+    assert abs(z.aci - ACI_MIN) < 1e-9, f"sifirlama olmadi: {z.aci}"
     assert z.kalibre, "sifirlama kalibrasyonu SILMEMELI"
     assert not z.kart_resetlendi, "bilincli sifirlama 'kart resetlendi' sanildi"
     # kilitliyken (acik=0) sifirlama da reset sanilmamali
@@ -1600,7 +1647,7 @@ if __name__ == "__main__":
     saat[0] += 0.25; z.yokla(); saat[0] += 0.25; z.yokla()
     z.git(40.0); saat[0] += 0.12; z.yokla()
     z.sifirla(); saat[0] += 0.05; z._oku()
-    assert z.aci > 0.5, "hareket ortasinda sifirlama kabul edildi"
+    assert z.aci > ACI_MIN + 0.5, "hareket ortasinda sifirlama kabul edildi"
 
     # 17. ⭐ YENIDEN PLANLAMA (retarget). Sahada takip ederken namlu titriyordu:
     #     kart hareket halinde yeni hedefi bekletiyor, kol her duzeltmede DURUP
@@ -1612,15 +1659,15 @@ if __name__ == "__main__":
     for _ in range(3):
         saat[0] += 0.25; y.yokla()
     assert y.yeniden_planlama is True, "yeni firmware tanınmadı"
-    y.git(30.0); saat[0] += 0.1; y.yokla()
+    y.git(0.0); saat[0] += 0.1; y.yokla()
     assert y.hareket
-    y.git(45.0)                                   # hareket halinde — BEKLETILMEMELI
-    assert y.mock.hedef == y.mock._darbe(45.0), "hedef hareket halinde bekletildi"
+    y.git(25.0)                                   # hareket halinde — BEKLETILMEMELI
+    assert y.mock.hedef == y.mock._darbe(kol_karsiligi(25.0)), "hedef hareket halinde bekletildi"
     assert y._bekleyen_hedef is None
     #     ayni hedef tekrar tekrar gelirse karta yeniden gitmez (seri hat bogulmasin)
     n = len([k for k in y.mock.kayit if k.startswith("G")])
     for _ in range(5):
-        y.git(45.02)
+        y.git(25.02)
     assert len([k for k in y.mock.kayit if k.startswith("G")]) == n
     #     eski firmware'de ise Q hata DEGIL, sessizce eski davranis
     assert s.yeniden_planlama is False and "tanımadı" not in (s.hata or ""), s.hata
@@ -1665,7 +1712,8 @@ if __name__ == "__main__":
     for _ in range(3):
         saat[0] += 0.1; yk.yokla()
     assert yk.yorunge_destekli is True and "YQ" in yk.mock.kayit
-    assert yorunge(12.5, 4) == "Y12.500,4.000\n" and yorunge(99, 999) == f"Y{ACI_MAX:.3f},300.000\n"
+    assert yorunge(12.5, 4) == f"Y{12.5 + KULLANICI_SIFIR:.3f},4.000\n"
+    assert yorunge(99, 999) == f"Y{KOL_MAX:.3f},300.000\n"
     assert pan_yorunge(-5, -2.5) == "PY-5.000,-2.500\n"
     for i in range(20):                                   # 2 sn: 10 -> 20 derece @5 der/sn
         yk.yorunge(10.0 + 0.5 * i, 5.0); yk.pan_yorunge(1.0 * i, 10.0)
@@ -1686,12 +1734,15 @@ if __name__ == "__main__":
     assert ey.yorunge_destekli is False and ey.hata is None and not ey.yorunge(10, 1)
     assert not any(c.startswith("Y") and c != "YQ" for c in ey.mock.kayit)
 
-    # 13b. kol <-> kamera acisi donusumu: monoton, tersinir, yerel egim tabloyu izler
-    for a in (0.0, 7.3, 25.0, 44.0, 59.0):
+    # 13b. operator <-> kamera acisi donusumu: monoton, tersinir, yerel egim tabloyu
+    #      izler. Egim tablosu KOL acisinda olculdu; girdi operator acisidir.
+    for a in (ACI_MIN, -22.7, -5.0, 14.0, 29.0):
         assert abs(kol_acisi(kamera_acisi(a)) - a) < 1e-6, a
+    assert kamera_acisi(ACI_MIN) == 0.0, "kamera olceginin sifiri kolun EN ALTI"
     egim = lambda a: (kamera_acisi(a + 0.05) - kamera_acisi(a - 0.05)) / 0.1 * KAMERA_PPD_REF
-    assert abs(egim(28.0) - 13.5) < 0.2 and abs(egim(44.0) - 5.3) < 0.3, (egim(28.0), egim(44.0))
-    assert all(kamera_acisi(a + 0.5) > kamera_acisi(a) for a in range(0, 60))
+    kol28, kol44 = aci_karsiligi(28.0), aci_karsiligi(44.0)
+    assert abs(egim(kol28) - 13.5) < 0.2 and abs(egim(kol44) - 5.3) < 0.3, (egim(kol28), egim(kol44))
+    assert all(kamera_acisi(a + 0.5) > kamera_acisi(a) for a in range(int(ACI_MIN), int(ACI_MAX)))
 
     # 14. PAN (ayni kart, GPIO10/11): PAN1 cozumu, P komutu, kademe, X ile durma
     assert pan_durum_coz("PAN1,984,984,0,10.003,10.003,-1")["aci"] == 10.003

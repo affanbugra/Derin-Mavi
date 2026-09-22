@@ -18,7 +18,7 @@ olursa ondan hemen once karta ne gittigi ve karttan ne geldigi gorulur.
 
 Kullanim:
     python app/tilt_stres.py yazilim 120            # 120 sn, kol KIPIRDAMAZ
-    python app/tilt_stres.py hareket 120 20 35      # 20-35 derece arasi, KOL DONER
+    python app/tilt_stres.py hareket 120 -10 5      # operator -10..+5 (kol 20-35), DONER
 """
 import os
 import random
@@ -31,7 +31,7 @@ import tilt_surucu as T
 SESSIZLIK_ESIGI = 1.0   # sn — bu kadar STATE3 gelmezse kart KILITLENDI sayilir
 
 
-def calistir(mod, sure, alt=20.0, ust=35.0, port="auto"):
+def calistir(mod, sure, alt=-10.0, ust=5.0, port="auto"):
     if port == "auto":
         port = T.otomatik_port_bul()
         if port is None:
@@ -150,6 +150,6 @@ if __name__ == "__main__":
         raise SystemExit(0)
     mod = sys.argv[1]
     sure = float(sys.argv[2]) if len(sys.argv) > 2 else 120.0
-    alt = float(sys.argv[3]) if len(sys.argv) > 3 else 20.0
-    ust = float(sys.argv[4]) if len(sys.argv) > 4 else 35.0
+    alt = float(sys.argv[3]) if len(sys.argv) > 3 else -10.0
+    ust = float(sys.argv[4]) if len(sys.argv) > 4 else 5.0
     raise SystemExit(calistir(mod, sure, alt, ust))

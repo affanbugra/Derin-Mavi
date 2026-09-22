@@ -1635,6 +1635,38 @@ class MainWindow(QMainWindow):
         t.setObjectName("ph")
         kv.addWidget(t)
 
+        # ARANAN TIP — otonom kilit yalniz secili tiplere kurulur (algi.hedef_tipleri_ayarla).
+        # Hicbiri secili degilse HEPSI aranir; bu, acilis durumudur. Sartname: A2'de tip
+        # ayrimi yok, A3'te tur basina TEK dusman tipi gelir ve menzili tipe bagli (§4).
+        # ⚠ Yalniz OTOMATIK kilidi baglar: tum tespitler listede gorunur ve operator
+        # listeden elle her hedefi secebilir.
+        # Ayni Python surecinde pencere yeniden kurulsa bile onceki turun secimi
+        # tasinmasin; her uygulama acilisinda guvenli varsayilan HEPSI.
+        algi.hedef_tipleri_ayarla(None)
+        tip_sat = QHBoxLayout()
+        tip_sat.setContentsMargins(0, 0, 0, 2)
+        tip_sat.setSpacing(4)
+        etiket = QLabel("Aranan:")
+        etiket.setStyleSheet(f"font-size:11px; color:{TXT3};")
+        tip_sat.addWidget(etiket)
+        self.tip_butonlari = {}
+        for kanon, ad in (("fuze", "Füze"), ("helikopter", "Heli"), ("f16", "F-16"), ("drone", "İHA")):
+            b = QPushButton(ad)
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setStyleSheet(
+                "QPushButton { border:1px solid rgba(120,140,170,0.45); border-radius:5px; "
+                f"padding:2px 7px; font-size:11px; font-weight:600; color:{TXT2}; background:transparent; }} "
+                f"QPushButton:checked {{ background:{GRN}; border-color:{GRN}; color:#ffffff; }}")
+            b.clicked.connect(self._tip_secimi_degisti)
+            self.tip_butonlari[kanon] = b
+            tip_sat.addWidget(b)
+        tip_sat.addStretch(1)
+        self.tip_hepsi_lbl = QLabel("hepsi")
+        self.tip_hepsi_lbl.setStyleSheet(f"font-size:11px; color:{TXT3};")
+        tip_sat.addWidget(self.tip_hepsi_lbl)
+        kv.addLayout(tip_sat)
+
         # Yatay, TEK SATIRLIK liste: yeni hedef tanindikca kart DIKEY buyumesin
         # (alttaki Motor Hizi/Lazer kartlarini asagi itmesin). Isimler yan yana
         # dizilir; sigmayan kisim yatay kaydirmayla gorulur (dikey kaydirma YOK).
@@ -1659,6 +1691,12 @@ class MainWindow(QMainWindow):
         kv.addWidget(self.hedef_bos_lbl)
 
         return kart
+
+    def _tip_secimi_degisti(self):
+        """Aranan hedef tipleri degisti — otonom kilidin suzgecini gunceller."""
+        secili = [k for k, b in self.tip_butonlari.items() if b.isChecked()]
+        algi.hedef_tipleri_ayarla(secili)
+        self.tip_hepsi_lbl.setText("hepsi" if not secili else f"{len(secili)} tip")
 
     def _hedef_liste_guncelle(self, hedefler, a3):
         """HEDEFLER kartini gunceller: her hedef icin '<no>- <isim>' YAN YANA (yatay).
@@ -1869,7 +1907,10 @@ class MainWindow(QMainWindow):
         # ESP32'ye giden azimut SARMASIZ (birikimli) olmalidir: 350°'den 10°'ye gecerken
         # "P370" denir, "P10" degil — yoksa motor kisa yoldan degil 340° geri doner.
         self.pan_ham = 0.0
-        self.tilt_aci = 0.0           # yukselis, 0 - max_tilt_limit
+        # OPERATOR acisi: 0 = kol T.KULLANICI_SIFIR (30), aralik -30..+30
+        # (bkz. tilt_surucu.py "IKI ACI CERCEVESI"). Eski kartta 0..max_tilt_limit.
+        self.tilt_aci = 0.0
+        self._acilis_yukselisi = False   # acilis yukselisi bir kez denenir
         # Operatorun calisma siniri; mekanik tavan protokol.TILT_MAX'tir ve bunun
         # USTUNE cikilamaz (kontrol katmani ayrica kirpar). Acilista tavanin tamami
         # DEGIL, guvenli bir varsayilan gelir — daha yukarisi ⚙ panelinden acilir.
@@ -1883,8 +1924,8 @@ class MainWindow(QMainWindow):
         self.pan_yasak_min = 120.0
         self.pan_yasak_max = 160.0
         self.tilt_yasak_aktif = False # harekete yasak alan (yukselis)
-        self.tilt_yasak_min = 45.0
-        self.tilt_yasak_max = float(P.TILT_CALISMA_VARSAYILAN)
+        self.tilt_yasak_min = 15.0
+        self.tilt_yasak_max = float(T.ACI_MAX)
         self.atis_yasak_aktif = False # atisa yasak alan (azimut)
         self.atis_pan_min = 45.0
         self.atis_pan_max = 75.0
@@ -2070,7 +2111,7 @@ class MainWindow(QMainWindow):
         ust.addLayout(ust_bas)
         self.ap_tilt_sl = QSlider(Qt.Horizontal)
         self.ap_tilt_sl.setObjectName("ayarsl")
-        self.ap_tilt_sl.setMinimum(10)
+        self.ap_tilt_sl.setMinimum(int(T.ACI_MIN) + 10)
         # Tavan MEKANIK sinirdan turer (tek kaynak: protokol.TILT_MAX). Eskiden burada
         # sabit 90 yaziyordu ama protokol 60'ta kirpiyordu: kaydirici 90'a cekilse bile
         # gimbal 60'ta takili kaliyor, operator sebebini goremiyordu.
@@ -2087,7 +2128,7 @@ class MainWindow(QMainWindow):
         self.ap_tilt_cb, self.ap_tmin_spin, self.ap_tmax_spin = self._yasak_alan_bolumu(
             apv, "Tilt (Yükseliş) Harekete Yasak Açı Aralığı",
             self.tilt_yasak_aktif, self.tilt_yasak_min, self.tilt_yasak_max,
-            int(P.TILT_MAX))
+            int(P.TILT_MAX), int(T.ACI_MIN))
         self.ap_atis_cb, self.ap_amin_spin, self.ap_amax_spin = self._yasak_alan_bolumu(
             apv, "Pan (Azimut) Atışa Yasak Açı Aralığı",
             self.atis_yasak_aktif, self.atis_pan_min, self.atis_pan_max, 360)
@@ -2120,7 +2161,7 @@ class MainWindow(QMainWindow):
         apv.addLayout(alt)
         return self.aci_ayar_panel
 
-    def _yasak_alan_bolumu(self, layout, baslik, acik, alt_deg, ust_deg, maks):
+    def _yasak_alan_bolumu(self, layout, baslik, acik, alt_deg, ust_deg, maks, mini=0):
         """Bir yasak alan bolumu: onay kutusu + Min/Max derece kutulari.
         Uc yasak alan (pan hareket, tilt hareket, pan atis) ayni kaliptadir.
         Doner: (onay_kutusu, min_spin, max_spin)"""
@@ -2139,7 +2180,7 @@ class MainWindow(QMainWindow):
             lbl = QLabel(etiket)
             lbl.setObjectName("engsub")
             spin = QSpinBox()
-            spin.setRange(0, maks)
+            spin.setRange(mini, maks)
             spin.setValue(int(deger))
             spin.valueChanged.connect(self._ap_yasak_degisti)
             satir.addWidget(lbl, 0, Qt.AlignVCenter)
@@ -2286,10 +2327,11 @@ class MainWindow(QMainWindow):
             return
         self._tuslari_birak()               # basili tutma/surekli hareket kesilsin
         if k.tilt_sifirla():
-            self.tilt_aci = 0.0
-            self.tilt_val_lbl.setText("0.0°")
+            self.tilt_aci = self.tilt_taban_deg()
+            self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
             self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;'
-                                f'Tilt sayacı sıfırlandı — kol en altta = 0°.')
+                                f'Tilt sayacı sıfırlandı — kol en altta = '
+                                f'{self.tilt_aci:.0f}° (operator açısı).')
 
     def _tilt_surekli_mi(self):
         """Dikeyde basili-tutma, kartin KENDI ivme profiliyle mi yurusun?
@@ -2306,7 +2348,7 @@ class MainWindow(QMainWindow):
         duracagini bilir ve PC'nin "simdi dur" demesine yetismesi gerekmez.
         Yoklama 100 ms'de bir yapiliyor ve kol 36 derece/sn'ye cikabiliyor —
         durdurmayi yoklamaya birakmak 3-4 derecelik bir asma demekti."""
-        hedef = self.max_tilt_limit if yon > 0 else 0.0
+        hedef = self.max_tilt_limit if yon > 0 else self.tilt_taban_deg()
         if self.tilt_yasak_aktif:
             simdi = self.tilt_aci
             if yon > 0 and simdi < self.tilt_yasak_min <= hedef:
@@ -2453,6 +2495,14 @@ class MainWindow(QMainWindow):
         return bool(getattr(self, "atis_yasak_aktif", False)
                     and self.atis_pan_min <= self.pan_aci <= self.atis_pan_max)
 
+    def tilt_taban_deg(self):
+        """Dikeyde inilebilecek EN ALT operator acisi.
+
+        Yeni tilt kartinda kol 0..60 derece calisir ve operatorun sifiri kolun
+        ORTASIDIR (T.KULLANICI_SIFIR): aralik -30..+30. Eski dogrudan tahrikli
+        kartta negatif tilt YOKTUR, taban 0'dir."""
+        return float(T.ACI_MIN) if getattr(self.kontrol, "tilt_ayri", False) else 0.0
+
     def _tilt_tavan_uygula(self):
         """Dikey eksenin MEKANIK tavanini kontrol katmanindan ogrenip arayuze uygular.
 
@@ -2536,7 +2586,7 @@ class MainWindow(QMainWindow):
         self.ap_pmin_spin.setValue(120)
         self.ap_pmax_spin.setValue(160)
         self.ap_tilt_cb.setChecked(False)
-        self.ap_tmin_spin.setValue(45)
+        self.ap_tmin_spin.setValue(15 if getattr(self.kontrol, "tilt_ayri", False) else 45)
         self.ap_tmax_spin.setValue(tavan)
         self.ap_atis_cb.setChecked(False)
         self.ap_amin_spin.setValue(45)
@@ -2562,6 +2612,16 @@ class MainWindow(QMainWindow):
         if hasattr(self, "pan_val_lbl"):
             self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
             self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
+        # ACILIS YUKSELISI: kol en alttayken kamera yere/masaya bakiyor ve ilk
+        # goruntu ise yaramiyor. Konum ogrenilir ogrenilmez namlu calisma
+        # araliginin ORTASINA (operator 0 = kol T.KULLANICI_SIFIR) getirilir.
+        # ⚠ Hareket BURADA baslatilmaz: bu fonksiyon hareket kapisinin (_aci_hareket)
+        # ILK isidir, icinden yeni bir hareket cagirmak kapiyi kendi icinde yeniden
+        # girer ve cagiran komutun acisini ezerdi. Yalniz isaretlenir; yukselisi
+        # periyodik yoklama (_esp_yokla) yapar.
+        if not self._acilis_yukselisi and getattr(k, "tilt_ayri", False):
+            self._acilis_yukselisi = True
+            self._acilis_yukselisi_bekliyor = True
 
     def _aci_hareket(self, d_pan, d_tilt, taban_olculen=False, hiz=None):
         """Pan/Tilt acisini degistirir, yasak bolgeleri kontrol eder ve ESP32 komutunu gonderir.
@@ -2616,7 +2676,7 @@ class MainWindow(QMainWindow):
             olculen = getattr(getattr(self, "kontrol", None), "tilt_olculen", None)
             if olculen is not None:
                 tilt_taban = olculen
-        yeni_tilt = max(0.0, min(self.max_tilt_limit, tilt_taban + d_tilt))
+        yeni_tilt = max(self.tilt_taban_deg(), min(self.max_tilt_limit, tilt_taban + d_tilt))
 
         # Harekete yasak aci kontrolu
         yasak_mi = False
@@ -2767,13 +2827,13 @@ class MainWindow(QMainWindow):
             self._tilt_takip.olcum(t_kare, T.kamera_acisi(k.tilt_zamaninda(t_kare)), ey,
                                    float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
         sinir = min(T.PAN_SINIR - 1.0, float(algi.AYAR.get("pan_takip_siniri", 170.0)))
-        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 48.0)))
+        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 18.0)))
         if k.yorunge_destekli:
             # YORUNGE KIPI: (konum, hiz) — motor hedefin hizinda akar, dur-kalk yok.
             pr = self._pan_takip.yorunge_komut(simdi, k.pan_olculen, -sinir, sinir,
                                                hata_px=ex, olu_px=olu_x)
             tr = self._tilt_takip.yorunge_komut(
-                simdi, T.kamera_acisi(k.tilt_olculen), T.kamera_acisi(0.0),
+                simdi, T.kamera_acisi(k.tilt_olculen), T.kamera_acisi(T.ACI_MIN),
                 T.kamera_acisi(ust), hata_px=ey, olu_px=olu_y)
             if pr is None and tr is None:
                 return
@@ -2782,7 +2842,7 @@ class MainWindow(QMainWindow):
                 d_pan, pan_v = pr[0] - self.pan_ham, pr[1]
             if tr is not None:
                 # kamera acisi -> kol acisi; hiz yerel egimle (kol-biyel dogrusal degil)
-                kol = max(0.0, min(ust, T.kol_acisi(tr[0])))
+                kol = max(T.ACI_MIN, min(ust, T.kol_acisi(tr[0])))
                 egim = (T.kamera_acisi(kol + 0.05) - T.kamera_acisi(kol - 0.05)) / 0.1
                 d_tilt, tilt_v = kol - self.tilt_aci, tr[1] / max(1e-3, egim)
             if self._aci_hareket(d_pan or 0.0, d_tilt or 0.0, hiz=(pan_v, tilt_v)):
@@ -2790,12 +2850,12 @@ class MainWindow(QMainWindow):
             return
         pan_k = self._pan_takip.komut(simdi, k.pan_olculen, -sinir, sinir,
                                       hata_px=ex, olu_px=olu_x)
-        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 48.0)))
+        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 18.0)))
         tilt_k = T.kol_acisi(self._tilt_takip.komut(
-            simdi, T.kamera_acisi(k.tilt_olculen), T.kamera_acisi(0.0), T.kamera_acisi(ust),
+            simdi, T.kamera_acisi(k.tilt_olculen), T.kamera_acisi(T.ACI_MIN), T.kamera_acisi(ust),
             hata_px=ey, olu_px=olu_y))
         if tilt_k is not None:
-            tilt_k = max(0.0, min(ust, tilt_k))
+            tilt_k = max(T.ACI_MIN, min(ust, tilt_k))
         if pan_k is None and tilt_k is None:
             return
         d_pan = 0.0 if pan_k is None else pan_k - self.pan_ham
@@ -3369,6 +3429,17 @@ class MainWindow(QMainWindow):
             self.kontrol.ates_tazele()
         yeni = self.kontrol.oku()
 
+        # ACILIS HIZALAMASI + YUKSELISI. Hizalama operatorun komut vermesini
+        # BEKLEYEMEZ: kart konumunu bildirir bildirmez arayuz ona uymali, cunku
+        # acilis yukselisi de o degerden hesaplanir.
+        self._acilis_hizala()
+        if getattr(self, "_acilis_yukselisi_bekliyor", False):
+            self._acilis_yukselisi_bekliyor = False
+            # Namlu calisma araliginin ORTASINA (operator 0). Bir kez denenir;
+            # E-Stop gibi bir sebeple gecmezse operator MERKEZ dugmesine basar.
+            if abs(self.tilt_aci) > 0.2:
+                self._aci_hareket(0.0, -self.tilt_aci)
+
         # FIRMWARE GUNCEL MI? Kart acilista kendi TILT_MAX'ini yazar; bizimkiyle
         # uyusmuyorsa firmware yuklenmemis demektir ve gimbal ESKI limitte takilir
         # (07.08: ekran 120 gosteriyordu, kart 90'da kirpiyordu — sebebi gorunmuyordu).
@@ -3385,10 +3456,17 @@ class MainWindow(QMainWindow):
         # degerde kalir — sonraki her komut kaymis referansa gider ve kimse fark etmez.
         if self.kontrol.kart_resetlendi:
             self.kontrol.kart_resetlendi = False
-            self.pan_aci = self.pan_ham = self.tilt_aci = 0.0
+            self.pan_aci = self.pan_ham = 0.0
+            # Ayri kart resetten sonra sayacini fiziksel kol 0 varsayar; bu yeni
+            # operator cercevesinde -30'dur. Fiziksel konum yine de bilinmez ve
+            # asagidaki ciddi uyari korunur, fakat ekran/kart hedefi birbirinden
+            # kopuk bir 0/-30 cifti gostermemelidir.
+            self.tilt_aci = (self.kontrol.tilt_olculen
+                             if getattr(self.kontrol, "tilt_ayri", False)
+                             and self.kontrol.tilt_olculen is not None else 0.0)
             if hasattr(self, "pan_val_lbl"):
                 self.pan_val_lbl.setText("0.0°")
-                self.tilt_val_lbl.setText("0.0°")
+                self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
             self._ates_kes("ESP32 yeniden başladı")
             # Dikey eksen ayri karttaysa uyari daha ciddidir: o firmware her
             # acilista "kol fiziksel olarak en asagidaki 0 konumunda" VARSAYAR.

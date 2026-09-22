@@ -134,6 +134,8 @@ class SahtePencere:
     _step_btn_stil_guncelle = A.MainWindow._step_btn_stil_guncelle
     _takip_olcum_geldi = A.MainWindow._takip_olcum_geldi
     _acilis_hizala = A.MainWindow._acilis_hizala
+    tilt_taban_deg = A.MainWindow.tilt_taban_deg
+    _acilis_yukselisi = False        # acilis yukselisi (bkz. _acilis_hizala)
     YORUNGE_UFUK_S = A.MainWindow.YORUNGE_UFUK_S
     _surekli_takip_mi = A.MainWindow._surekli_takip_mi
     _nisan_geldi = A.MainWindow._nisan_geldi
@@ -693,12 +695,15 @@ def test_surekli_takip_iki_eksen():
             saat[0] += 0.05
             k.oku()
         assert k.takip_geri_bildirimli, "mock kart pan+tilt bildirmeli"
-        w._aci_hareket(0.0, 20.0)                     # baslangic: kol 20 derece
+        # ⚠ Aci secimi keyfi degil: kameranin derece basina donusu kol acisina gore
+        # degisir (KAMERA_PPD_TABLO). Ust uclarda 7 px'lik olu bolge ~1.3 dereceye
+        # karsilik gelir; test orta bolgede (ppd ~13) yapilir.
+        w._aci_hareket(0.0, -18.0)                    # baslangic: operator -18 derece
         for _ in range(60):
             saat[0] += 0.05
             k.oku()
         w.mod = "Otonom"
-        hedef_pan, hedef_tilt = 10.0, 25.0
+        hedef_pan, hedef_tilt = 10.0, -5.0
         ppd_p = A.algi.AYAR["takip_ppd_pan"]
         kam = A.T.kamera_acisi            # dikeyde goruntu KAMERA acisiyla kayar
         komut_sayisi, son_yarim = 0, 0
@@ -819,7 +824,7 @@ def test_yorunge_kipi_iki_eksen():
             saat[0] += 0.05
             k.oku()
         assert k.yorunge_destekli, "mock kart Y/PY destekli olmali"
-        w._aci_hareket(0.0, 20.0)
+        w._aci_hareket(0.0, -8.0)
         for _ in range(60):
             saat[0] += 0.05
             k.oku()
@@ -834,14 +839,14 @@ def test_yorunge_kipi_iki_eksen():
             hp = 3.0 * (saat[0] - t0)
             t_cek = saat[0] - A.algi.AYAR["kamera_gecikme"]
             ex = (hp - k.pan_zamaninda(t_cek)) * ppd
-            ey = -(kam(22.0) - kam(k.tilt_zamaninda(t_cek))) * ppd
+            ey = -(kam(-6.0) - kam(k.tilt_zamaninda(t_cek))) * ppd
             w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": ex, "ey": ey,
                                   "olu_x": 7.0, "olu_y": 7.0, "w": 1280})
         kayit = k.tilt.mock.kayit[n0:]
         assert any(c.startswith("PY") for c in kayit) and any(c.startswith("Y") and c != "YQ" for c in kayit)
         assert not any(c.startswith(("G", "P1", "P2", "P-")) for c in kayit), [c for c in kayit if c[0] in "GP"][:5]
         assert abs(k.pan_olculen - 3.0 * (saat[0] - t0)) < 1.5, (k.pan_olculen, 3.0 * (saat[0] - t0))
-        assert abs(k.tilt_olculen - 22.0) < 1.0, k.tilt_olculen
+        assert abs(k.tilt_olculen - (-6.0)) < 1.0, k.tilt_olculen
         # E-Stop: kapidan tek yorunge komutu gecmez
         k.estop_aktif = True
         n = len(k.tilt.mock.kayit)
@@ -861,6 +866,37 @@ def test_yorunge_kipi_iki_eksen():
         assert son.endswith(",0.000"), son
     finally:
         A.time = gercek_zaman
+
+
+def test_acilista_tilt_ortaya_yukselir():
+    """Kol fiziksel en altta baslarsa ilk konum paketinden sonra fiziksel 30 dereceye
+    gider ve arayuz bunu operator 0 derece sayar. Hareket yalniz BIR kez uretilir."""
+    saat = [30000.0]
+    w = SahtePencere()
+    w.kontrol = kontrol_mod.Kontrol("off", tilt_kaynak="mock")
+    w.max_tilt_limit = A.T.ACI_MAX
+    k = w.kontrol
+    k.tilt._saat = lambda: saat[0]
+    k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+
+    # Mock fiziksel kol 0'da baslar; surucunun disari bildirdigi operator acisi -30'dur.
+    for _ in range(4):
+        saat[0] += 0.05
+        k.oku()
+    assert k.acilis_hizalama is not None
+    assert abs(k.acilis_hizalama[1] - A.T.ACI_MIN) < 0.1, k.acilis_hizalama
+
+    n = len(k.tilt.mock.kayit)
+    w._esp_yokla()
+    yeni = k.tilt.mock.kayit[n:]
+    assert "G30.0000" in yeni, yeni       # operator 0 -> fiziksel kol 30
+    assert abs(w.tilt_aci) < 1e-9 and abs(k.tilt_hedef) < 1e-9
+
+    # Sonraki yoklamalar acilis hareketini tekrar gondermemeli.
+    for _ in range(3):
+        saat[0] += 0.05
+        w._esp_yokla()
+    assert k.tilt.mock.kayit.count("G30.0000") == 1, k.tilt.mock.kayit
 
 
 if __name__ == "__main__":
@@ -886,8 +922,9 @@ if __name__ == "__main__":
     test_surekli_takip_iki_eksen()
     test_otonom_ates_anlik_kirmizi_kapisi()
     test_yorunge_kipi_iki_eksen()
+    test_acilista_tilt_ortaya_yukselir()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
           "[L] kisayolu, gamepad, lazer gucu, ates olu adam anahtari, surekli iki eksen takip, "
-          "anlik kirmizi ates kapisi, yorunge kipi")
+          "anlik kirmizi ates kapisi, yorunge kipi, acilista tilt operator sifiri")

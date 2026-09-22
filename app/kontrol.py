@@ -15,8 +15,9 @@ DIKEY EKSEN (tilt) AYRI BIR KARTA VERILEBILIR — `DERINMAVI_TILT` ile:
     DERINMAVI_TILT=COM3  -> gercek ESP32-S3 + HSD57 karti (bkz. tilt_surucu.py)
 
 Neden: tilt ekseni artik KOL-BIYEL mekanizmasiyla, kapali cevrim HSD57 surucu ve
-ayri bir ESP32-S3 ile suruluyor. O kart mutlak aciyi "G<derece>" ile alir, 0..60
-arasinda calisir ve KONUMUNU GERI BILDIRIR (STATE3). Pan tarafi degismez.
+ayri bir ESP32-S3 ile suruluyor. Ham kart 0..60 fiziksel kol acisi konusur; bu
+katmanin dis API'si -30..+30 operator acisidir (0 = fiziksel kol 30) ve KONUMU
+GERI BILDIRIR (STATE3). Pan tarafi degismez.
 
 YONLENDIRME NEREDE: yalniz `aci()` icinde. Arayuz hicbir sey bilmez — hareketin
 tek kapisi (arayuz_qt._aci_hareket) yine buraya, buradan da dogru karta gider.
@@ -176,13 +177,13 @@ class Kontrol:
 
     @property
     def tilt_tavan(self):
-        """Dikey eksenin FIZIKSEL tavani. Kol-biyel mekanizmasinda 60, eski
-        dogrudan tahrikte P.TILT_MAX. Arayuzun calisma limiti bunu asmamali."""
+        """Dikey eksenin operator cercevesindeki tavani. Kol-biyel mekanizmasinda
+        +30 (fiziksel kol 60), eski dogrudan tahrikte P.TILT_MAX."""
         return T.ACI_MAX if self.tilt_ayri else P.TILT_MAX
 
     @property
     def tilt_olculen(self):
-        """Kartin BILDIRDIGI kol acisi (derece) — yoksa None.
+        """Kartin bildirdigi operator acisi (-30..+30 derece) — yoksa None.
 
         kontrol.py'nin bas yorumundaki "kart konum geri bildirimi kazanirsa tek
         degisecek yer burasi" notu: yeni tilt karti kazandi. Arayuz dikey aci
@@ -325,7 +326,7 @@ class Kontrol:
             satirlar.append(P.pan(pan_der))
             self.pan_hedef = pan_der
         if self.tilt_ayri:
-            tilt_der = T.aci_kirp(tilt_der)         # kol-biyel araligi (0..60)
+            tilt_der = T.aci_kirp(tilt_der)         # operator araligi (-30..+30)
             if abs(tilt_der - self.tilt_hedef) > 0.005:
                 self.tilt_hedef = tilt_der
                 # Kart mesgulse surucu PC tarafinda bekletir ve EN TAZE hedefi
@@ -349,7 +350,7 @@ class Kontrol:
             return False
         ok = self.tilt.sifirla()
         if ok:
-            self.tilt_hedef = 0.0
+            self.tilt_hedef = T.ACI_MIN
         return ok
 
     def tilt_dur(self):
@@ -410,10 +411,11 @@ class Kontrol:
 
     def home(self):
         """Merkeze al (0°, 0°). ESP'de limit switch homing'i YOK — bu yalnizca
-        'bilinen baslangica don' demektir; gercek homing kart tarafina eklenecek."""
+        'bilinen merkeze don' demektir; gercek homing kart tarafina eklenecek.
+        Ayri tilt kartinda operator 0° = fiziksel kol 30°'dir."""
         self.pan_hedef = self.tilt_hedef = 0.0
         if self.tilt_ayri:
-            self.tilt.git(0.0)             # kol alt dayamaya (0 derece) iner
+            self.tilt.git(0.0)             # operator merkezi = fiziksel kol 30 derece
             if self.pan_ayri:
                 self.tilt.pan_git(0.0)
                 return self.durum
@@ -530,7 +532,8 @@ if __name__ == "__main__":
 
     tilt_tik(); tilt_tik()
     assert k2.tilt_ayri and k2.tilt.hazir, k2.tilt.ozet()
-    assert k2.tilt_tavan == T.ACI_MAX == 60.0       # kol-biyel tavani, 180 DEGIL
+    # Operator cercevesi: kol 0..60 -> -30..+30 (bkz. tilt_surucu "IKI ACI CERCEVESI")
+    assert k2.tilt_tavan == T.ACI_MAX == 30.0       # kol-biyel tavani, 180 DEGIL
     assert k2.hiz_profilleri(P.H_NORMAL) == \
         (P.HIZ_TABLO[P.H_NORMAL], T.HIZ_TABLO[T.H_NORMAL])
     assert k2.hiz_profilleri(P.H_NORMAL)[1][1] > k2.hiz_profilleri(P.H_NORMAL)[0][1], \
@@ -549,16 +552,16 @@ if __name__ == "__main__":
             break
     assert abs(k2.tilt_olculen - 12.0) < 0.5, k2.tilt_olculen
 
-    # 2. Kirpma kol araligina gore yapilir (P.TILT_MAX=180 degil, 60)
+    # 2. Kirpma kol araligina gore yapilir (P.TILT_MAX=180 degil, +30)
     k2.aci(45.0, 500.0)
-    assert k2.tilt_hedef == 60.0, k2.tilt_hedef
+    assert k2.tilt_hedef == 30.0, k2.tilt_hedef
 
     # 3. E-STOP: kol OLDUGU YERDE durur, 0'a park ETMEZ (acil durdurma yeni bir
     #    hareket baslatmamali) ve ozet gercekten durdugu yeri gosterir.
     for _ in range(6):
         tilt_tik()
     durdugu = k2.tilt_olculen
-    assert durdugu > 12.0, "kol 60'a dogru ilerlemis olmaliydi"
+    assert durdugu > 12.0, "kol ust uca dogru ilerlemis olmaliydi"
     d = k2.estop(True)
     assert d["durum_ad"] == "E-STOP" and d["tilt"] != 0.0, d
     assert abs(d["tilt"] - durdugu) < 0.01, (d["tilt"], durdugu)
@@ -598,7 +601,8 @@ if __name__ == "__main__":
         saat5[0] += 0.1
         kh.oku()
     assert kh.acilis_hizalama is not None and abs(kh.acilis_hizalama[0] - 20.0) < 0.05, kh.acilis_hizalama
-    assert abs(kh.pan_hedef - 20.0) < 0.05 and abs(kh.tilt_hedef - 10.0) < 0.1
+    # mock KOL 10 derecede; operator cercevesinde bu T.aci_karsiligi(10) = -20
+    assert abs(kh.pan_hedef - 20.0) < 0.05 and abs(kh.tilt_hedef - T.aci_karsiligi(10.0)) < 0.1
     kh.aci(0.0, 5.0)
     for _ in range(40):
         saat5[0] += 0.1

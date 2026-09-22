@@ -53,7 +53,8 @@ class Benzetim:
 
     def __init__(self, hedef_aci, hedef_hizi=0.0, baslangic_aci=0.0,
                  hiz_seviye=P.H_NORMAL, mekanizma=None):
-        """mekanizma: komut acisi -> KAMERA acisi fonksiyonu (None = birebir).
+        """Butun acilar OPERATOR cercevesindedir (-30..+30, 0 = fiziksel kol 30).
+        mekanizma: operator acisi -> KAMERA acisi fonksiyonu (None = birebir).
         Kamera ile komut arasindaki donus orani 1 degilse dongu kazanci fiilen
         o oranla carpilir; bunu denemek icin verilir."""
         self.mekanizma = mekanizma
@@ -65,9 +66,10 @@ class Benzetim:
         self.k = Kontrol("off", tilt_kaynak="mock")   # pan karti gerekmiyor
         self.k.tilt._saat = lambda: self.saat
         self.k.tilt.mock.t = self.k.tilt.mock.son_canli = self.saat
-        # Kol baslangicta istenen acida olsun (kart sayaci oraya kurulur)
+        # Mock kart kendi icinde fiziksel KOL acisi (0..60) tutar; disaridaki test
+        # ve gercek surucu operator acisi (-30..+30) konusur.
         self.k.tilt.mock.pos = self.k.tilt.mock.hedef = \
-            self.k.tilt.mock._darbe(baslangic_aci)
+            self.k.tilt.mock._darbe(T.kol_karsiligi(baslangic_aci))
 
         self.nisanci = nisan.PDNisanci()
         self.tilt_aci = baslangic_aci           # arayuzun inandigi aci (self.tilt_aci)
@@ -78,8 +80,8 @@ class Benzetim:
 
     @property
     def kol_aci(self):
-        """Mekanigin GERCEK acisi (kartin bildirdigi; benzetimde ayni sey)."""
-        return self.k.tilt.mock._aci(self.k.tilt.mock.pos)
+        """Mekanigin operator cercevesindeki GERCEK acisi."""
+        return T.aci_karsiligi(self.k.tilt.mock._aci(self.k.tilt.mock.pos))
 
     @property
     def kamera_aci(self):
@@ -118,7 +120,7 @@ class Benzetim:
         taban = self.k.tilt_olculen
         if taban is None:
             taban = self.tilt_aci
-        yeni = max(0.0, min(self.k.tilt_tavan, taban + d_pitch))
+        yeni = max(T.ACI_MIN, min(self.k.tilt_tavan, taban + d_pitch))
         self.tilt_aci = yeni
         self.k.aci(0.0, yeni)
 
@@ -225,35 +227,37 @@ if __name__ == "__main__":
     print("ayar kaynagi:", _kaynak or "kod varsayilanlari")
     esik = olu_bolge_px()
 
-    # 1-3. SABIT HEDEF, kol altta: yukari cikip hedefe YERLESMELI; asma ve salinim yok.
+    # 1-3. SABIT HEDEF, kol alt bolgede: yukari cikip hedefe YERLESMELI;
+    # asma ve salinim yok. Negatif operator acilari ozellikle denenir.
     #
     #  ⭐ ASIL SINAV BUDUR. Kol-biyel yavastir ve firmware once mevcut hedefi
     #  bitirip sonra bekleyene gecer. Komutlar OLCULEN aciya gore kurulmasaydi
     #  (bkz. arayuz_qt._aci_hareket, taban_olculen) her kare bir oncekinin ustune
     #  biner, namlu hedefi asar ve geri salinirdi.
-    b = Benzetim(hedef_aci=25.0, baslangic_aci=0.0)
+    b = Benzetim(hedef_aci=-5.0, baslangic_aci=T.ACI_MIN)
     iz = b.calistir(8.0)
     yakinsama_dogrula(iz, esik, "asagidan yukari")
-    assert abs(b.kol_aci - 25.0) < 1.5, f"kol yanlis acida durdu: {b.kol_aci:.2f}"
+    assert abs(b.kol_aci - (-5.0)) < 1.5, f"kol yanlis acida durdu: {b.kol_aci:.2f}"
 
     # 4. YUKARIDAN ASAGI da calismali (isaret simetrisi).
-    b2 = Benzetim(hedef_aci=8.0, baslangic_aci=45.0)
+    b2 = Benzetim(hedef_aci=-22.0, baslangic_aci=15.0)
     iz2 = b2.calistir(8.0)
     yakinsama_dogrula(iz2, esik, "yukaridan asagi")
-    assert abs(b2.kol_aci - 8.0) < 1.5, f"kol yanlis acida durdu: {b2.kol_aci:.2f}"
+    assert abs(b2.kol_aci - (-22.0)) < 1.5, f"kol yanlis acida durdu: {b2.kol_aci:.2f}"
 
     # 5. HAREKETLI HEDEF: sabit hizda kalici bir GECIKME oturur (PD'de integral
     #    yok — nisan.py bunu aciklar). Kol 15 derece/sn ile ilerleyebiliyor;
     #    2 derece/sn'lik hedefi yakalayip bandin icinde tutmali.
-    b3 = Benzetim(hedef_aci=10.0, hedef_hizi=2.0, baslangic_aci=0.0)
+    b3 = Benzetim(hedef_aci=-20.0, hedef_hizi=2.0, baslangic_aci=T.ACI_MIN)
     iz3 = b3.calistir(12.0)
     kararli = [abs(v) for v in iz3[-30:]]
     assert max(kararli) < 4 * esik, \
         f"hareketli hedef takibi zayif: {max(kararli):.0f} px (esik {esik:.1f})"
 
-    # 6. KOL ARALIGI ASILMAZ: hedef mekanigin uzerindeyse kol 60'ta durur,
+    # 6. KOL ARALIGI ASILMAZ: hedef mekanigin uzerindeyse operator +30'da
+    #    (fiziksel kol 60) durur,
     #    yazilimsal tavana tirmanip dayamaya yuklenmez.
-    b4 = Benzetim(hedef_aci=120.0, baslangic_aci=0.0)
+    b4 = Benzetim(hedef_aci=120.0, baslangic_aci=T.ACI_MIN)
     b4.calistir(10.0)
     assert b4.kol_aci <= T.ACI_MAX + 1e-6, f"kol araligi asildi: {b4.kol_aci}"
     assert b4.tilt_aci <= T.ACI_MAX + 1e-6, f"arayuz acisi araligi asti: {b4.tilt_aci}"
@@ -287,7 +291,8 @@ if __name__ == "__main__":
                 tavan = tavan_hiz * min(0.2, self.saat - self._nisan_son_t)
                 d_pitch = max(-tavan, min(tavan, d_pitch))
             self._nisan_son_t = self.saat
-            yeni = max(0.0, min(self.k.tilt_tavan, self.tilt_aci + d_pitch))   # INANC
+            yeni = max(T.ACI_MIN, min(self.k.tilt_tavan,
+                                      self.tilt_aci + d_pitch))   # INANC
             self.tilt_aci = yeni
             self.k.aci(0.0, yeni)
             sure = 2.0 * math.sqrt(abs(d_pitch) / max(1.0, tavan_ivme)) * NISAN_MESGUL_ORANI
@@ -326,7 +331,9 @@ if __name__ == "__main__":
 
         # 10a. Hareketli hedefte kalici hata makul mu? (kp cok DUSUKSE burasi patlar —
         #      0.25'te olculen 72 px idi, yani hedef kadrajda surekli geride kalir.)
-        g2 = GecikmeliBenzetim(hedef_aci=10.0, hedef_hizi=3.0, baslangic_aci=0.0)
+        # 12 sn sonunda hedef +16° olur; +30° mekanik/operator tavanina carpip
+        # takip hatasini yapay olarak buyutmemesi icin alt bolgeden baslatilir.
+        g2 = GecikmeliBenzetim(hedef_aci=-20.0, hedef_hizi=3.0, baslangic_aci=T.ACI_MIN)
         iz2 = g2.calistir(12.0)
         kalici = max(abs(v) for v in iz2[-45:])
         assert kalici < 3.5 * esik, \
@@ -336,7 +343,8 @@ if __name__ == "__main__":
         T.MockTiltKart.UST_DARBE = _eski_ust
 
     print(f"tilt takip benzetimi OK — yerlesme {abs(iz[-1]):.1f} px / esik {esik:.1f} px, "
-          f"asma yok, salinim yok, iki yon, hareketli hedef, 0-{T.ACI_MAX:.0f}° araligi, "
+          f"asma yok, salinim yok, iki yon, hareketli hedef, "
+          f"{T.ACI_MIN:.0f}..+{T.ACI_MAX:.0f}° operator araligi, "
           f"kalibrasyon kapisi, {g_sayisi} komut / {kare_sayisi} kare "
           f"(inanc referansi karsi deneyi: {max(iz7):.0f} px asma, {dgs7} yon degisimi) | "
           f"gecikmeli (133 ms) kp={algi.AYAR['kp']} kd={algi.AYAR['kd']}: "

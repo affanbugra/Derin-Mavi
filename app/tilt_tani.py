@@ -8,12 +8,12 @@ yani sorunun arayuzde mi yoksa kart hattinda mi oldugunu ayirir.
 Kullanim:
     python app/tilt_tani.py                 # portlari listele
     python app/tilt_tani.py COM3            # baglan ve tesihis et (MOTOR DONMEZ)
-    python app/tilt_tani.py COM3 --git 10   # 10 dereceye git (⚠ MOTOR DONER)
+    python app/tilt_tani.py COM3 --git 10   # operator +10° (fiziksel kol 40°), MOTOR DONER
     python app/tilt_tani.py mock            # araci kendi kendine dene
     python app/tilt_tani.py auto --sifirla  # KOL EN ALTTAYKEN: sayaci 0 kabul ettir
 
 ⚠ --git verilmeden MOTOR DONDURULMEZ. Once kolun onunde kimse/engel olmadigini
-  dogrula; kol 0..60 derece arasinda hareket eder.
+  dogrula; operator acisi -30..+30'dur (fiziksel kol 0..60).
 """
 import sys
 import time
@@ -89,7 +89,8 @@ def teshis(kaynak, hedef_aci=None, sure=3.0):
         s.kapat(kalici=True)
         return False
     print(f"{IYI} Kontrol acik (armed).")
-    print(f"{IYI} Kolun BILDIRDIGI aci: {s.aci:.2f}°   (hedef {s.hedef_aci:.2f}°)")
+    print(f"{IYI} Operator acisi: {s.aci:.2f}°   (hedef {s.hedef_aci:.2f}°; "
+          f"fiziksel kol {T.kol_karsiligi(s.aci):.2f}°)")
 
     if s.satirlar:
         print(f"{BILGI} Karttan gelen son metinler: {s.satirlar[-5:]}")
@@ -157,7 +158,8 @@ if __name__ == "__main__":
         t0 = time.time()
         while time.time() - t0 < 0.6:
             s.yokla(); time.sleep(0.02)
-        print(f"sifirlamadan sonra: {s.aci}  | {s.hata or 'OK'}")
+        print(f"sifirlamadan sonra operator acisi: {s.aci} "
+              f"(beklenen {T.ACI_MIN:.0f}; fiziksel kol 0) | {s.hata or 'OK'}")
         s.kapat(kalici=True)
         raise SystemExit(0)
     hedef = None

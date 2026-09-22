@@ -114,7 +114,7 @@ def olc_ppd(args):
     try:
         for a0, a1 in ((args.bas - 4, args.bas), (args.bas, args.bas + 4),
                        (args.bas - 4, args.bas + 4)):
-            a0 = max(0.0, a0)
+            a0 = max(TS.ACI_MIN, a0)
             git_bekle(k, kilit, a0, cap); algi.takip_sifirla(); y0 = drone_y(model, cap)
             git_bekle(k, kilit, a1, cap); algi.takip_sifirla(); y1 = drone_y(model, cap)
             if y0 is None or y1 is None:
@@ -131,7 +131,7 @@ def olc_ppd(args):
 def calistir(args):
     kaynak, model, cap, k, kilit, calis = kur(args)
     git_bekle(k, kilit, args.bas, cap)
-    tilt_alt = max(0.0, args.bas - args.tilt_sinir)
+    tilt_alt = max(TS.ACI_MIN, args.bas - args.tilt_sinir)
     tilt_ust = min(k.tilt_tavan, float(algi.AYAR["tilt_takip_ust"]),
                    args.bas + args.tilt_sinir)
     if tilt_alt >= tilt_ust:
@@ -379,7 +379,8 @@ if __name__ == "__main__":
     ap.add_argument("--mod", choices=("pd", "kalman", "surekli", "yorunge"), default="yorunge",
                     help="surekli = arayuzun konum bildiren karttaki yolu (EksenTakip)")
     ap.add_argument("--sure", type=float, default=20.0)
-    ap.add_argument("--bas", type=float, default=6.0, help="baslangic kol acisi")
+    ap.add_argument("--bas", type=float, default=0.0,
+                    help="baslangic operator acisi (-30..+30; 0 = fiziksel kol 30)")
     ap.add_argument("--tilt_sinir", type=float, default=45.0,
                     help="baslangic acisi etrafindaki test penceresi (+/- derece)")
     ap.add_argument("--sanal", type=lambda s: tuple(map(float, s.split(","))), default=None,

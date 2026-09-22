@@ -103,9 +103,9 @@ def main():
             if s.hareket or s.pan_durum["hareket"] or s.kart_resetlendi:
                 raise RuntimeError("Kart hareket ediyor veya reset gördü; test iptal")
             tilt0, pan0 = s.aci, s.pan_aci
-        # Kalibrasyon yuksek acida da olculebilsin; ama test boyunca mekanik
-        # 48° takip tavanindan en az 3° pay kalsin.
-        if not (0.0 <= tilt0 and tilt0 + args.adim <= 45.0
+        # Operator acisi -30..+30'dur. Test boyunca olculmus fiziksel 48°
+        # (= operator +18°) takip tavanindan en az 3° pay kalsin.
+        if not (T.ACI_MIN <= tilt0 and tilt0 + args.adim <= 15.0
                 and abs(pan0) <= 45.0 and abs(pan0 + args.adim) <= 45.0):
             raise RuntimeError(f"Güvenli başlangıç penceresi dışında: tilt={tilt0}, pan={pan0}")
         with kilit:
