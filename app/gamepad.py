@@ -4,6 +4,11 @@
 Sartname Yetenek 1 kullanici komut arayuzlerini "UI/joystick/klavye" diye sayar; joystick
 video icin dogrudan puandir (CLAUDE.md §2).
 
+DUZEN (takim karari 22.09): SOL cubuk = yatay, SAG cubuk = dikey, D-pad = iki
+eksen · L2+R2 birlikte 2 sn = ATES ac (tekrar basinca kes) · L1/R1 2 sn = merkeze
+al (kademeli) · Options = ACIL DURDUR / DEVAM. Tek tusla ates
+YOKTUR — klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
+
 ⚠ BU MODUL KOMUT URETMEZ, YALNIZCA OKUR. Arayuz okunan durumu kendi guvenlik kapilarindan
   gecirir (`_aci_hareket`, `_ates_bas`, `_estop_bas`). Gamepad'in kendi yolu OLMAMALIDIR:
   gecmiste ikinci bir ates yolu acilmis ve E-Stop denetimini atlamisti (CLAUDE.md §12 B1).
@@ -53,33 +58,42 @@ OLU_BOLGE = 0.15
 # PlayStation DualSense'te 7 = R2'dir. Sabit numara yazsaydik ACIL DURDUR baska bir pad
 # takildiginda yanlis tusa duserdi — kabul edilemez.
 if PYGAME_VAR:
-    CB_ATES = pygame.CONTROLLER_BUTTON_A                # atesi ac/kes (ATES butonuyla ayni)
-    CB_MERKEZ = pygame.CONTROLLER_BUTTON_Y              # merkeze al (0°, 0°)
-    CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # ACIL DURDUR / DEVAM
-    CB_HIZ_ASAGI = pygame.CONTROLLER_BUTTON_LEFTSHOULDER
-    CB_HIZ_YUKARI = pygame.CONTROLLER_BUTTON_RIGHTSHOULDER
+    # Takim karari 22.09: ATES iki omuz TETIGI birden (L2+R2) — tek tusla ates
+    # istemiyoruz, klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
+    CB_MERKEZ = (pygame.CONTROLLER_BUTTON_LEFTSHOULDER,     # L1 / R1: merkeze al
+                 pygame.CONTROLLER_BUTTON_RIGHTSHOULDER)
+    CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # Options: ACIL DURDUR / DEVAM
+    CB_TETIK = (pygame.CONTROLLER_AXIS_TRIGGERLEFT,     # L2 / R2 (analog)
+                pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
+    # Takim karari 22.09: SOL cubuk yalniz YATAY (pan), SAG cubuk yalniz DIKEY (tilt).
+    # Tek cubukta capraz surmek iki ekseni ayni anda kaydiriyor ve hassas nisan
+    # zorlasiyordu; eksenleri iki ele bolmek her ekseni bagimsiz kontrol ettirir.
     CB_EKSEN_PAN = pygame.CONTROLLER_AXIS_LEFTX
-    CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_LEFTY
+    CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_RIGHTY
     # GameController'da D-pad ayri bir "hat" degil, dort dugmedir.
-    CB_DPAD = ((pygame.CONTROLLER_BUTTON_DPAD_UP, 0.0, 1.0),
-               (pygame.CONTROLLER_BUTTON_DPAD_DOWN, 0.0, -1.0),
-               (pygame.CONTROLLER_BUTTON_DPAD_LEFT, -1.0, 0.0),
-               (pygame.CONTROLLER_BUTTON_DPAD_RIGHT, 1.0, 0.0))
+    CB_DPAD = ((pygame.CONTROLLER_BUTTON_DPAD_UP, 0.0, 1.0, "up"),
+               (pygame.CONTROLLER_BUTTON_DPAD_DOWN, 0.0, -1.0, "down"),
+               (pygame.CONTROLLER_BUTTON_DPAD_LEFT, -1.0, 0.0, "left"),
+               (pygame.CONTROLLER_BUTTON_DPAD_RIGHT, 1.0, 0.0, "right"))
     # GameController eksenleri -32768..32767 tam sayi doner (joystick'te -1..1 float).
     CB_EKSEN_OLCEK = 32767.0
 
+# Tetik esigi: tetik analogdur (0..1). Yarisi gecince "basili" sayilir — daha
+# dusuk olsaydi tetige degmek atesi kurmaya baslardi.
+TETIK_ESIK = 0.5
+
 # Yedek yol: ham Joystick numaralari (Xbox/XInput duzeni varsayilir).
 # `python app/gamepad.py` hangi dugmenin hangi numara oldugunu canli gosterir.
-BTN_ATES = 0          # A
-BTN_MERKEZ = 3        # Y
-BTN_HIZ_ASAGI = 4     # LB
-BTN_HIZ_YUKARI = 5    # RB
-BTN_ESTOP = 7         # Start/Menu
+BTN_L1, BTN_R1 = 4, 5     # omuz dugmeleri
+BTN_L2, BTN_R2 = 6, 7     # DualSense'te tetikler dugme olarak da gorunur
+BTN_ESTOP = 9             # Options/Start (ham duzende cogu padde 9)
+EKSEN_L2, EKSEN_R2 = 4, 5       # tetikler eksen olarak gelirse
 
-# Sol analog cubuk. Y ekseni SDL'de yukari = NEGATIF; tilt'te yukari = ARTI oldugu icin
-# isaret cevrilir (yoksa cubugu yukari itince namlu asagi inerdi).
-EKSEN_PAN = 0
-EKSEN_TILT = 1
+# Analog cubuklar (ham yol): SOL X = pan, SAG Y = tilt. Y ekseni SDL'de yukari =
+# NEGATIF; tilt'te yukari = ARTI oldugu icin isaret cevrilir (yoksa cubugu yukari
+# itince namlu asagi inerdi).
+EKSEN_PAN = 0             # sol cubuk X
+EKSEN_TILT = 3            # sag cubuk Y (XInput/DirectInput duzeninde 3)
 
 
 def _olu_bolge(v):
@@ -94,25 +108,51 @@ def _olu_bolge(v):
 
 
 class Durum:
-    """Bir yoklamanin sonucu. Eksenler -1..1, dugmeler KENAR TETIKLI (basildigi an True).
+    """Bir yoklamanin sonucu.
 
-    Neden kenar tetikli: ates/E-Stop birer ac-kapa. Seviye okunsaydi dugme basili
-    tutuldugu surece her yoklamada (50 ms) tekrar tetiklenir, lazer yanip sonerdi."""
+    * `pan`/`tilt`  : -1..1 (cubuk veya D-pad)
+    * `basili`      : O AN basili tuslarin adlari — arayuzdeki kol resmini yakar
+                      ve "iki tetik birlikte 2 sn" gibi SURE kurallarini besler.
+    * `kenar`       : bu yoklamada YENI basilanlar — ac/kapa komutlari icin.
 
-    __slots__ = ("pan", "tilt", "ates", "estop", "merkez", "hiz_yukari", "hiz_asagi")
+    Neden iki kume: ates/E-Stop birer ac-kapa (kenar gerekir), ama atesi kurmak
+    icin tetiklerin BASILI KALMASI gerekir (seviye gerekir). Ikisi de lazim."""
+
+    __slots__ = ("pan", "tilt", "basili", "kenar")
 
     def __init__(self):
         self.pan = 0.0
         self.tilt = 0.0
-        self.ates = False
-        self.estop = False
-        self.merkez = False
-        self.hiz_yukari = False
-        self.hiz_asagi = False
+        self.basili = set()
+        self.kenar = set()
 
     @property
     def hareket_var(self):
         return self.pan != 0.0 or self.tilt != 0.0
+
+    @property
+    def estop(self):
+        return "start" in self.kenar
+
+    @property
+    def merkez(self):
+        """L1/R1 BU yoklamada basildi mi (kurma sayacini baslatmak icin)."""
+        return bool({"l1", "r1"} & self.kenar)
+
+    @property
+    def merkez_basili(self):
+        """L1/R1 hala basili mi (2 sn kuralini surdurmek icin)."""
+        return bool({"l1", "r1"} & self.basili)
+
+    @property
+    def ates_basili(self):
+        """Iki tetik birden basili mi (atesi kurma kosulu)."""
+        return {"l2", "r2"} <= self.basili
+
+    @property
+    def ates_kenar(self):
+        """Iki tetik BU yoklamada birlikte basildi mi (ac/kapa komutu)."""
+        return self.ates_basili and bool({"l2", "r2"} & self.kenar)
 
 
 class Gamepad:
@@ -187,11 +227,14 @@ class Gamepad:
             self.hata = f"gamepad açılamadı: {e}"
             return False
 
-    def _kenar(self, no, basili):
-        """Dugme BU yoklamada basildi mi? (basili tutmak tekrar tetiklemez)"""
-        onceki = self._onceki.get(no, False)
-        self._onceki[no] = basili
-        return basili and not onceki
+    def _koy(self, d, ad, basili):
+        """Tusu duruma yazar: `basili` seviye, `kenar` bu yoklamada YENI basilanlar."""
+        onceki = self._onceki.get(ad, False)
+        self._onceki[ad] = basili
+        if basili:
+            d.basili.add(ad)
+            if not onceki:
+                d.kenar.add(ad)
 
     # ---- okuma ----
     def oku(self):
@@ -222,17 +265,18 @@ class Gamepad:
 
         # D-pad analog cubukla AYNI alanlari besler: hassas nisan icin dijital yon cogu
         # zaman cubuktan kolaydir. Cubuk zaten hareketliyse D-pad yok sayilir.
-        if not d.hareket_var:
-            for btn, kpan, ktilt in CB_DPAD:
-                if c.get_button(btn):
+        for btn, kpan, ktilt, ad in CB_DPAD:
+            if c.get_button(btn):
+                self._koy(d, ad, True)
+                if not d.hareket_var:
                     d.pan, d.tilt = kpan, ktilt
-                    break
+            else:
+                self._koy(d, ad, False)
 
-        d.ates = self._kenar(CB_ATES, bool(c.get_button(CB_ATES)))
-        d.estop = self._kenar(CB_ESTOP, bool(c.get_button(CB_ESTOP)))
-        d.merkez = self._kenar(CB_MERKEZ, bool(c.get_button(CB_MERKEZ)))
-        d.hiz_yukari = self._kenar(CB_HIZ_YUKARI, bool(c.get_button(CB_HIZ_YUKARI)))
-        d.hiz_asagi = self._kenar(CB_HIZ_ASAGI, bool(c.get_button(CB_HIZ_ASAGI)))
+        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP)):
+            self._koy(d, ad, bool(c.get_button(btn)))
+        for ad, eksen in (("l2", CB_TETIK[0]), ("r2", CB_TETIK[1])):
+            self._koy(d, ad, c.get_axis(eksen) / CB_EKSEN_OLCEK > TETIK_ESIK)
 
     def _oku_joystick(self, d):
         """Ham Joystick yolu — SDL cihazi tanimadi, numaralar XInput duzeni VARSAYILIR."""
@@ -240,18 +284,25 @@ class Gamepad:
         d.pan = _olu_bolge(float(j.get_axis(EKSEN_PAN)))
         d.tilt = -_olu_bolge(float(j.get_axis(EKSEN_TILT)))
 
-        if j.get_numhats() > 0 and not d.hareket_var:
+        if j.get_numhats() > 0:
             hx, hy = j.get_hat(0)
-            d.pan, d.tilt = float(hx), float(hy)
+            for ad, acik in (("left", hx < 0), ("right", hx > 0),
+                             ("down", hy < 0), ("up", hy > 0)):
+                self._koy(d, ad, acik)
+            if not d.hareket_var:
+                d.pan, d.tilt = float(hx), float(hy)
 
         def bas(no):
             return bool(j.get_button(no)) if no < j.get_numbuttons() else False
 
-        d.ates = self._kenar(BTN_ATES, bas(BTN_ATES))
-        d.estop = self._kenar(BTN_ESTOP, bas(BTN_ESTOP))
-        d.merkez = self._kenar(BTN_MERKEZ, bas(BTN_MERKEZ))
-        d.hiz_yukari = self._kenar(BTN_HIZ_YUKARI, bas(BTN_HIZ_YUKARI))
-        d.hiz_asagi = self._kenar(BTN_HIZ_ASAGI, bas(BTN_HIZ_ASAGI))
+        def eksen(no):
+            return float(j.get_axis(no)) if no < j.get_numaxes() else -1.0
+
+        for ad, btn in (("l1", BTN_L1), ("r1", BTN_R1), ("start", BTN_ESTOP)):
+            self._koy(d, ad, bas(btn))
+        # Tetik: kimi padde dugme, kimi padde eksen (-1..1). Ikisi de kabul edilir.
+        for ad, btn, eks in (("l2", BTN_L2, EKSEN_L2), ("r2", BTN_R2, EKSEN_R2)):
+            self._koy(d, ad, bas(btn) or (eksen(eks) + 1.0) / 2.0 > TETIK_ESIK)
 
     def kapat(self):
         try:
@@ -275,6 +326,20 @@ if __name__ == "__main__":
     assert _olu_bolge(1.0) == 1.0 and _olu_bolge(-1.0) == -1.0     # uc degerler tam
     assert 0.0 < _olu_bolge(0.20) < 0.10                           # esikten hemen sonra KUCUK
     assert abs(_olu_bolge(-0.5) + _olu_bolge(0.5)) < 1e-9          # simetrik
+
+    # Durum semantigi (cihazsiz test edilebilir): ates IKI tetik birden ister ve
+    # basili tutmak komutu TEKRARLAMAZ (yoksa lazer 50 ms'de bir acilip kapanirdi).
+    d = Durum()
+    d.basili, d.kenar = {"l2"}, {"l2"}
+    assert not d.ates_basili and not d.ates_kenar, "tek tetik atesi kurmamali"
+    d.basili, d.kenar = {"l2", "r2"}, {"r2"}
+    assert d.ates_basili and d.ates_kenar
+    d.kenar = set()
+    assert d.ates_basili and not d.ates_kenar, "basili tutmak tekrar tetikledi"
+    d.basili, d.kenar = {"l1"}, {"l1"}
+    assert d.merkez and not d.estop
+    d.basili, d.kenar = {"start"}, {"start"}
+    assert d.estop and not d.merkez
     print("olu bolge testleri OK")
 
     if not g.bagli:
@@ -284,20 +349,23 @@ if __name__ == "__main__":
 
     print(f"Gamepad: {g.ad}")
     if g.standart_harita:
-        print("  yol: SDL GameController — dugme duzeni STANDART (A/Y/Start her padde ayni)")
+        print("  yol: SDL GameController — dugme duzeni STANDART (her padde ayni)")
     else:
         print("  yol: ham Joystick — SDL bu cihazi tanimiyor, XInput duzeni VARSAYILIYOR.")
         print(f"       eksen: {g.js.get_numaxes()}  dugme: {g.js.get_numbuttons()}"
               f"  hat: {g.js.get_numhats()}")
         print("       Yanlis tusa dusuyorsa gamepad.py'deki BTN_* numaralarini asagidaki")
         print("       'basili' ciktisina bakarak duzeltin.")
-    print("\nCubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
+    print("\nDuzen: sol cubuk=yatay, sag cubuk=dikey, D-pad=yon · L2+R2 (2 sn)=ates"
+          " · L1/R1 (2 sn)=merkez · Options=E-STOP")
+    print("Cubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
     try:
         while True:
             d = g.oku()
-            olaylar = [ad for ad, v in (("ATES", d.ates), ("E-STOP", d.estop),
-                                        ("MERKEZ", d.merkez), ("HIZ+", d.hiz_yukari),
-                                        ("HIZ-", d.hiz_asagi)) if v]
+            olaylar = [ad for ad, v in (("ATES(L2+R2)", d.ates_basili),
+                                        ("E-STOP", d.estop),
+                                        ("MERKEZ", d.merkez)) if v]
+            olaylar.append("basili:" + ",".join(sorted(d.basili)))
             ham = ""
             if g.js is not None:
                 ham = " ham:" + str([i for i in range(g.js.get_numbuttons())

@@ -40,15 +40,15 @@ echo ===================================================
 echo Bağlı seri portlar:
 powershell -NoProfile -Command "Get-CimInstance Win32_PnPEntity | Where-Object { $_.Name -match '\(COM\d+\)' } | ForEach-Object { '   ' + $_.Name }" 2>nul
 echo.
-echo [1/2] PAN (yatay) kartı - eski AccelStepper firmware, "P/T" komutları
+echo [1/2] Ayrı PAN kartı ^(yalnız eski iki-kart düzeninde^)
 echo   Port adı yazın (örn. COM7)  -^> gerçek karta bağlanır, MOTORLAR DÖNER
-echo   Boş bırakıp Enter           -^> mock simülasyon (motor dönmez)
+echo   Yeni ESP32-S3 iki ekseni de sürüyorsa BOŞ bırakın ^(pan bu karta gider^)
 echo.
 set "DERINMAVI_ESP="
 set /p DERINMAVI_ESP="Pan portu: "
 if "%DERINMAVI_ESP%"=="" set "DERINMAVI_ESP=mock"
 echo.
-echo [2/2] TILT (dikey) kartı - ESP32-S3 + HSD57 kol-biyel, "G" komutu
+echo [2/2] ESP32-S3 PAN/TILT kartı - STATE3/PAN1 geri bildirim, G/Y/PY
 echo   Boş bırakıp Enter  -^> OTOMATIK BUL ^(önerilen^)
 echo   off                -^> kapalı ^(dikey eksen pan kartında kalır^)
 echo   COM3 / COM4        -^> elle port

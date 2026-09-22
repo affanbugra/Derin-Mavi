@@ -282,10 +282,16 @@ class Kontrol:
         tasinmamali: okuma dongusuyle ayni kaderi paylasmasi bilincli bir tercihtir."""
         if self.tilt.bagli:
             self.tilt.yokla()
-            if (not self._olculen_hizalandi and self.pan_ayri
-                    and self.tilt.aci is not None and self.tilt.pan_aci is not None):
+            # Yeni tek kartta PAN1 + STATE3 birlikte beklenir. Ayrı eski pan kartı
+            # bağlıysa pan konumu zaten yazılımın inancıdır; tilt STATE3 gelir
+            # gelmez hizalanıp açılışta -30'dan 0'a çıkabilmelidir.
+            if (not self._olculen_hizalandi and self.tilt.aci is not None
+                    and (self.seri is not None or
+                         (self.pan_ayri and self.tilt.pan_aci is not None))):
                 self._olculen_hizalandi = True
-                self.pan_hedef, self.tilt_hedef = self.tilt.pan_aci, self.tilt.aci
+                if self.pan_ayri:
+                    self.pan_hedef = self.tilt.pan_aci
+                self.tilt_hedef = self.tilt.aci
                 self.acilis_hizalama = (self.pan_hedef, self.tilt_hedef)
             for s in self.tilt.yeni_satirlar():
                 self._kart_yaziyor(f"TILT: {s}")

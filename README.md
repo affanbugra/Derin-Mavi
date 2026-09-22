@@ -7,6 +7,10 @@ hedef tespiti, renkten dost/düşman ayrımı ve gimbal/lazer kontrol iskeleti i
 > **Model repoda geliyor** (`models/best.pt`) — klonla, kur, çalıştır; ayrıca bir şey indirmen
 > gerekmez. Veri seti ve türetilmiş model biçimleri (`.onnx`, `.engine`) repoya girmez.
 
+`final_v1` dalı Affan'ın yeni arayüzünü geri bildirimli pan/tilt ve dört hedefli
+takip katmanıyla birleştirir. Mimari ve güvenli saha doğrulaması:
+[FINAL_ENTEGRASYON.md](FINAL_ENTEGRASYON.md).
+
 ---
 
 ## Özellikler
@@ -58,7 +62,8 @@ python app/arayuz_qt.py
 
 Ortak ağırlık **`models/best.pt`** repoda gelir — bir şey yapmana gerek yok, uygulama açılınca
 otomatik yüklenir. Tanıdığı sınıflar: `DRONE`, `F16`, `FUZE`, `HELIKOPTER`
-(**`balon` henüz yok** — nişan noktası şimdilik gövde merkezine düşüyor).
+(**`balon` sınıfı henüz yok** — nişan noktası hedef kutusundan tahmin ediliyor;
+gerçek balon konumu sahada kalibre edilmelidir).
 
 **Hızlandırmak istersen** (opsiyonel — asıl darboğaz inference'tır) kendi makinende bir kez
 çevir, çıktıyı `models/` içine bırak, uygulama otomatik tercih eder:
@@ -84,11 +89,12 @@ Hiçbiri zorunlu değildir; hepsinin makul otomatik varsayılanı vardır.
 | `DERINMAVI_CAM` | Kamera kaynağını sabitler (yoksa otomatik tarama) | `0`, `video.mp4`, `rtsp://...` |
 | `DERINMAVI_MODEL` | Belirli model dosyası / ONNX seçer | `onnx`, `C:\yol\best.pt` |
 | `DERINMAVI_ESP` | Kontrolcü hedefi | `mock` (varsayılan), `COM5`, `off` |
-| `DERINMAVI_TILT` | **Dikey eksen ayrı kartta** (ESP32-S3 + HSD57 kol-biyel) | `off` (varsayılan), `mock`, `COM3` |
+| `DERINMAVI_TILT` | ESP32-S3 pan/tilt kartı (PAN1 varsa iki eksen de burada) | `off` (varsayılan), `auto`, `mock`, `COM3` |
 | `DERINMAVI_FOCAL` | Mesafe kalibrasyon odak (piksel) | `900` |
 
 > `DERINMAVI_TILT` verilmezse hiçbir davranış değişmez; tilt eski kartta kalır.
-> Verilirse dikey eksen 0–60° kol-biyel mekanizmasına yönlenir ve **konum geri
+> Verilirse dikey eksen operatöre −30…+30° olarak gösterilir; kartın 0–60° ham
+> açısına sürücüde dönüştürülür ve **konum geri
 > bildirimli** çalışır. Kurulum, kalibrasyon ve tasarım kararları:
 > **[TILT_TAKIP.md](TILT_TAKIP.md)**.
 
