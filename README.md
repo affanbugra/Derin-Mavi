@@ -128,8 +128,9 @@ Derin Mavi/
 Kamera → Laptop (görüntü işleme + karar) → UART 115200 → ESP32 → 2 step motor + lazer
 ```
 
-ESP32'ye bağlı olanlar: **pan (yatay) step motoru** (STEP 6/DIR 7/ENABLE 16, 15→83 diş =
-5.53:1 redüksiyon), **tilt (dikey) step motoru** (STEP 4/DIR 5/ENABLE 17), **acil stop butonu**
+ESP32'ye bağlı olanlar: **pan (yatay) step motoru** (PULSE 10/DIR 11/ENABLE 16,
+normal 15→83 çarklı sistem = 5.53:1 redüksiyon), **tilt (dikey) step motoru**
+(PULSE 4/DIR 5/ENABLE 17), **acil stop butonu**
 (GPIO 15, normalde açık — basılınca LOW) ve **lazer** (GPIO 18, PWM). Sürücüler 6400 step/tur.
 Firmware AccelStepper kullanır ve ASCII satır komutları konuşur:
 
@@ -144,6 +145,10 @@ Firmware AccelStepper kullanır ve ASCII satır komutları konuşur:
 Protokolün tek kaynağı [app/protokol.py](app/protokol.py); kart tarafı
 [esp32/derin_mavi_esp32/derin_mavi_esp32.ino](esp32/derin_mavi_esp32/derin_mavi_esp32.ino). Biri değişirse diğeri de değişmeli.
 Hız **derece/sn** olarak gönderilir; step'e çevirmek kartın işidir (iki eksenin dişli oranı farklı).
+
+> **Mekanik ayrımı:** pan normal sabit oranlı çarklı eksendir ve `83/15` oranıyla
+> doğrusal `step/derece` hesabı kullanır. Kol-biyel tilt aynı hesapla sürülmez;
+> `DERINMAVI_TILT` etkinse ayrı tilt firmware'indeki ölçülmüş kalibrasyon tablosuna gider.
 
 **USB gamepad:** Takılıysa otomatik bulunur (uygulama açıkken takarsanız ~2 sn içinde) ve
 alt çubukta adı görünür. Sol çubuk / D-pad — gimbal · **A** — ateş aç/kes · **Y** — merkeze

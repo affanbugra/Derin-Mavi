@@ -5,9 +5,9 @@
   Bir komut eklenecek/degistirilecekse ONCE orasi guncellenir, sonra burasi.
 
   Donanim:
-    pan  motoru  : YATAY eksen (azimut)   — STEP 6, DIR 7, ENABLE 16
+    pan  motoru  : YATAY eksen (azimut)   — PULSE 10, DIR 11, ENABLE 16
                    motor 15 disli -> buyuk cark 83 disli = 5.533:1 rediksiyon
-    tilt motoru  : DIKEY eksen (yukselis) — STEP 4, DIR 5, ENABLE 17
+    tilt motoru  : DIKEY eksen (yukselis) — PULSE 4, DIR 5, ENABLE 17
     acil stop    : GPIO 15 — NO buton, GND'ye ceker (basili = LOW), dahili pull-up
     lazer        : GPIO 18 — **PWM tetik** (1 kHz), guc %0-100 arasi ayarlanir
     Surucu cozunurlugu: 6400 step/tur (1/32 mikroadim)
@@ -45,19 +45,39 @@
       sessizce hicbir sey yapar — derleme hata VERMEZ. Lazer bu yuzden 25'ten 18'e alindi.
     - S3'te GPIO 26-32 dahili SPI flash icin, oktal PSRAM'li modullerde 33-37 de PSRAM icin
       ayrilidir. GPIO 43/44 = UART0 (CH343 uzerinden laptop), 19/20 = USB D-/D+.
-      Kullandigimiz 4/5/6/7/15/16/17/18 pinlerinin tamami bu bolgelerin DISINDA ve gecerli.
+      Kullandigimiz 4/5/10/11/15/16/17/18 pinlerinin tamami bu bolgelerin DISINDA ve gecerli.
 */
 
 #include <AccelStepper.h>
 
 // ---- Pinler ----
-AccelStepper tiltMotor(AccelStepper::DRIVER, 19, 18); // DIKEY eksen (STEP, DIR)
-AccelStepper panMotor(AccelStepper::DRIVER, 5, 17);   // YATAY eksen (STEP, DIR)
-const int PAN_EN_PIN  = 4;                            // pan surucusu ENABLE hatti
-const int TILT_EN_PIN = 0;                            // tilt surucusu ENABLE hatti
-const int ESTOP_PIN   = 16;                           // ACIL STOP BUTONU (NO, GND'ye ceker)
+constexpr int TILT_STEP_PIN = 4;
+constexpr int TILT_DIR_PIN  = 5;
+constexpr int PAN_STEP_PIN  = 10;
+constexpr int PAN_DIR_PIN   = 11;
+constexpr int PAN_EN_PIN    = 16;                     // pan surucusu ENABLE hatti
+constexpr int TILT_EN_PIN   = 17;                     // tilt surucusu ENABLE hatti
+constexpr int ESTOP_PIN     = 15;                     // ACIL STOP BUTONU (NO, GND'ye ceker)
 // ⚠ LAZER PINI
-const int LAZER_PIN   = 2;                            // lazer PWM tetigi
+constexpr int LAZER_PIN     = 18;                     // lazer PWM tetigi
+
+// Pin degisikliginde iki motor hattinin ayni GPIO'ya verilmesi derlemede dursun.
+// Eski PAN_EN=4 degeri yeni TILT PULSE=4 ile cakisiyordu; o durumda STEP darbeleri
+// surucuyu acip kapatir ve hareket tanimsiz hale gelir.
+constexpr int KULLANILAN_PINLER[] = {
+  TILT_STEP_PIN, TILT_DIR_PIN, PAN_STEP_PIN, PAN_DIR_PIN,
+  PAN_EN_PIN, TILT_EN_PIN, ESTOP_PIN, LAZER_PIN
+};
+constexpr bool motorPinleriBenzersiz() {
+  for (unsigned i = 0; i < sizeof(KULLANILAN_PINLER) / sizeof(KULLANILAN_PINLER[0]); ++i)
+    for (unsigned j = i + 1; j < sizeof(KULLANILAN_PINLER) / sizeof(KULLANILAN_PINLER[0]); ++j)
+      if (KULLANILAN_PINLER[i] == KULLANILAN_PINLER[j]) return false;
+  return true;
+}
+static_assert(motorPinleriBenzersiz(), "STEP/DIR/ENABLE/E-Stop/lazer pinleri cakismamali");
+
+AccelStepper tiltMotor(AccelStepper::DRIVER, TILT_STEP_PIN, TILT_DIR_PIN);
+AccelStepper panMotor(AccelStepper::DRIVER, PAN_STEP_PIN, PAN_DIR_PIN);
 
 // ---- LAZER GUCU (PWM) ----
 // Lazer surucusunun PWM/TTL girisi duty oraniyla gucu belirler: %40 duty ≈ %40 ortalama
@@ -80,18 +100,11 @@ int lazerYuzde = LAZER_GUC_VARSAYILAN;
 const unsigned long ATES_ZAMAN_ASIMI_MS = 1000;
 unsigned long sonAtesKomutu = 0;
 
-// Surucu ENABLE polaritesi — ⚠ IKI EKSENDE FARKLI, tek sabit YETMEZ (16.08 olcumu).
-//   Tek bir ENA_AKTIF_LOW vardi ve false idi (HIGH = enerjili). Tilt bununla calisiyordu
-//   ama PAN HIC DONMUYORDU: komutlar kabul ediliyor, sayac ilerliyor (230 dereceye kadar
-//   birikmisti), motor kipirdamiyordu — cunku pan surucusu surekli DEVRE DISI kaliyordu.
-//   Hicbir hata satiri uretmedigi icin aylarca "kablo sorunu" gibi gorundu.
-//
-//   OLCUM (X teshis komutu ile, AccelStepper bypass edilerek):
-//     reset sonrasi (pan ENA = HIGH) -> X5 darbesi -> pan DONMEDI
-//     X4 ile pan ENA LOW'a cekildi   -> X5 darbesi -> pan DONDU
-//   Yani pan surucusu LOW ile enerjilenir, tilt HIGH ile. Muhtemel fiziksel sebep:
-//   optokuplorlu suruculerde ENA+ / ENA- uclari ters takilinca polarite tersine doner.
-//   Kablo duzeltilirse ikisi de ayni degere alinabilir; o zamana kadar eksen basina ayri.
+// Surucu ENABLE polaritesi eksen basina ayridir. Eski tesisatta PAN'in aktif-LOW,
+// TILT'in aktif-HIGH oldugu olculmustu; fakat o olcum eski STEP/ENA pin eslemesindeydi.
+// Yeni PULSE 10/DIR 11/ENA 16 tesisatinda canli testte tekrar dogrulanmalidir. Degerler
+// onceki calisan surucu profili korunarak birakildi; motor komut aliyor ama donmuyorsa
+// ilk kontrol edilecek sey ENA 16 seviyesi/polaritesidir.
 //
 //   ⚠ Yanlis polarite HAREKETI DURDURMAYI ENGELLEMEZ: acil durdurmada systemActive=false
 //     olur ve run() hic cagrilmaz. ENABLE, ustune binen IKINCI guvenlik katmanidir.
@@ -107,14 +120,15 @@ const unsigned long ESTOP_DEBOUNCE_MS = 30;
 
 // ---- Mekanik (app/protokol.py'deki sabitlerle AYNI olmali) ----
 const float STEP_PER_REV   = 6400.0;                  // surucu cozunurlugu (1/32)
+// PAN NORMAL CARKLI SISTEMDIR: sabit 15->83 oran, dolayisiyla derece->step DONUSUMU
+// dogrusaldir. Kol-biyel tilt'in cok noktali kalibrasyon tablosu PAN'a uygulanmaz.
 const float PAN_GEAR_RATIO = 83.0 / 15.0;             // motor 15 disli -> cark 83 disli
-// ⚠ GECICI: dikey eksende de rediksiyon VAR ama orani heniz olculmedi (ekip bildirecek).
-//   1:1 kaldigi surece tilt acilari GERCEK acilar degildir — "60°" komutu gercekte
-//   60/oran kadar dondurur. Oran gelince BU SATIR ve app/protokol.py TILT_DISLI birlikte
-//   duzeltilecek.
+// ⚠ Bu TILT sabiti yalniz ESKI/TEK-KART geri donus yoludur. Gercek kol-biyel tilt,
+//   DERINMAVI_TILT etkin oldugunda ws_motor_test firmware'indeki olculmus kalibrasyon
+//   tablosuyla surulur; sabit step/derece kol-biyel mekanik icin fiziksel olarak yanlistir.
 const float TILT_GEAR_RATIO = 0.5; // (Guncellendi: 45->90 derece tasmasini duzeltmek icin 0.5 carpan)
 const float PAN_STEPS_PER_DEG  = STEP_PER_REV * PAN_GEAR_RATIO / 360.0;   // ~98.37
-const float TILT_STEPS_PER_DEG = STEP_PER_REV * TILT_GEAR_RATIO / 360.0;  // ~17.78
+const float TILT_STEPS_PER_DEG = STEP_PER_REV * TILT_GEAR_RATIO / 360.0;  // ~8.89
 
 // AccelStepper adimlari yazilimla uretir; ESP32'de guvenli ust sinir kabaca budur.
 // (app/protokol.py MAKS_STEP_SN ile ayni deger.)
@@ -353,18 +367,23 @@ void loop() {
       // AccelStepper'i BYPASS eder. "Motor donmuyor" durumunda soruyu ikiye ayirir:
       // darbe gonderince motor donuyorsa ESP32 pini + kablo + surucu saglamdir, sorun
       // yazilim yapilandirmasindadir; donmuyorsa o hat fiziksel olarak kopuktur.
-      // Or. "X5" = pan STEP pini, "X19" = tilt STEP pini (calisan eksen, kiyas icin).
-      // ⚠ "X2" GONDERMEYIN: lazer pini. Komut pini OUTPUT yapip LOW'da birakir; ENABLE
-      //   veya E-Stop pinine gonderilirse o hat bir sonraki resete kadar bozulur.
+      // Or. "X10" = pan PULSE pini, "X4" = tilt PULSE pini (calisan eksen, kiyas icin).
+      // Guvenlik icin baska pine darbe gonderilmez: lazer/ENABLE/E-Stop yanlislikla
+      // OUTPUT yapilip sistemin durumu bozulamaz.
       if (eksen == 'X') {
         int pin = komut.substring(1).toInt();
-        pinMode(pin, OUTPUT);
-        for (int i = 0; i < 2000; i++) {        // 2000 adim ≈ 1/3 tur (6400 step/tur)
-          digitalWrite(pin, HIGH); delayMicroseconds(300);
-          digitalWrite(pin, LOW);  delayMicroseconds(300);
+        if (pin != PAN_STEP_PIN && pin != TILT_STEP_PIN) {
+          Serial.print(">>> TESHIS REDDEDILDI: yalniz PULSE GPIO ");
+          Serial.print(PAN_STEP_PIN); Serial.print(" veya "); Serial.println(TILT_STEP_PIN);
+        } else {
+          pinMode(pin, OUTPUT);
+          for (int i = 0; i < 2000; i++) {      // 2000 adim ≈ 1/3 tur (6400 step/tur)
+            digitalWrite(pin, HIGH); delayMicroseconds(300);
+            digitalWrite(pin, LOW);  delayMicroseconds(300);
+          }
+          Serial.print(">>> TESHIS: GPIO "); Serial.print(pin);
+          Serial.println(" pinine 2000 adim darbesi gonderildi");
         }
-        Serial.print(">>> TESHIS: GPIO "); Serial.print(pin);
-        Serial.println(" pinine 2000 adim darbesi gonderildi");
       }
       // --- LAZER GUCU (%) ---
       // "Ne kadar" (G) ile "ne zaman" (L) ayri tutuldu — hiz duzeyindeki S/A ile P/T

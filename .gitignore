@@ -29,6 +29,8 @@ dataset/
 dataset_v*/
 runs/
 roboflow_rf/
+# zor ornek toplama (algi._zor_ornek) — egitim adayi, repoya girmez
+app/veri_toplama/
 
 # NOT: Dokümanlar repoda AÇIKTIR — yalnızca 2 dosya: CLAUDE.md (proje beyni) + README.md.
 

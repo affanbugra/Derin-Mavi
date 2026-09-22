@@ -75,6 +75,13 @@ class Kontrol:
         self.firmware_uyumsuz = None
         # Kart acil durdurmada durdugu konumu bildirir; arayuz ekrani buna gore duzeltir.
         self.estop_konum = None
+        # ACILIS HIZALAMASI: kart (ESP32-S3) uygulama kapaninca resetlenmez; eksenler en
+        # son neredeyse oradadir. Hedefler 0 kabul edilirse ilk komut (or. "tilt 5")
+        # pan'i hic gondermez (0 == 0) ve namlu yana bakarken yazilim onu merkezde sanir
+        # — sahada pan 28 derecede kalirken test "merkeze aldim" dedi. Ilk konum
+        # raporunda hedefler OLCULENE esitlenir; arayuz `acilis_hizalama`yi tuketir.
+        self._olculen_hizalandi = False
+        self.acilis_hizalama = None
         if self.kaynak == "off":
             return
         if self.kaynak == "mock":
@@ -108,6 +115,64 @@ class Kontrol:
     def tilt_ayri(self):
         """Dikey eksen ayri kartta mi? (yonlendirmenin tek kosulu)"""
         return self.tilt.bagli
+
+    @property
+    def pan_ayri(self):
+        """Pan ekseni tilt karti uzerinden mi suruluyor?
+
+        Yeni ESP32-S3 firmware'i pan motorunu da (GPIO10/11) surer ve PAN1 yayinlar.
+        Gercek bir eski pan karti (DERINMAVI_ESP=COMx) bagliysa pan ORADA kalir:
+        iki kart ayni ekseni surmesin. Pan karti mock/off ise pan buraya gelir."""
+        return self.seri is None and self.tilt_ayri and self.tilt.pan_destekli
+
+    @property
+    def pan_olculen(self):
+        """Kartin bildirdigi pan acisi (darbe sayimindan) — yoksa None."""
+        return self.tilt.pan_aci if self.pan_ayri else None
+
+    @property
+    def takip_geri_bildirimli(self):
+        """Iki eksen de konumunu bildiriyor mu? (surekli takip kontrolcusunun sarti)"""
+        return self.tilt_ayri and self.pan_ayri
+
+    @property
+    def yorunge_destekli(self):
+        """Otonom takip YORUNGE kipinde mi surulebilir? (iki eksen bu kartta + firmware Y/PY)"""
+        return self.pan_ayri and self.tilt.yorunge_destekli is True
+
+    def yorunge(self, pan_der=None, pan_hiz=None, tilt_der=None, tilt_hiz=None):
+        """YORUNGE komutu: "hedef su an burada ve bu HIZLA gidiyor" (otonom takip).
+
+        Konum kipinden (aci) farki: kart referansi kendisi ilerletir, motor hedefin
+        hizinda akar, varis/durus ani olmaz (bkz. firmware yorunge_core.h). None
+        verilen eksene bu turda komut gitmez; kart o eksenin son komutunu 150 ms
+        ilerletip yumusakca durur. Hareketin tek kapisi yine arayuz_qt._aci_hareket."""
+        if pan_der is not None and pan_hiz is not None:
+            pan_der = T.pan_kirp(pan_der)
+            self.pan_hedef = pan_der
+            self.tilt.pan_yorunge(pan_der, pan_hiz)
+        if tilt_der is not None and tilt_hiz is not None:
+            tilt_der = T.aci_kirp(tilt_der)
+            self.tilt_hedef = tilt_der
+            self.tilt.yorunge(tilt_der, tilt_hiz)
+        return self.durum
+
+    def tilt_zamaninda(self, t):
+        """Kolun `t` anindaki acisi (kare cekildigi an) — yoksa None."""
+        return self.tilt.aci_zamaninda(t) if self.tilt_ayri else None
+
+    def pan_zamaninda(self, t):
+        """Pan'in `t` anindaki acisi — yoksa None."""
+        return self.tilt.pan_zamaninda(t) if self.pan_ayri else None
+
+    def pan_sifirla(self):
+        """Pan'in su anki konumunu 0 kabul ettir; arayuz hedefi de 0'a ceker."""
+        if not self.pan_ayri:
+            return False
+        ok = self.tilt.pan_sifirla()
+        if ok:
+            self.pan_hedef = 0.0
+        return ok
 
     @property
     def tilt_tavan(self):
@@ -216,6 +281,11 @@ class Kontrol:
         tasinmamali: okuma dongusuyle ayni kaderi paylasmasi bilincli bir tercihtir."""
         if self.tilt.bagli:
             self.tilt.yokla()
+            if (not self._olculen_hizalandi and self.pan_ayri
+                    and self.tilt.aci is not None and self.tilt.pan_aci is not None):
+                self._olculen_hizalandi = True
+                self.pan_hedef, self.tilt_hedef = self.tilt.pan_aci, self.tilt.aci
+                self.acilis_hizalama = (self.pan_hedef, self.tilt_hedef)
             for s in self.tilt.yeni_satirlar():
                 self._kart_yaziyor(f"TILT: {s}")
             if self.tilt.hata:
@@ -246,7 +316,12 @@ class Kontrol:
         karta "T" gitmez: iki kart ayni anda ayni ekseni surerse mekanik ikisinin
         ortasinda bir yerde kalir."""
         satirlar = []
-        if abs(pan_der - self.pan_hedef) > 0.005:
+        if self.pan_ayri:
+            pan_der = T.pan_kirp(pan_der)
+            if abs(pan_der - self.pan_hedef) > 0.005:
+                self.pan_hedef = pan_der
+                self.tilt.pan_git(pan_der)
+        elif abs(pan_der - self.pan_hedef) > 0.005:
             satirlar.append(P.pan(pan_der))
             self.pan_hedef = pan_der
         if self.tilt_ayri:
@@ -339,6 +414,9 @@ class Kontrol:
         self.pan_hedef = self.tilt_hedef = 0.0
         if self.tilt_ayri:
             self.tilt.git(0.0)             # kol alt dayamaya (0 derece) iner
+            if self.pan_ayri:
+                self.tilt.pan_git(0.0)
+                return self.durum
             return self._gonder(P.pan(0.0))
         return self._gonder(P.pan(0.0), P.tilt(0.0))
 
@@ -362,6 +440,19 @@ class Kontrol:
             self.tilt.hiz_ayarla(self.hiz)
         return self._gonder(*P.hiz(self.hiz))
 
+    def hiz_profilleri(self, seviye=None):
+        """Secili kademenin gercek pan ve tilt (hiz, ivme) profillerini dondur.
+
+        Ayri HSD57 tilt kartinin mekanigi ve ivmesi pan ekseninden farklidir.
+        Takip dongusu komut kirpma/mesgul suresini hesaplarken tek bir profil
+        kullanirsa tilt'i oldugundan yavas sanir ve gereksiz bekler.  Tek kartli
+        eski sistemde iki eksen de protokol profilini kullanmaya devam eder.
+        """
+        kademe = self.hiz if seviye is None else P.hiz_kirp(seviye)
+        pan = T.PAN_HIZ_TABLO[kademe] if self.pan_ayri else P.HIZ_TABLO[kademe]
+        tilt = T.HIZ_TABLO[kademe] if self.tilt_ayri else pan
+        return pan, tilt
+
     def kapat(self):
         # Tilt karti KALICI olarak kapatilir (D): uygulama kapanirken kol komut
         # kabul eder halde kalmamali. Kart zaten canlilik kesilince kilitlenir,
@@ -379,6 +470,7 @@ if __name__ == "__main__":
     assert k.bagli and k.mock_mu
     # acilista hiz duzeyi karta bildirilir (kart kendi varsayilaninda kalmasin)
     assert (k.mock.max_hiz, k.mock.ivme) == P.HIZ_TABLO[P.HIZ_VARSAYILAN]
+    assert k.hiz_profilleri() == (P.HIZ_TABLO[P.HIZ_VARSAYILAN],) * 2
 
     k.aci(45.0, 12.0)
     assert (k.mock.pan_hedef, k.mock.tilt_hedef) == (45.0, 12.0)
@@ -430,6 +522,7 @@ if __name__ == "__main__":
     saat = [5000.0]
     k2.tilt._saat = lambda: saat[0]                 # testte gercek zamani beklemeyelim
     k2.tilt.mock.t = k2.tilt.mock.son_canli = saat[0]
+    k2.tilt.mock.pan_destek = False   # PAN'SIZ (eski) tilt firmware'i; pan'li hal: test 6
 
     def tilt_tik(sure=0.25):
         saat[0] += sure
@@ -438,6 +531,10 @@ if __name__ == "__main__":
     tilt_tik(); tilt_tik()
     assert k2.tilt_ayri and k2.tilt.hazir, k2.tilt.ozet()
     assert k2.tilt_tavan == T.ACI_MAX == 60.0       # kol-biyel tavani, 180 DEGIL
+    assert k2.hiz_profilleri(P.H_NORMAL) == \
+        (P.HIZ_TABLO[P.H_NORMAL], T.HIZ_TABLO[T.H_NORMAL])
+    assert k2.hiz_profilleri(P.H_NORMAL)[1][1] > k2.hiz_profilleri(P.H_NORMAL)[0][1], \
+        "ayri tilt kartinin ivmesi pan profiliyle ezilmemeli"
 
     # 1. ⭐ YONLENDIRME: tilt ESKI KARTA GITMEZ, yeni karta gider. Iki kart ayni
     #    ekseni surerse mekanik ikisinin ortasinda kalir.
@@ -489,5 +586,51 @@ if __name__ == "__main__":
     k3.oku()
     assert not any(s.startswith("G") for s in k3.tilt.mock.kayit), k3.tilt.mock.kayit
 
-    print("kontrol testleri OK — mutlak aci, ates/estop, hiz duzeyi, kart metni, "
-          "tilt yonlendirmesi (ayri kart), kol araligi, E-Stop'ta yerinde durma")
+    # 5b. ACILIS HIZALAMASI: kart pan 20 / tilt 10 derecede kalmisken acilan kontrol,
+    #     hedefleri olculene esitler; "pan 0, tilt 5" komutu pan'i da GERCEKTEN gonderir.
+    kh = Kontrol("off", tilt_kaynak="mock")
+    saat5 = [6500.0]
+    kh.tilt._saat = lambda: saat5[0]
+    kh.tilt.mock.t = kh.tilt.mock.son_canli = saat5[0]
+    kh.tilt.mock.pan_pos = kh.tilt.mock.pan_hedef = int(round(20.0 * T.PAN_DARBE_DER))
+    kh.tilt.mock.pos = kh.tilt.mock.hedef = kh.tilt.mock._darbe(10.0)
+    for _ in range(4):
+        saat5[0] += 0.1
+        kh.oku()
+    assert kh.acilis_hizalama is not None and abs(kh.acilis_hizalama[0] - 20.0) < 0.05, kh.acilis_hizalama
+    assert abs(kh.pan_hedef - 20.0) < 0.05 and abs(kh.tilt_hedef - 10.0) < 0.1
+    kh.aci(0.0, 5.0)
+    for _ in range(40):
+        saat5[0] += 0.1
+        kh.oku()
+    assert abs(kh.pan_olculen) < 0.1 and abs(kh.tilt_olculen - 5.0) < 0.2, (kh.pan_olculen, kh.tilt_olculen)
+
+    # 6. PAN tilt kartinda (yeni firmware): pan oraya gider, eski (mock) karta GITMEZ
+    k4 = Kontrol("mock", tilt_kaynak="mock")
+    saat4 = [7000.0]
+    k4.tilt._saat = lambda: saat4[0]
+    k4.tilt.mock.t = k4.tilt.mock.son_canli = saat4[0]
+    for _ in range(3):
+        saat4[0] += 0.25; k4.oku()
+    assert k4.pan_ayri
+    eski_pan = k4.mock.pan_hedef
+    k4.aci(15.0, 10.0)
+    assert k4.tilt.mock.kayit[-1] == "P15.000" or "P15.000" in k4.tilt.mock.kayit
+    assert k4.mock.pan_hedef == eski_pan, "pan iki karta birden gitmemeli"
+    for _ in range(12):
+        saat4[0] += 0.25; k4.oku()
+    assert abs(k4.pan_olculen - 15.0) < 0.05, k4.pan_olculen
+    assert k4.hiz_profilleri()[0] == T.PAN_HIZ_TABLO[k4.hiz]
+    k4.home()
+    for _ in range(12):
+        saat4[0] += 0.25; k4.oku()
+    assert abs(k4.pan_olculen) < 0.05
+    k4.tilt.mock.pan_destek = False                 # eski firmware: pan eski yola doner
+    for _ in range(4):
+        saat4[0] += 0.25; k4.oku()
+    assert not k4.pan_ayri
+    k4.aci(5.0, 0.0)
+    assert k4.mock.pan_hedef == 5.0
+
+    print("kontrol testleri OK — mutlak aci, ates/estop, eksene ozel hiz profili, "
+          "kart metni, tilt yonlendirmesi (ayri kart), kol araligi, E-Stop'ta yerinde durma")

@@ -36,6 +36,8 @@ import algi
 import nisan
 import gamepad as gamepad_mod
 import kontrol as kontrol_mod
+import hedef_kestirici as HK   # surekli takip kontrolcusu (EksenTakip)
+import tilt_surucu as T        # PAN_SINIR
 import protokol as P          # hiz duzeyi/durum sabitleri — TEK KAYNAK (bkz. protokol.py)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -351,6 +353,7 @@ class OrtakVeri:
         self.kilit = threading.Lock()
         self.kare = None
         self.kare_sira = -1
+        self.kare_t = 0.0       # karenin KAMERADAN alindigi an (time.time)
         self.dets = []
         self.balonlar = []
         self.active_idx = -1
@@ -366,6 +369,8 @@ class OrtakVeri:
 class InferenceThread(QThread):
     model_bilgi = Signal(str, list)         # ozet metni, eksik siniflar (C7)
     nisan_komut = Signal(float, float)      # d_yaw, d_pitch — Otonom takip (B3)
+    # Surekli takip icin HAM olcum: {t, ex, ey, olu_x, olu_y, w} ya da {t, var: False}
+    takip_olcum = Signal(object)
 
     def __init__(self, veri):
         super().__init__()
@@ -375,7 +380,31 @@ class InferenceThread(QThread):
         self.asama = 3                      # 1/2/3/0 — SARTNAME davranisi
         self.estop = False
         self.otonom = False                 # Otonom modda mi
+        # t -> (pan_derece, kamera_yukselis_derece) ya da None. Ana pencere baglar;
+        # kamera hareketi telafisi icin (algi.kamera_kaymasi_bildir).
+        self.kamera_acisi_fn = None
+        self._onceki_kamera_acisi = None
         self.nisanci = nisan.PDNisanci()
+
+    def _kamera_kaymasi(self, kare_t, genislik):
+        """Onceki analiz karesinden bu yana eksenlerin donusunu goruntu kaymasina
+        cevirip algi'ya bildirir (ByteTrack + kilit hafizasi kameraya gore kayar)."""
+        fn = self.kamera_acisi_fn
+        if fn is None:
+            return
+        try:
+            aci = fn(kare_t - float(algi.AYAR.get("kamera_gecikme", 0.03)))
+        except Exception:
+            aci = None
+        if aci is None or None in aci:
+            self._onceki_kamera_acisi = None
+            return
+        onceki, self._onceki_kamera_acisi = self._onceki_kamera_acisi, aci
+        if onceki is None:
+            return
+        ppd = float(algi.AYAR.get("takip_ppd_pan", 18.7)) * genislik / 1280.0
+        # pan + (saga) -> sahne SOLA kayar; kamera yukari -> sahne ASAGI kayar (olculdu)
+        algi.kamera_kaymasi_bildir(-(aci[0] - onceki[0]) * ppd, (aci[1] - onceki[1]) * ppd)
 
     def run(self):
         # Mevcut modelleri sirasiyla dener, ilk yuklenenle devam eder
@@ -396,6 +425,7 @@ class InferenceThread(QThread):
                 with self.veri.kilit:
                     kare = self.veri.kare
                     sira = self.veri.kare_sira
+                    kare_t = self.veri.kare_t
 
                 if kare is None or sira == son_islenen_sira or self.model is None:
                     self.msleep(3)
@@ -404,11 +434,14 @@ class InferenceThread(QThread):
                 son_islenen_sira = sira
                 frame = kare.copy()
 
+                self._kamera_kaymasi(kare_t, frame.shape[1])
                 dets, balonlar, active_idx = algi.analiz_et(self.model, frame, self.estop, self.asama)
 
                 merkezde = False
                 aktif_det = dets[active_idx] if 0 <= active_idx < len(dets) else None
-                if self.otonom and not self.estop and aktif_det is not None:
+                kirmizi_kaniti = (aktif_det is not None and not aktif_det.get("hayalet")
+                                   and algi.anlik_kirmizi_kaniti(frame, aktif_det["box"]))
+                if self.otonom and not self.estop and aktif_det is not None and kirmizi_kaniti:
                     if aktif_det.get("hayalet"):
                         # ⚠ HAYALET HEDEFE NISAN ALINMAZ. Kutu KARE KOORDINATLARINDA
                         # DONMUS: gimbal ne yaparsa yapsin hata azalmaz, dolayisiyla
@@ -417,10 +450,12 @@ class InferenceThread(QThread):
                         # ~15 FPS = 2 sn, Normal hizda 80 dereceye kadar kacis).
                         # Sistem OLDUGU YERDE BEKLER.
                         #
-                        # Ama `merkezde` SIFIRLANMAZ: hayaletin tum varlik sebebi
-                        # kisa tespit kesintilerini yutmak. Her kesintide dwell
-                        # sayacini sifirlasaydik ates hic tamamlanamazdi.
-                        merkezde = self.veri.merkezde
+                        # Hayalet kutu yalniz GOSTERIM/KILIT hafizasidir; isabet
+                        # kaniti degildir. Onceki kare merkezdeyse bunu korumak,
+                        # gercek tespit kaybolduktan sonra dwell sayacini doldurup
+                        # gorunmeyen hedefe ates acabilirdi. Takip hafizasi kalir
+                        # ama ates dwell'i gercek kutu donene kadar sifirlanir.
+                        merkezde = False
                     else:
                         h, w = frame.shape[:2]
                         kutu = aktif_det["box"]
@@ -434,8 +469,15 @@ class InferenceThread(QThread):
                             self.nisan_komut.emit(d_yaw, d_pitch)
                         else:
                             merkezde = True
+                        (ex, ey), (olu_x, olu_y) = self.nisanci.son_hata_px, self.nisanci.son_olu_px
+                        self.takip_olcum.emit({"var": True, "t": kare_t, "ex": ex, "ey": ey,
+                                               "olu_x": olu_x, "olu_y": olu_y, "w": w})
                 else:
                     self.nisanci.sifirla()
+                if self.otonom and not self.estop and not kirmizi_kaniti:
+                    # Hedef yok / hayalet: kontrolcu kisa sure tahminle devam eder,
+                    # sonra durur — bunu bilmesi icin "gorulmedi" bildirimi de gider.
+                    self.takip_olcum.emit({"var": False, "t": kare_t})
 
                 now = time.perf_counter()
                 dt = now - t_son
@@ -488,7 +530,10 @@ HEDEF_ONCELIK = {"fuze": 0, "helikopter": 1, "f16": 2, "drone": 3}
 # Tilt kartinin nabiz periyodu (ms). Firmware 350 ms sessizlikte kendini kilitler
 # (tilt_surucu.ZAMAN_ASIMI_MS); bu deger asimin ~1/3'u olacak sekilde secildi ki
 # arka arkaya iki nabiz kacsa bile kart kilitlenmesin.
-TILT_NABIZ_MS = 100
+# 20 ms: surekli takip kartin aci gecmisini ZAMAN DAMGASIYLA kullanir; 100 ms'lik
+# okuma paketleri 0-100 ms gec damgaliyordu. Nabiz (H) yine 120 ms'de bir gider
+# (TiltSurucu.yokla kendi sayar), yani hat trafigi artmaz.
+TILT_NABIZ_MS = 20
 
 NISAN_MESGUL_ORANI = 0.4
 NISAN_MIN_ARALIK = 0.04
@@ -578,6 +623,7 @@ class VideoThread(QThread):
                 if frame is None:              
                     self.msleep(3)
                     continue
+                kare_t = okuyucu.son_kare_zamani()
                 son_sira = sira
                 frame = frame.copy()           
 
@@ -594,6 +640,7 @@ class VideoThread(QThread):
                 with self.veri.kilit:
                     self.veri.kare = frame
                     self.veri.kare_sira = sira
+                    self.veri.kare_t = kare_t
                     self.veri.kamera_fps = kamera_fps
                     dets = list(self.veri.dets)
                     balonlar = list(self.veri.balonlar)
@@ -609,6 +656,9 @@ class VideoThread(QThread):
                 data["merkezde"] = getattr(self.veri, "merkezde", False)
                 data["nisan_hata_px"] = getattr(self.veri, "nisan_hata_px", None)
                 data["olu_bolge_px"] = getattr(self.veri, "olu_bolge_px", None)
+                aktif = data.get("active")
+                data["kirmizi_kaniti"] = bool(
+                    aktif and algi.anlik_kirmizi_kaniti(frame, aktif["box"]))
 
                 rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 h, w, ch = rgb.shape
@@ -656,7 +706,8 @@ class VideoThread(QThread):
         if active_idx >= 0 and not self.estop:
             try:
                 d = dets[active_idx]
-                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"]}
+                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"],
+                          "box": d["box"], "hayalet": d.get("hayalet", False)}
             except IndexError:
                 pass
         if self.estop:
@@ -816,6 +867,12 @@ class MainWindow(QMainWindow):
         self.hiz_seviye = P.HIZ_VARSAYILAN
         self._nisan_son_t = None   # otonom PD komutlari icin hiz-siniri zamanlayicisi
         self._nisan_mesgul_ta = 0.0   # bu zamana kadar yeni otonom komutu KABUL EDILMEZ
+        # SUREKLI TAKIP (konum bildiren kartta; bkz. _takip_olcum_geldi). Iki eksen
+        # ayri kontrolcu: pan (+: hedef sagda -> saga), tilt (+px: hedef altta -> asagi).
+        self._pan_takip = HK.EksenTakip(isaret=+1.0,
+                                        bosluk=algi.AYAR.get("takip_bosluk", 0.8))
+        self._tilt_takip = HK.EksenTakip(isaret=-1.0,
+                                         bosluk=algi.AYAR.get("takip_bosluk", 0.8))
         self._otonom_ates_aktif = False
         self._otonom_hedef_merkezde_t = None
         self._otonom_ates_bitis_t = None
@@ -957,6 +1014,8 @@ class MainWindow(QMainWindow):
         self.inference_thread.otonom = (self.mod == "Otonom")
         self.inference_thread.model_bilgi.connect(self._model_bilgi_geldi)
         self.inference_thread.nisan_komut.connect(self._nisan_geldi)
+        self.inference_thread.takip_olcum.connect(self._takip_olcum_geldi)
+        self.inference_thread.kamera_acisi_fn = self._kamera_acilari
         self.inference_thread.start()
         
         self.thread = VideoThread(self.inference_thread, self.veri)
@@ -2485,7 +2544,26 @@ class MainWindow(QMainWindow):
         self._ap_tilt_degisti(tavan)
         self._ap_yasak_degisti()
 
-    def _aci_hareket(self, d_pan, d_tilt, taban_olculen=False):
+    # Yorunge kipinde kart son komutu en fazla bu kadar ilerletir (firmware
+    # Yorunge::ZAMAN_ASIMI_US 150 ms + pay). Yasak alan kontrolu bu ufka bakar.
+    YORUNGE_UFUK_S = 0.2
+
+    def _acilis_hizala(self):
+        """ACILIS HIZALAMASI (bkz. Kontrol.acilis_hizalama): arayuzun inandigi acilar
+        kartin GERCEK konumundan baslar; ilk komut namluyu 0'a firlatmaz. Hareket
+        kapisinin BASINDA da cagrilir: sonra cagrilsaydi yeni komutun acisini ezerdi."""
+        k = getattr(self, "kontrol", None)
+        hz = getattr(k, "acilis_hizalama", None) if k is not None else None
+        if hz is None:
+            return
+        k.acilis_hizalama = None
+        self.pan_ham, self.tilt_aci = hz
+        self.pan_aci = self.pan_ham % 360.0
+        if hasattr(self, "pan_val_lbl"):
+            self.pan_val_lbl.setText(f"{self.pan_aci:.1f}°")
+            self.tilt_val_lbl.setText(f"{self.tilt_aci:.1f}°")
+
+    def _aci_hareket(self, d_pan, d_tilt, taban_olculen=False, hiz=None):
         """Pan/Tilt acisini degistirir, yasak bolgeleri kontrol eder ve ESP32 komutunu gonderir.
 
         HAREKETIN TEK KAPISI. E-Stop, yasak alan ve tilt limiti burada uygulanir;
@@ -2507,6 +2585,7 @@ class MainWindow(QMainWindow):
         if getattr(self, "kontrol", None) and self.kontrol.estop_aktif:
             return False
 
+        self._acilis_hizala()
         yeni_pan_ham = self.pan_ham + d_pan
         yeni_pan = yeni_pan_ham % 360.0
 
@@ -2551,6 +2630,21 @@ class MainWindow(QMainWindow):
             self.bolge_status.setStyleSheet(f"color:{RED}; font-size:11px; font-weight:700; padding:2px 0;")
             return False
 
+        # YORUNGE KIPI (hiz=(pan_der_sn, tilt_der_sn), None = o eksene komut yok):
+        # kart hedefi kendisi ilerletir; YORUNGE_UFUK_S sonra yasak bolgeye girecek
+        # eksenin hizi SIFIRLANIR (namlu bolge kenarinda durur, iceri tasmaz).
+        if hiz is not None:
+            pan_v, tilt_v = hiz
+            if pan_v and self.pan_yasak_aktif:
+                ileri = (yeni_pan_ham + pan_v * self.YORUNGE_UFUK_S) % 360.0
+                if self.pan_yasak_min <= ileri <= self.pan_yasak_max:
+                    pan_v = 0.0
+            if tilt_v and self.tilt_yasak_aktif:
+                ileri = yeni_tilt + tilt_v * self.YORUNGE_UFUK_S
+                if self.tilt_yasak_min <= ileri <= self.tilt_yasak_max:
+                    tilt_v = 0.0
+            hiz = (pan_v, tilt_v)
+
         self.pan_ham = yeni_pan_ham
         self.pan_aci = yeni_pan
         self.tilt_aci = yeni_tilt
@@ -2570,7 +2664,12 @@ class MainWindow(QMainWindow):
         # ESP32'ye MUTLAK hedef aci gider (pan sarmasiz). Degismeyen ekseni kontrol
         # katmani zaten gondermez, burada ayrica ayiklamaya gerek yok.
         if getattr(self, "kontrol", None) and self.kontrol.bagli:
-            self._esp_goster(self.kontrol.aci(self.pan_ham, self.tilt_aci))
+            if hiz is not None and self.kontrol.yorunge_destekli:
+                self._esp_goster(self.kontrol.yorunge(
+                    self.pan_ham if hiz[0] is not None else None, hiz[0],
+                    self.tilt_aci if hiz[1] is not None else None, hiz[1]))
+            else:
+                self._esp_goster(self.kontrol.aci(self.pan_ham, self.tilt_aci))
         return True
 
     def _nisan_geldi(self, d_yaw, d_pitch):
@@ -2579,9 +2678,10 @@ class MainWindow(QMainWindow):
         Manuel hareketle AYNI kapidan (_aci_hareket) gecer: E-Stop, yasak alan ve
         tilt limiti otonom modda da aynen uygulanir — guvenlik icin tek yol olmali.
 
-        PD'nin urettigi komut, MOTORUN GERCEKTEN GIDEBILECEGI hizla (secili hiz duzeyi,
-        P.HIZ_TABLO) kirpilir — basili-tutma D-pad'de (_tekrar_tik) kullanilan AYNI
-        matematik: adim = tavan_hiz x gecen_sure. ESP32 konum geri bildirimi YOLLAMADIGI
+        PD'nin urettigi komut, HER EKSENIN GERCEKTEN GIDEBILECEGI hizla (secili hiz
+        duzeyinin pan ve tilt profilleri ayri ayri) kirpilir — basili-tutma D-pad'de
+        (_tekrar_tik) kullanilan AYNI matematik: adim = tavan_hiz x gecen_sure.
+        ESP32 konum geri bildirimi YOLLAMADIGI
         icin (CLAUDE.md §5.1) pan_ham/tilt_aci gimbalin fiziksel pozisyonu hakkinda
         YAZILIMIN inancidir, olcum degil.
 
@@ -2601,17 +2701,20 @@ class MainWindow(QMainWindow):
         yorumu: tam bekleme akiciligi asiri dusurdugu icin kisaltildi)."""
         if self.mod != "Otonom":
             return
+        if self._surekli_takip_mi():
+            return   # iki eksen de konum bildiriyor: _takip_olcum_geldi yonetir
         simdi = time.time()
         if simdi < self._nisan_mesgul_ta:
             return   # onceki komutun fiziksel karsiligi henuz gorulmedi, bekle
-        tavan_hiz, tavan_ivme = P.HIZ_TABLO[self.hiz_seviye]
+        (pan_hiz, pan_ivme), (tilt_hiz, tilt_ivme) = \
+            self.kontrol.hiz_profilleri(self.hiz_seviye)
         if self._nisan_son_t is not None:
             dt = min(0.2, simdi - self._nisan_son_t)   # uzun kopukluk sonrasi sicrama olmasin
-            tavan = tavan_hiz * dt
-            d_yaw = max(-tavan, min(tavan, d_yaw))
-            d_pitch = max(-tavan, min(tavan, d_pitch))
+            pan_tavan = pan_hiz * dt
+            tilt_tavan = tilt_hiz * dt
+            d_yaw = max(-pan_tavan, min(pan_tavan, d_yaw))
+            d_pitch = max(-tilt_tavan, min(tilt_tavan, d_pitch))
         self._nisan_son_t = simdi
-        mesafe = max(abs(d_yaw), abs(d_pitch))
 
         # taban_olculen=True: dikey eksende komut, kartin BILDIRDIGI aciya gore
         # kurulur (bkz. _aci_hareket). Kart bildirmiyorsa (eski donanim) eski
@@ -2620,8 +2723,85 @@ class MainWindow(QMainWindow):
             # Ucgen ivme profili (tepe hiza hic ulasilmadigi varsayimi — kisa
             # duzeltmelerde gecerli): TAM tamamlanma t = 2*sqrt(mesafe/ivme); yalniz
             # NISAN_MESGUL_ORANI kadarini bekleriz (bkz. sabitin yorumu — akicilik icin).
-            sure = 2.0 * math.sqrt(mesafe / max(1.0, tavan_ivme)) * NISAN_MESGUL_ORANI
+            pan_sure = 2.0 * math.sqrt(abs(d_yaw) / max(1.0, pan_ivme))
+            tilt_sure = 2.0 * math.sqrt(abs(d_pitch) / max(1.0, tilt_ivme))
+            sure = max(pan_sure, tilt_sure) * NISAN_MESGUL_ORANI
             self._nisan_mesgul_ta = simdi + max(NISAN_MIN_ARALIK, sure)
+
+    def _kamera_acilari(self, t):
+        """(pan, kamera yukselisi) `t` aninda — InferenceThread'den cagrilir (okuma)."""
+        k = getattr(self, "kontrol", None)
+        if not (k and k.bagli and k.takip_geri_bildirimli):
+            return None
+        return k.pan_zamaninda(t), T.kamera_acisi(k.tilt_zamaninda(t))
+
+    def _surekli_takip_mi(self):
+        k = getattr(self, "kontrol", None)
+        return bool(k and k.bagli and k.takip_geri_bildirimli)
+
+    def _takip_olcum_geldi(self, d):
+        """SUREKLI TAKIP — iki eksen de konumunu bildiriyorsa otonom yolun sahibi.
+
+        PD + mesgul kapisi (_nisan_geldi) sahada titreme ve dur-kalk uretti (21.09:
+        40 sn'de 271 ayri tilt hedefi, pan 16 yon degisimi, yatay medyan 43 px):
+        her kare kucuk bir adim, motor durur, bayat kareye bakilip yeni adim.
+        Burada hedefin DUNYA acisi (kare anindaki eksen acisi + hata/ppd) filtrelenir
+        ve karta MUTLAK hedef olarak akar; kart hareket halinde durmadan yeni hedefe
+        gecer. Ayrinti ve benzetim sonuclari: hedef_kestirici.EksenTakip.
+
+        Hareket yine TEK KAPIDAN (_aci_hareket) gecer: E-Stop, yasak alan, limit aynen."""
+        if self.mod != "Otonom" or not self._surekli_takip_mi():
+            return
+        k = self.kontrol
+        simdi = time.time()
+        var = bool(d.get("var"))
+        ex = ey = olu_x = olu_y = None
+        if var:
+            olcek = float(d["w"]) / 1280.0              # ppd 1280 px'te olculdu
+            ex, ey, olu_x, olu_y = d["ex"], d["ey"], d["olu_x"], d["olu_y"]
+            t_kare = d["t"] - float(algi.AYAR.get("kamera_gecikme", 0.03))
+            self._pan_takip.olcum(t_kare, k.pan_zamaninda(t_kare), ex,
+                                  float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
+            # Tilt KAMERA ACISINDA izlenir (kol-biyel dogrusal degil, bkz.
+            # tilt_surucu.KAMERA_PPD_TABLO); orada ppd pan ile ayni.
+            self._tilt_takip.olcum(t_kare, T.kamera_acisi(k.tilt_zamaninda(t_kare)), ey,
+                                   float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
+        sinir = min(T.PAN_SINIR - 1.0, float(algi.AYAR.get("pan_takip_siniri", 170.0)))
+        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 48.0)))
+        if k.yorunge_destekli:
+            # YORUNGE KIPI: (konum, hiz) — motor hedefin hizinda akar, dur-kalk yok.
+            pr = self._pan_takip.yorunge_komut(simdi, k.pan_olculen, -sinir, sinir,
+                                               hata_px=ex, olu_px=olu_x)
+            tr = self._tilt_takip.yorunge_komut(
+                simdi, T.kamera_acisi(k.tilt_olculen), T.kamera_acisi(0.0),
+                T.kamera_acisi(ust), hata_px=ey, olu_px=olu_y)
+            if pr is None and tr is None:
+                return
+            d_pan = pan_v = d_tilt = tilt_v = None
+            if pr is not None:
+                d_pan, pan_v = pr[0] - self.pan_ham, pr[1]
+            if tr is not None:
+                # kamera acisi -> kol acisi; hiz yerel egimle (kol-biyel dogrusal degil)
+                kol = max(0.0, min(ust, T.kol_acisi(tr[0])))
+                egim = (T.kamera_acisi(kol + 0.05) - T.kamera_acisi(kol - 0.05)) / 0.1
+                d_tilt, tilt_v = kol - self.tilt_aci, tr[1] / max(1e-3, egim)
+            if self._aci_hareket(d_pan or 0.0, d_tilt or 0.0, hiz=(pan_v, tilt_v)):
+                self._nisan_mesgul_ta = simdi + 0.15
+            return
+        pan_k = self._pan_takip.komut(simdi, k.pan_olculen, -sinir, sinir,
+                                      hata_px=ex, olu_px=olu_x)
+        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 48.0)))
+        tilt_k = T.kol_acisi(self._tilt_takip.komut(
+            simdi, T.kamera_acisi(k.tilt_olculen), T.kamera_acisi(0.0), T.kamera_acisi(ust),
+            hata_px=ey, olu_px=olu_y))
+        if tilt_k is not None:
+            tilt_k = max(0.0, min(ust, tilt_k))
+        if pan_k is None and tilt_k is None:
+            return
+        d_pan = 0.0 if pan_k is None else pan_k - self.pan_ham
+        d_tilt = 0.0 if tilt_k is None else tilt_k - self.tilt_aci
+        if self._aci_hareket(d_pan, d_tilt):
+            self._nisan_mesgul_ta = simdi + 0.15      # durum etiketi: "Konumlaniyor..."
 
     def _aci_reset(self):
         self.pan_aci = 0.0
@@ -2880,6 +3060,21 @@ class MainWindow(QMainWindow):
 
     def _mod_sec(self, ad):
         self.mod = ad
+        # Otonom'a her giris/cikista takip kontrolculeri sifirdan baslar: eski hedefin
+        # hizi ve ogrenilmis hedef konumu yeni oturuma tasinmasin.
+        if hasattr(self, "_pan_takip"):
+            self._pan_takip.sifirla()
+            self._tilt_takip.sifirla()
+        # Otonomdan cikarken yorunge kipindeki eksenler HEMEN durur (150 ms'lik
+        # kendiliginden durusu beklemeden) ve ekrandaki aci olculene hizalanir.
+        k = getattr(self, "kontrol", None)
+        if ad != "Otonom" and k is not None and k.bagli and k.yorunge_destekli:
+            k.tilt_dur()
+            if k.tilt_olculen is not None:
+                self.tilt_aci = k.tilt_olculen
+            if k.pan_olculen is not None:
+                self.pan_ham = self.pan_aci = k.pan_olculen
+                self.pan_aci %= 360.0
         for m, b in self.mod_btns.items():
             b.setChecked(m == ad)
         izin = self.IZIN[ad]
@@ -3126,6 +3321,7 @@ class MainWindow(QMainWindow):
         # DIKEY EKSEN KARTI (varsa) AYRI GOSTERILIR — ve HEDEF ile OLCULEN ayri
         # yazilir. Ikisini tek sayiya indirgemek, kartin komuta yetisemedigi ani
         # gorunmez yapardi: ekran "30°" derken kol 12°'de olabilir.
+        self._acilis_hizala()
         if d.get("tilt_ayri"):
             t = d["tilt_ozet"] or {}
             t_renk = {"iyi": GRN, "uyari": AMB}.get(t.get("renk"), RED)
@@ -3526,6 +3722,18 @@ class MainWindow(QMainWindow):
 
         simdi = time.time()
         a = data.get("active")
+        # A2/A3'te sinif/taraf hafizasi ates izni DEGILDIR. Bu karede hedefin
+        # kirmizisi gorunmuyorsa (veya kutu hayaletse) dwell'i sifirla ve
+        # halihazirda acik olan atesi de derhal kes.
+        if not data.get("kirmizi_kaniti", False) or (a and a.get("hayalet")):
+            self._otonom_hedef_merkezde_t = None
+            self._ates_kapi_yaz("Ateş engelli", "Anlık kırmızı hedef kanıtı yok", AMB)
+            if self._otonom_ates_aktif:
+                self._otonom_ates_aktif = False
+                if self.fire_btn.isChecked():
+                    self.fire_btn.setChecked(False)
+                    self._ates_kes("Kırmızı hedef kanıtı kayboldu")
+            return
         
         # Hedef merkezde ise zamani tut (Dwell Time tetikleyicisi)
         if a and data.get("merkezde", False):
@@ -3647,15 +3855,28 @@ class MainWindow(QMainWindow):
         self._fit()
 
     def closeEvent(self, e):
+        # Iki is parcacigi birbirinden bagimsizdir. Yalniz video dongusunu
+        # durdurmak inference dongusunu arka planda canli birakiyordu; pencere
+        # kapanirken ``QThread: Destroyed while thread is still running`` ile
+        # surec sert sonlanabiliyordu. Once ikisine de dur sinyali ver, sonra
+        # ikisinin de devam eden kamera/model cagrilarindan cikmasini bekle.
+        # ONCE motorlar: asagidaki bekleme bir kamera/model cagrisinda takilirsa
+        # kart son hedefinde kalmasin (eskiden E-Stop beklemelerden SONRA gidiyordu
+        # ve inference_thread.wait() suresizdi).
+        if self.kontrol.bagli:
+            self.kontrol.estop(True)
         self.thread.durdur()
+        self.inference_thread.durdur()
         self.thread.wait(2000)
+        self.inference_thread.wait(3000)
+        if hasattr(self, "tarama") and self.tarama.isRunning():
+            self.tarama.wait(3000)
         if hasattr(self, "esp_timer"):
             self.esp_timer.stop()      # kapanan port yoklanmasin
         if hasattr(self, "gp_timer"):
             self.gp_timer.stop()
             self.gamepad.kapat()
         if self.kontrol.bagli:
-            self.kontrol.estop(True)   # kapanista guvenli duruma al
             self.kontrol.kapat()
         e.accept()
 

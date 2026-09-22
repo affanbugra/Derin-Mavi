@@ -126,11 +126,17 @@ class SahtePencere:
     _hiz_sec = A.MainWindow._hiz_sec
     _tekrar_tik = A.MainWindow._tekrar_tik
     _tekrar_durdur = A.MainWindow._tekrar_durdur
+    _tilt_surekli_bitir = A.MainWindow._tilt_surekli_bitir
     YON_TABLO = A.MainWindow.YON_TABLO
     _hiz_bilgi_yaz = A.MainWindow._hiz_bilgi_yaz
     _lazer_bilgi_yaz = A.MainWindow._lazer_bilgi_yaz
     _lazer_guc_degisti = A.MainWindow._lazer_guc_degisti
     _step_btn_stil_guncelle = A.MainWindow._step_btn_stil_guncelle
+    _takip_olcum_geldi = A.MainWindow._takip_olcum_geldi
+    _acilis_hizala = A.MainWindow._acilis_hizala
+    YORUNGE_UFUK_S = A.MainWindow.YORUNGE_UFUK_S
+    _surekli_takip_mi = A.MainWindow._surekli_takip_mi
+    _nisan_geldi = A.MainWindow._nisan_geldi
 
     def _ci(self, ad, renk, alt):               # alt cubuk segmenti — testte gorsel yok
         pass
@@ -653,6 +659,210 @@ def test_basili_tutma_estopta_kesilir():
     assert not w._basili_yonler
 
 
+def test_surekli_takip_iki_eksen():
+    """Konum bildiren kartta otonom takip SUREKLI kontrolcuden gecer (21.09 titreme).
+
+    Sahte saat + gercek mock kart (pan+tilt, PAN1/STATE3). Dunyada sabit duran bir
+    hedef (pan +10, tilt 25): iki eksen 3 sn icinde hedefe oturmali, oturduktan
+    sonra titrememeli (komut yagdirmamali) ve eski PD yolu devreye girmemeli.
+    E-Stop'ta tek komut gecmemeli."""
+    import hedef_kestirici as HK
+    saat = [10000.0]
+
+    class SahteZaman:
+        @staticmethod
+        def time():
+            return saat[0]
+
+        perf_counter = time
+
+    gercek_zaman = A.time
+    A.time = SahteZaman
+    try:
+        w = SahtePencere()
+        w.kontrol = kontrol_mod.Kontrol("off", tilt_kaynak="mock")
+        k = w.kontrol
+        k.tilt._saat = lambda: saat[0]
+        k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+        w._pan_takip = HK.EksenTakip(isaret=+1.0)
+        w._tilt_takip = HK.EksenTakip(isaret=-1.0)
+        k.tilt.mock.yorunge_destek = False          # bu test KONUM kipini sinar
+        w._nisan_mesgul_ta = 0.0
+        w._nisan_son_t = None
+        for _ in range(5):
+            saat[0] += 0.05
+            k.oku()
+        assert k.takip_geri_bildirimli, "mock kart pan+tilt bildirmeli"
+        w._aci_hareket(0.0, 20.0)                     # baslangic: kol 20 derece
+        for _ in range(60):
+            saat[0] += 0.05
+            k.oku()
+        w.mod = "Otonom"
+        hedef_pan, hedef_tilt = 10.0, 25.0
+        ppd_p = A.algi.AYAR["takip_ppd_pan"]
+        kam = A.T.kamera_acisi            # dikeyde goruntu KAMERA acisiyla kayar
+        komut_sayisi, son_yarim = 0, 0
+        onceki = len(k.tilt.mock.kayit)
+        for i in range(300):                          # 5 sn @ 60 Hz
+            saat[0] += 1 / 60.0
+            k.oku()
+            # Kare 50 ms once CEKILDI (algi.AYAR kamera_gecikme): hata o anki acidan.
+            t_cek = saat[0] - A.algi.AYAR["kamera_gecikme"]
+            pan, tilt = k.pan_zamaninda(t_cek), k.tilt_zamaninda(t_cek)
+            ex = (hedef_pan - pan) * ppd_p            # + = hedef sagda
+            ey = -(kam(hedef_tilt) - kam(tilt)) * ppd_p   # + = hedef asagida
+            w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": ex, "ey": ey,
+                                  "olu_x": 7.0, "olu_y": 7.0, "w": 1280})
+            if i >= 180:
+                son_yarim += sum(1 for c in k.tilt.mock.kayit[onceki:]
+                                 if c[:1] in ("P", "G") and c[:2] not in ("PZ", "PR", "PE"))
+            onceki = len(k.tilt.mock.kayit)
+        yeni = [c for c in k.tilt.mock.kayit if c[:1] in ("P", "G") and c[:2] not in ("PZ", "PR", "PE")]
+        assert abs(k.pan_olculen - hedef_pan) < 0.7, k.pan_olculen
+        assert abs(k.tilt_olculen - hedef_tilt) < 0.7, k.tilt_olculen
+        assert son_yarim <= 4, f"yerlestikten sonra {son_yarim} komut (titreme)"
+        assert len(yeni) < 80, len(yeni)
+        # Eski PD yolu bu kartta devre disi: nisan_komut sinyali hicbir sey yapmamali
+        pan_once = w.pan_ham
+        w._nisan_geldi(5.0, 5.0)
+        assert w.pan_ham == pan_once
+        # E-Stop: kontrolcu ne derse desin kapi kapali
+        k.estop_aktif = True
+        n = len(k.tilt.mock.kayit)
+        for _ in range(30):
+            saat[0] += 1 / 60.0
+            k.oku()
+            w._takip_olcum_geldi({"var": True, "t": saat[0] - 0.03, "ex": 300.0, "ey": 0.0,
+                                  "olu_x": 7.0, "olu_y": 7.0, "w": 1280})
+        assert not any(c[:1] in ("P", "G") and c[:2] != "PZ"
+                       for c in k.tilt.mock.kayit[n:]), k.tilt.mock.kayit[n:]
+        # Otonom pan siniri: hedef cok sagda kacsa bile namlu siniri gecmez (kablo sarmasi)
+        k.estop_aktif = False
+        A.algi.ayar_guncelle(pan_takip_siniri=20.0)
+        try:
+            for i in range(240):
+                saat[0] += 1 / 60.0
+                k.oku()
+                t_cek = saat[0] - A.algi.AYAR["kamera_gecikme"]
+                ex = (60.0 + 30.0 * i / 60.0 - k.pan_zamaninda(t_cek)) * ppd_p
+                w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": ex, "ey": 0.0,
+                                      "olu_x": 7.0, "olu_y": 7.0, "w": 1280})
+            assert k.pan_olculen <= 20.0 + 1e-6, k.pan_olculen
+        finally:
+            A.algi.ayar_guncelle(pan_takip_siniri=A.algi.VARSAYILAN_AYAR["pan_takip_siniri"])
+    finally:
+        A.time = gercek_zaman
+
+
+def test_otonom_ates_anlik_kirmizi_kapisi():
+    """Sinif hafizasi veya merkezde olma tek basina atese yetmemeli."""
+    class Pencere:
+        _otonom_ates_kontrol = A.MainWindow._otonom_ates_kontrol
+
+        def __init__(self):
+            self.mod, self.asama = "Otonom", "Aşama 2"
+            self._otonom_hedef_merkezde_t = time.time() - A.OTONOM_DWELL_SURE - 1
+            self._otonom_ates_aktif = False
+            self.fire_btn = SahteButon()
+            self.bas, self.kes = 0, 0
+
+        def _ates_kapi_yaz(self, *args):
+            pass
+
+        def _ates_bas(self):
+            self.bas += 1
+
+        def _ates_kes(self, *args):
+            self.kes += 1
+
+    w = Pencere()
+    veri = {"active": {"tip": "Hedef", "hayalet": False}, "merkezde": True,
+            "kirmizi_kaniti": False}
+    w._otonom_ates_kontrol(veri, False)
+    assert w.bas == 0 and not w._otonom_ates_aktif
+    veri["kirmizi_kaniti"] = True
+    w._otonom_hedef_merkezde_t = time.time() - A.OTONOM_DWELL_SURE - 1
+    w._otonom_ates_kontrol(veri, False)
+    assert w.bas == 1 and w._otonom_ates_aktif
+    veri["kirmizi_kaniti"] = False
+    w._otonom_ates_kontrol(veri, False)
+    assert w.kes == 1 and not w._otonom_ates_aktif
+
+
+def test_yorunge_kipi_iki_eksen():
+    """YORUNGE KIPI (21.09 dur-kalk/titreme sikayeti): konum bildiren + Y/PY destekli
+    kartta otonom takip karta (konum, HIZ) yollar; motor hedefin hizinda akar.
+    Sabit hizla kayan hedef izlenmeli, kart Y/PY almali (G/P DEGIL), E-Stop'ta hicbir
+    yorunge komutu gecmemeli, yasak bolgeye dogru hiz sifirlanmali."""
+    import hedef_kestirici as HK
+    saat = [20000.0]
+
+    class SahteZaman:
+        @staticmethod
+        def time():
+            return saat[0]
+
+        perf_counter = time
+
+    gercek_zaman = A.time
+    A.time = SahteZaman
+    try:
+        w = SahtePencere()
+        w.kontrol = kontrol_mod.Kontrol("off", tilt_kaynak="mock")
+        k = w.kontrol
+        k.tilt._saat = lambda: saat[0]
+        k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+        w._pan_takip = HK.EksenTakip(isaret=+1.0)
+        w._tilt_takip = HK.EksenTakip(isaret=-1.0)
+        w._nisan_mesgul_ta = 0.0
+        for _ in range(5):
+            saat[0] += 0.05
+            k.oku()
+        assert k.yorunge_destekli, "mock kart Y/PY destekli olmali"
+        w._aci_hareket(0.0, 20.0)
+        for _ in range(60):
+            saat[0] += 0.05
+            k.oku()
+        w.mod = "Otonom"
+        ppd = A.algi.AYAR["takip_ppd_pan"]
+        kam = A.T.kamera_acisi
+        n0 = len(k.tilt.mock.kayit)
+        t0 = saat[0]
+        for i in range(360):                       # 6 sn: pan hedefi 3 der/sn kayar
+            saat[0] += 1 / 60.0
+            k.oku()
+            hp = 3.0 * (saat[0] - t0)
+            t_cek = saat[0] - A.algi.AYAR["kamera_gecikme"]
+            ex = (hp - k.pan_zamaninda(t_cek)) * ppd
+            ey = -(kam(22.0) - kam(k.tilt_zamaninda(t_cek))) * ppd
+            w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": ex, "ey": ey,
+                                  "olu_x": 7.0, "olu_y": 7.0, "w": 1280})
+        kayit = k.tilt.mock.kayit[n0:]
+        assert any(c.startswith("PY") for c in kayit) and any(c.startswith("Y") and c != "YQ" for c in kayit)
+        assert not any(c.startswith(("G", "P1", "P2", "P-")) for c in kayit), [c for c in kayit if c[0] in "GP"][:5]
+        assert abs(k.pan_olculen - 3.0 * (saat[0] - t0)) < 1.5, (k.pan_olculen, 3.0 * (saat[0] - t0))
+        assert abs(k.tilt_olculen - 22.0) < 1.0, k.tilt_olculen
+        # E-Stop: kapidan tek yorunge komutu gecmez
+        k.estop_aktif = True
+        n = len(k.tilt.mock.kayit)
+        for _ in range(20):
+            saat[0] += 1 / 60.0
+            k.oku()
+            w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": 200.0, "ey": 0.0,
+                                  "olu_x": 7.0, "olu_y": 7.0, "w": 1280})
+        assert not any(c.startswith(("Y", "PY")) and c != "YQ" for c in k.tilt.mock.kayit[n:])
+        k.estop_aktif = False
+        # Harekete yasak bolge: bolgeye DOGRU giden eksenin hizi sifirlanir
+        w.pan_yasak_aktif, w.pan_yasak_min, w.pan_yasak_max = True, 100.0, 200.0
+        w.pan_ham, w.pan_aci = 99.5, 99.5
+        n = len(k.tilt.mock.kayit)
+        assert w._aci_hareket(0.2, 0.0, hiz=(20.0, None))
+        son = [c for c in k.tilt.mock.kayit[n:] if c.startswith("PY")][-1]
+        assert son.endswith(",0.000"), son
+    finally:
+        A.time = gercek_zaman
+
+
 if __name__ == "__main__":
     test_ekran_aci_kart_hedefi_ayni()
     test_azimut_sarmasiz_gider()
@@ -673,7 +883,11 @@ if __name__ == "__main__":
     test_ates_tazelemesi_kesilirse_lazer_soner()
     test_ates_kapaliyken_tazeleme_gitmez()
     test_basili_tutma_estopta_kesilir()
+    test_surekli_takip_iki_eksen()
+    test_otonom_ates_anlik_kirmizi_kapisi()
+    test_yorunge_kipi_iki_eksen()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
-          "[L] kisayolu, gamepad, lazer gucu, ates olu adam anahtari")
+          "[L] kisayolu, gamepad, lazer gucu, ates olu adam anahtari, surekli iki eksen takip, "
+          "anlik kirmizi ates kapisi, yorunge kipi")

@@ -5,12 +5,12 @@ Bu dosya, ESP32'de GERCEKTEN CALISAN kodun konustugu protokolu tarif eder
 (AccelStepper tabanli surus — bkz. esp32/derin_mavi_esp32/derin_mavi_esp32.ino).
 
 DONANIM (ESP32'ye bagli):
-    pan  motoru : YATAY eksen (azimut)   — step motor, STEP 6 / DIR 7
+    pan  motoru : YATAY eksen (azimut)   — normal disli/cark, PULSE 10 / DIR 11
                   motor 15 disli -> buyuk cark 83 disli = **5.533:1 rediksiyon**
-    tilt motoru : DIKEY eksen (yukselis) — step motor, STEP 4 / DIR 5, ENABLE 17
+    tilt motoru : DIKEY eksen (yukselis) — kol-biyel, PULSE 4 / DIR 5, ENABLE 17
                   pan tarafinda ENABLE 16
-    acil stop   : GPIO 15 — NO buton, basilinca LOW. Kart once lazeri, sonra hareketi,
-                  sonra surucu ENABLE hatlarini (16/17) keser.
+    acil stop   : GPIO 15 — NO buton, basilinca LOW. Kart once lazeri keser, sonra iki
+                  ekseni oldugu yerde kilitler; ENABLE hatlari enerjili kalir.
     lazer       : GPIO 18 — **PWM tetik** (1 kHz), guc %0-100 arasi ayarlanir
                   (25 DEGIL: ESP32-S3'te GPIO 22/23/24/25 fiziksel olarak YOKTUR)
     Surucu cozunurlugu: **6400 step/tur** (1/32 mikroadim).
@@ -56,6 +56,10 @@ ESP32 -> laptop: **yapisal durum paketi YOK.** Kart insan-okur metin yazar
   mekanigi kirmasin diye). Tek tarafa guvenilmez.
 """
 
+# ---- ESP32 pin eslemesi (firmware ile AYNI olmali) ----
+TILT_PULSE_PIN, TILT_DIR_PIN = 4, 5
+PAN_PULSE_PIN, PAN_DIR_PIN = 10, 11
+
 # ---- ESP32 mekanik sabitleri (esp32/derin_mavi_esp32/derin_mavi_esp32.ino ile AYNI olmali) ----
 STEP_TUR = 6400.0                   # surucu cozunurlugu (1/32 mikroadim)
 PAN_DISLI = 83.0 / 15.0             # motor 15 disli -> cark 83 disli = 5.533:1
@@ -64,7 +68,7 @@ TILT_DISLI = 0.5                    # 45->90 derece donus hatasini telafi eden d
 #   "60°" komutu gercekte 60/oran kadar dondurur. Oran gelince BURASI ve firmware'deki
 #   TILT_GEAR_RATIO birlikte duzeltilecek.
 PAN_STEP_DER = STEP_TUR * PAN_DISLI / 360.0     # ≈ 98.37 step/derece
-TILT_STEP_DER = STEP_TUR * TILT_DISLI / 360.0   # ≈ 17.78 step/derece
+TILT_STEP_DER = STEP_TUR * TILT_DISLI / 360.0   # ≈ 8.89 step/derece
 
 # AccelStepper adimlari yazilimla uretir; ESP32'de guvenli ust sinir kabaca budur.
 # Ustune cikilirsa kart adim kacirir/tikanir — hiz tablosu bu sinira gore secildi ve
@@ -260,9 +264,13 @@ if __name__ == "__main__":
     for h in HIZ_SEVIYELER:                                   # PAN darbogaz eksen
         assert pan_step_sn(h) < MAKS_STEP_SN, (h, pan_step_sn(h))
 
+    # Pinler ve mekanik birbirine karismamali: pan normal 15->83 carkli eksendir.
+    assert (TILT_PULSE_PIN, TILT_DIR_PIN) == (4, 5)
+    assert (PAN_PULSE_PIN, PAN_DIR_PIN) == (10, 11)
+    assert len({TILT_PULSE_PIN, TILT_DIR_PIN, PAN_PULSE_PIN, PAN_DIR_PIN}) == 4
     # mekanik: 6400 step/tur + 83/15 rediksiyon
     assert abs(PAN_STEP_DER - 98.370) < 0.01, PAN_STEP_DER
-    assert abs(TILT_STEP_DER - 17.778) < 0.01, TILT_STEP_DER
+    assert abs(TILT_STEP_DER - 8.889) < 0.01, TILT_STEP_DER
 
     # LAZER GUCU: ayri komut, kirpilir, "L1" hala tam bir ac komutu olarak kalir
     assert lazer_guc(40) == "G40\n"

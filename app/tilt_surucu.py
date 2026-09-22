@@ -87,9 +87,127 @@ HIZ_TABLO = {                 # seviye: (tepe hiz derece/sn, ivme derece/sn^2)
 }
 HIZ_VARSAYILAN = H_NORMAL
 
+# ---- PAN (sag-sol) EKSENI — AYNI ESP32-S3 KARTINDA (GPIO10 PUL / GPIO11 DIR) ----
+# Firmware pan'i "P<derece>" ile alir, "PAN1,pos,target,moving,angle,goal,en" yayinlar
+# (bkz. ws_motor_test/esp32_ws_test/pan_core.h). Oran sabittir: 6400 darbe/tur,
+# 15 -> 83 disli. Aci SARMASIZ (birikimli) ve isaretlidir; 0 = kart acildigi konum.
+PAN_DARBE_DER = 6400.0 * (83.0 / 15.0) / 360.0      # ~98.37
+PAN_SINIR = 400.0                                    # firmware PanCore::ACI_SINIR
+# Pan kademeleri (derece/sn, derece/sn^2). Firmware pan tavani 12000 darbe/sn
+# (~122 derece/sn) ve 150000 darbe/sn^2 (bkz. pan_core.h).
+# ⚠ IVME ASIL BELIRLEYICI: ilk surumde 100 derece/sn^2 idi; takipteki kisa
+# duzeltmelerde tepe hiza hic cikilamadi, sahada "yatay cok yavas" goruldu.
+PAN_HIZ_TAVAN, PAN_IVME_TAVAN = 12000.0, 150000.0     # darbe/s, darbe/s^2
+PAN_HIZ_TABLO = {
+    H_YAVAS:  (25.0, 200.0),
+    H_NORMAL: (60.0, 500.0),
+    H_HIZLI:  (100.0, 800.0),
+}
+
+
+# ---- KOL ACISI -> KAMERA ACISI (surekli takip icin) ----
+# Kol-biyel mekanizmasinda kamera, kol "derecesi" basina SABIT miktarda donmuyor.
+# OLCULDU (22.09, faz korelasyonu, +-1.5 ve +-4 derece adimlar, iki yon, dokulu oda):
+# yerel piksel/derece (1280 px). 50 derecenin ustu tavana bakiyor, olcum guvenilmez
+# (guven 0.1-0.4) -> 46'daki deger sabit uzatildi ve otonom takip orada kesilir
+# (algi.AYAR tilt_takip_ust).
+# SAHADAKI SONUC: 12.4 sabit kabul edilince 36-50 derecede kontrolcu kolun kendi
+# hareketini hedef hareketi sandi (kamera kolun 0.3-0.7'si kadar donuyor), kol
+# 35->53 derece firladi ve yuksek acida +-10 derece salindi.
+KAMERA_PPD_TABLO = [(0.0, 10.5), (5.0, 10.5), (12.0, 11.3), (20.0, 12.7), (28.0, 13.5),
+                    (32.0, 10.0), (36.0, 9.1), (40.0, 7.6), (44.0, 5.3), (46.0, 5.4),
+                    (60.0, 5.4)]
+# Kameranin GERCEK derece basina piksel sayisi: pan'da olculen (pan disli orani
+# sabit, 90 derece sahada dogrulandi). Kare pikseller -> dikeyde de ayni.
+KAMERA_PPD_REF = 18.7
+
+
+def _kamera_tablosu(adim=0.1):
+    kol, kam, acc = [0.0], [0.0], 0.0
+    x = 0.0
+    while x < ACI_MAX - 1e-9:
+        y = min(ACI_MAX, x + adim)
+        acc += 0.5 * (_ppd_kol(x) + _ppd_kol(y)) * (y - x) / KAMERA_PPD_REF
+        kol.append(y)
+        kam.append(acc)
+        x = y
+    return kol, kam
+
+
+def _ppd_kol(a):
+    t = KAMERA_PPD_TABLO
+    if a <= t[0][0]:
+        return t[0][1]
+    for (a0, p0), (a1, p1) in zip(t, t[1:]):
+        if a0 <= a <= a1:
+            return p0 + (p1 - p0) * (a - a0) / (a1 - a0)
+    return t[-1][1]
+
+
+def _ara(xs, ys, x):
+    import bisect
+    if x <= xs[0]:
+        return ys[0] + (x - xs[0]) * (ys[1] - ys[0]) / (xs[1] - xs[0])
+    if x >= xs[-1]:
+        return ys[-1] + (x - xs[-1]) * (ys[-1] - ys[-2]) / (xs[-1] - xs[-2])
+    i = bisect.bisect_right(xs, x)
+    x0, x1, y0, y1 = xs[i - 1], xs[i], ys[i - 1], ys[i]
+    return y0 + (y1 - y0) * (x - x0) / (x1 - x0)
+
+
+_KOL, _KAM = _kamera_tablosu()
+
+
+def kamera_acisi(kol):
+    """Kol acisi (kartin derecesi) -> kameranin gercek yukselis acisi (derece, 0'dan)."""
+    return None if kol is None else _ara(_KOL, _KAM, float(kol))
+
+
+def kol_acisi(kamera):
+    """kamera_acisi'nin tersi (tablo monoton artan)."""
+    return None if kamera is None else _ara(_KAM, _KOL, float(kamera))
+
+
+def pan_kirp(derece):
+    return max(-PAN_SINIR + 1.0, min(PAN_SINIR - 1.0, float(derece)))
+
+
+def pan_git(derece):
+    return f"P{pan_kirp(derece):.3f}\n"
+
+
+def pan_yorunge(derece, hiz):
+    v = max(-YORUNGE_HIZ_SINIRI, min(YORUNGE_HIZ_SINIRI, float(hiz)))
+    return f"PY{pan_kirp(derece):.3f},{v:.3f}\n"
+
+
+def pan_profili(darbe_sn, ivme_darbe_sn2):
+    h = max(HIZ_TABAN, min(PAN_HIZ_TAVAN, float(darbe_sn)))
+    iv = max(IVME_TABAN, min(PAN_IVME_TAVAN, float(ivme_darbe_sn2)))
+    return f"PZ{h:.1f},{iv:.1f}\n"
+
+
+def pan_durum_coz(satir):
+    """PAN1 satiri -> sozluk; bozuksa None."""
+    parts = satir.split(',')
+    if len(parts) != 7 or parts[0] != 'PAN1':
+        return None
+    try:
+        pos, target, moving = int(parts[1]), int(parts[2]), int(parts[3])
+        angle, goal, en = float(parts[4]), float(parts[5]), int(parts[6])
+    except ValueError:
+        return None
+    if moving not in (0, 1) or en not in (-1, 0, 1):
+        return None
+    if not (math.isfinite(angle) and math.isfinite(goal)):
+        return None
+    return dict(pos=pos, target=target, hareket=bool(moving), aci=angle, hedef=goal, en=en)
+
+
 # Kartin "durum yok" kabul ettigimiz suresi: STATE3 100 ms'de bir gelir; 3 paket
 # kacarsa bagi kopmus sayariz (arayuz de oyle gosterir).
 DURUM_ASIMI_S = 0.6
+DURUM_PERIYODU_S = 0.02             # firmware STATE3/PAN1 yayin araligi (50 Hz)
 
 KAYNAK = os.environ.get("DERINMAVI_TILT", "off").strip() or "off"
 
@@ -170,6 +288,15 @@ KAPAT = "D\n"       # durdur + kontrolu kapat
 DUR = "X\n"         # durdur, bekleyen hedefi iptal et
 CANLI = "H\n"       # heartbeat
 SORGU = "Q\n"       # yetenek sorgusu: OK,Q = hareket halinde durmadan yeniden planlar
+YORUNGE_SORGU = "YQ\n"   # yetenek sorgusu: OK,YQ = yorunge kipi (Y/PY) var
+YORUNGE_HIZ_SINIRI = 300.0  # derece/sn — firmware 400'u reddeder
+
+
+def yorunge(derece, hiz):
+    """Y<derece>,<derece/sn>: tilt YORUNGE kipi (otonom takip). Kart referansi
+    derece + hiz*t olarak kendisi ilerletir; 150 ms yeni komut gelmezse yumusak durur."""
+    v = max(-YORUNGE_HIZ_SINIRI, min(YORUNGE_HIZ_SINIRI, float(hiz)))
+    return f"Y{aci_kirp(derece):.3f},{v:.3f}\n"
 
 
 def git(derece):
@@ -286,6 +413,15 @@ class MockTiltKart:
         self.maks_hiz = self.MAKS_HIZ      # Z komutuyla degisir
         self.ivme = 12800.0                # ACCEL_VARSAYILAN (mock ivmeyi UYGULAMAZ)
         self.kalibre = kalibre
+        # Pan ekseni (yeni firmware). pan_destek=False eski firmware'i taklit eder.
+        self.pan_destek = True
+        self.pan_pos = 0
+        self.pan_hedef = 0
+        self.pan_maks_hiz = 30.0 * PAN_DARBE_DER
+        # Yorunge kipi (Y/PY). yorunge_destek=False eski firmware'i taklit eder.
+        self.yorunge_destek = True
+        self.yor_tilt = None        # (darbe, darbe/sn, t0)
+        self.yor_pan = None
         self.son_canli = simdi if simdi is not None else time.time()
         self.t = self.son_canli
         self.kayit = []             # gonderilen komutlar (test icin)
@@ -303,13 +439,49 @@ class MockTiltKart:
         s = satir.strip()
         self.kayit.append(s)
         self._watchdog(simdi)
+        if s == "YQ":
+            return "OK,YQ" if self.yorunge_destek else "ERR,YQ,UNKNOWN_COMMAND"
+        if s.startswith("Y") and self.yorunge_destek:
+            if not self.acik:
+                return f"ERR,{s},DISARMED"
+            try:
+                a, v = map(float, s[1:].split(","))
+            except ValueError:
+                return f"ERR,{s},BAD_ANGLE"
+            if not 0 <= a <= ACI_MAX:
+                return f"ERR,{s},BAD_ANGLE"
+            self.hedef, self.bekleyen = self.pos, None
+            self.yor_tilt = (self._darbe(a), v * self.UST_DARBE / ACI_MAX, simdi)
+            return None                          # firmware Y'ye yanit YAZMAZ
+        if s.startswith("PY") and self.yorunge_destek and self.pan_destek:
+            if not self.acik:
+                return f"ERR,{s},DISABLED"
+            try:
+                a, v = map(float, s[2:].split(","))
+            except ValueError:
+                return f"ERR,{s},BAD_ANGLE"
+            self.pan_hedef = self.pan_pos
+            self.yor_pan = (a * PAN_DARBE_DER, v * PAN_DARBE_DER, simdi)
+            return None
+        # Firmware: H/Q disindaki her tilt komutu tilt yorungesini, her pan komutu pan
+        # yorungesini keser; X/D ikisini birden.
+        if s.startswith("P"):
+            self.yor_pan = None
+        elif s not in ("H", "Q"):
+            self.yor_tilt = None
+            if s in ("X", "D"):
+                self.yor_pan = None
+        if s.startswith("P") and self.pan_destek:
+            return self._pan_islet(s)
         if s == "X":
             self.hedef = self.pos
             self.bekleyen = None
+            self.pan_hedef = self.pan_pos
             return "OK,X"
         if s == "D":
             self.hedef = self.pos
             self.bekleyen = None
+            self.pan_hedef = self.pan_pos
             self.acik = False
             return "OK,D"
         if s == "E":
@@ -375,11 +547,61 @@ class MockTiltKart:
             return f"OK,{s}"
         return f"ERR,{s},UNKNOWN_COMMAND"
 
+    def _pan_islet(self, s):
+        """esp32_ws_test.ino:panCommand ile ayni kurallar."""
+        if s == "PR":
+            if self.pan_pos != self.pan_hedef:
+                return "ERR,PR,MOVING"
+            self.pan_pos = self.pan_hedef = 0
+            return "OK,PR"
+        if s.startswith("PZ"):
+            try:
+                h_s, iv_s = s[2:].split(",", 1)
+                h, iv = float(h_s), float(iv_s)
+            except ValueError:
+                return f"ERR,{s},BAD_PROFILE"
+            if self.pan_pos != self.pan_hedef:
+                return f"ERR,{s},MOVING"
+            if not (HIZ_TABAN <= h <= PAN_HIZ_TAVAN and IVME_TABAN <= iv <= PAN_IVME_TAVAN):
+                return f"ERR,{s},BAD_PROFILE"
+            self.pan_maks_hiz = h
+            return f"OK,{s}"
+        if s.startswith("PE"):
+            return f"OK,{s}"
+        if not self.acik:
+            return f"ERR,{s},DISABLED"
+        try:
+            a = float(s[1:])
+        except ValueError:
+            return f"ERR,{s},BAD_ANGLE"
+        if not math.isfinite(a) or abs(a) > PAN_SINIR:
+            return f"ERR,{s},BAD_ANGLE"
+        self.pan_hedef = int(round(a * PAN_DARBE_DER))
+        return f"OK,{s}"
+
+    def pan1(self):
+        return (f"PAN1,{self.pan_pos},{self.pan_hedef},"
+                f"{1 if self.pan_pos != self.pan_hedef else 0},"
+                f"{self.pan_pos / PAN_DARBE_DER:.3f},{self.pan_hedef / PAN_DARBE_DER:.3f},-1")
+
     def _watchdog(self, simdi):
         if self.acik and (simdi - self.son_canli) * 1000.0 >= ZAMAN_ASIMI_MS:
             self.hedef = self.pos
             self.bekleyen = None
+            self.pan_hedef = self.pan_pos
             self.acik = False
+            self.yor_tilt = self.yor_pan = None
+
+    @staticmethod
+    def _yor_adim(yor, pos, t, azami, alt, ust):
+        """Yorunge kipi (kaba): referansa hiz sinirinda yaklas; 150 ms'den eski
+        komutta dur. Doner: (yeni_pos, yorunge_hala_aktif_mi)."""
+        p0, v0, t0 = yor
+        if t - t0 > 0.15:
+            return pos, False
+        ref = int(round(max(alt, min(ust, p0 + v0 * (t - t0)))))
+        yon = 1 if ref > pos else -1
+        return pos + yon * min(int(azami), abs(ref - pos)), True
 
     def ilerlet(self, simdi):
         """Zamani `simdi`ye tasir: motoru hedefe dogru surer, STATE3 satirlarini uretir."""
@@ -388,6 +610,19 @@ class MockTiltKart:
             adim = min(0.1, simdi - self.t)     # 100 ms'lik STATE3 periyodu
             self.t += adim
             self._watchdog(self.t)
+            if self.acik and self.yor_tilt is not None:
+                self.pos, aktif = self._yor_adim(self.yor_tilt, self.pos, self.t,
+                                                 self.maks_hiz * adim, 0, self.UST_DARBE)
+                self.hedef = self.pos
+                if not aktif:
+                    self.yor_tilt = None
+            if self.acik and self.yor_pan is not None:
+                sinir = int(PAN_SINIR * PAN_DARBE_DER)
+                self.pan_pos, aktif = self._yor_adim(self.yor_pan, self.pan_pos, self.t,
+                                                     self.pan_maks_hiz * adim, -sinir, sinir)
+                self.pan_hedef = self.pan_pos
+                if not aktif:
+                    self.yor_pan = None
             if self.acik and self.pos != self.hedef:
                 yon = 1 if self.hedef > self.pos else -1
                 git_darbe = int(self.maks_hiz * adim)
@@ -395,7 +630,13 @@ class MockTiltKart:
                 self.pos += yon * min(git_darbe, kalan)
             if self.pos == self.hedef and self.bekleyen is not None:
                 self.hedef, self.bekleyen = self.bekleyen, None
+            if self.acik and self.pan_pos != self.pan_hedef:
+                yon = 1 if self.pan_hedef > self.pan_pos else -1
+                self.pan_pos += yon * min(int(self.pan_maks_hiz * adim),
+                                          abs(self.pan_hedef - self.pan_pos))
             satirlar.append(self.state3())
+            if self.pan_destek:
+                satirlar.append(self.pan1())
         return satirlar
 
     def state3(self):
@@ -459,6 +700,19 @@ class TiltSurucu:
         # Kart RESET ATTI mi? (bkz. _kart_yaziyor) — arayuz bunu operatore GORUNUR
         # sekilde soylemeli; sessiz kalirsa aci referansi bozulmus olarak devam eder.
         self.kart_resetlendi = False
+        # PAN ekseni ayni kartta (yeni firmware PAN1 yayinlar). Eski firmware'de
+        # pan_durum hep None kalir ve pan_destekli False olur -> pan eski yola gider.
+        self.pan_durum = None
+        self.pan_son_t = 0.0
+        self._pan_bekleyen = None
+        self._pan_gonderilen = None
+        self._pan_gonderim_t = 0.0
+        self._pan_gonderilen_hiz = None
+        self._pan_gecmisi = []          # [(zaman, pan acisi)] — aci_zamaninda'nin pan esi
+        # YORUNGE KIPI (Y/PY) destegi: None = henuz sorulmadi, True/False = cevap.
+        self.yorunge_destekli = None
+        self._yq_soruldu = False
+        self._yor_kayit_sayac = 0
 
         if self.kaynak.lower() == "off":
             return
@@ -579,6 +833,23 @@ class TiltSurucu:
         BU olmalidir: komut kaybolur/gecikirse fark buradan kapanir."""
         return self.durum["aci"] if (self.taze and self.durum["kalibre"]) else None
 
+    @staticmethod
+    def _ara_deger(g, t):
+        if t <= g[0][0]:
+            return g[0][1]
+        if t >= g[-1][0]:
+            return g[-1][1]
+        for (t0, a0), (t1, a1) in zip(g, g[1:]):
+            if t0 <= t <= t1:
+                return a0 + (a1 - a0) * (t - t0) / max(1e-9, t1 - t0)
+        return g[-1][1]
+
+    def pan_zamaninda(self, t):
+        """Pan'in `t` anindaki acisi (PAN1 gecmisinden) — aci_zamaninda'nin pan esi."""
+        if not self._pan_gecmisi or not self.pan_destekli:
+            return self.pan_aci
+        return self._ara_deger(self._pan_gecmisi, t)
+
     def aci_zamaninda(self, t):
         """Kolun `t` anindaki acisi (STATE3 gecmisinden dogrusal ara deger).
 
@@ -670,7 +941,12 @@ class TiltSurucu:
             return False
         # H her 120 ms gider; kayda yazilsa dosyanin cogu H olurdu ve asil olaylar
         # kaybolurdu. Yazma HATASI ise her zaman kaydedilir (asagida).
-        if satir != CANLI:
+        if satir.startswith(("Y", "PY")) and not satir.startswith("YQ"):
+            # 25-50 Hz'lik yorunge komutlari kaydi bogmasin: saniyede ~1 tanesi yazilir.
+            self._yor_kayit_sayac += 1
+            if self._yor_kayit_sayac % 25 == 1:
+                self._kara_kutu_yaz(">>", satir.strip())
+        elif satir != CANLI:
             self._kara_kutu_yaz(">>", satir.strip())
         try:
             veri = satir.encode("ascii")
@@ -682,11 +958,33 @@ class TiltSurucu:
             self._kara_kutu_yaz("!!", f"YAZMA HATASI ({satir.strip()}): {e}")
             return False
 
-    def _kart_yaziyor(self, s):
+    def _kart_yaziyor(self, s, t=None):
+        """t: satirin karttan GELDIGI tahmini an (verilmezse simdi)."""
+        if t is None:
+            t = self._saat()
+        if s.startswith("PAN1,"):
+            p = pan_durum_coz(s)
+            if p is not None:
+                # KART RESETI pan sayacindan da yakalanir: kol 0'dayken reset olursa
+                # tilt dedektoru (STATE3 pos 20+ -> 0) hicbir sey gormez, ama pan
+                # sayaci da 0'a dondu ve namlu yana bakiyorsa referans kaymistir.
+                # PR (pan sifirla) kontrol ACIKKEN gelir; reset ise kontrolu kapatir.
+                if (p["pos"] == 0 and abs(getattr(self, "_son_pan_pos", 0)) > 20
+                        and self.durum is not None and not self.durum["acik"]):
+                    self.kart_resetlendi = True
+                    self._pan_bekleyen = None
+                    self._pan_gonderilen = None
+                    self._pan_gonderilen_hiz = None
+                self._son_pan_pos = p["pos"]
+                self.pan_durum = p
+                self.pan_son_t = t
+                self._pan_gecmisi.append((self.pan_son_t, p["aci"]))
+                del self._pan_gecmisi[:-150]
+            return
         self.durum_satiri = s
         if s.startswith("STATE3,"):
             self._kk_state_sayac = getattr(self, "_kk_state_sayac", 0) + 1
-            if self._kk_state_sayac % 10 == 0:
+            if self._kk_state_sayac % 50 == 0:           # 50 Hz yayinda saniyede bir
                 self._kara_kutu_yaz("<<", s)
         else:
             self._kara_kutu_yaz("<<", s)
@@ -709,16 +1007,28 @@ class TiltSurucu:
                 self._gonderilen_hiz = None
                 self._q_soruldu = False
                 self.yeniden_planlama = None
+                self._yq_soruldu = False
+                self.yorunge_destekli = None
+                # Pan sayaci da 0'dan basladi (acilis konumu = 0).
+                self._pan_bekleyen = None
+                self._pan_gonderilen = None
+                self._pan_gonderilen_hiz = None
             self._son_pos = d["pos"]
             self.durum = d
-            self.son_durum_t = self._saat()
+            self.son_durum_t = t
             if d["kalibre"]:
                 self._aci_gecmisi.append((self.son_durum_t, d["aci"]))
-                del self._aci_gecmisi[:-40]            # ~4 sn yeter
+                del self._aci_gecmisi[:-150]           # 50 Hz'de ~3 sn
             return
         self.satirlar.append(s)
         self._yeni.append(s)
         del self.satirlar[:-20]
+        if s == "OK,YQ":
+            self.yorunge_destekli = True
+            return
+        if s.startswith("ERR,YQ,"):
+            self.yorunge_destekli = False       # eski firmware: konum kipiyle devam, HATA DEGIL
+            return
         if s == "OK,Q":
             self.yeniden_planlama = True
             return
@@ -758,11 +1068,24 @@ class TiltSurucu:
         except Exception as e:
             self.hata = f"Tilt seri iletişim hatası: {e}"
             return
+        satirlar = []
         while "\n" in self._rx:
             satir, self._rx = self._rx.split("\n", 1)
             satir = satir.strip()
             if satir:
-                self._kart_yaziyor(satir)
+                satirlar.append(satir)
+        # ZAMAN DAMGASI: okuma aralikli yapilir (arayuz zamanlayicisi), bir okumada
+        # birkac durum paketi birikmis olabilir. Hepsine "simdi" demek aci gecmisini
+        # okuma araligi kadar (100 ms'de 0-100 ms) GEC gosterir; surekli takip kareyi
+        # yanlis aciyla esler ve duran hedefte salinir (benzetim: 40 ms hata -> 64 yon
+        # degisimi). Kart STATE3'u 20 ms'de bir yollar: paketler geriye dogru o
+        # aralikla dagitilir (PAN1 kendi STATE3'uyle ayni ani paylasir).
+        simdi = self._saat()
+        kalan = sum(1 for x in satirlar if x.startswith("STATE3,"))
+        for satir in satirlar:
+            if satir.startswith("STATE3,"):
+                kalan -= 1
+            self._kart_yaziyor(satir, simdi - DURUM_PERIYODU_S * max(0, kalan))
         if len(self._rx) > 8192:            # bozuk akis: tamponu buyutmeye devam etme
             self._rx = ""
 
@@ -790,6 +1113,9 @@ class TiltSurucu:
         if self.taze and not self.durum["acik"] and (simdi - self._ac_denendi_t) > 0.3:
             self._ac_denendi_t = simdi
             self._yaz(AC)
+        if self.hazir and not self._yq_soruldu:
+            self._yq_soruldu = True
+            self._yaz(YORUNGE_SORGU)
         if self.hazir and not self._q_soruldu:
             self._q_soruldu = True
             self._yaz(SORGU)
@@ -797,6 +1123,8 @@ class TiltSurucu:
         # eski profille baslatir ve Z artik "hareket halinde" diye reddedilir.
         self._hiz_bosalt()
         self._bosalt()
+        self._pan_hiz_bosalt()
+        self._pan_bosalt()
         self._oku()
         self._kara_kutu_sessizlik()
         return self.ozet()
@@ -874,9 +1202,92 @@ class TiltSurucu:
         self._son_pos = 0
         return self._yaz("R\n")
 
-    def dur(self):
-        """Hareketi kes ve bekleyen hedefi iptal et (E-Stop / hedef kaybi)."""
+    # ---- PAN (ayni kart) ----
+    @property
+    def pan_destekli(self):
+        """Karttaki firmware pan'i suruyor mu? (taze PAN1 yayini var mi)"""
+        return (self.bagli and self.pan_durum is not None
+                and (self._saat() - self.pan_son_t) <= DURUM_ASIMI_S)
+
+    @property
+    def pan_aci(self):
+        """Kartin BILDIRDIGI pan acisi (darbe sayimindan) — yoksa None."""
+        return self.pan_durum["aci"] if self.pan_destekli else None
+
+    def pan_git(self, derece):
+        """MUTLAK, SARMASIZ pan acisi. Firmware hareket halinde durmadan yeniden
+        planlar (PanCore::retarget), bu yuzden hedef bekletilmeden gider; yalniz
+        kart kilitliyse/durum bayatsa bir sonraki yoklamaya kalir."""
+        if not self.bagli:
+            return None
+        self._pan_bekleyen = pan_kirp(derece)
+        return self._pan_bosalt()
+
+    def _pan_bosalt(self):
+        if self._pan_bekleyen is None or not self.pan_destekli:
+            return None
+        if not (self.taze and self.durum["acik"]):
+            return None
+        hedef = self._pan_bekleyen
+        p = self.pan_durum
+        if not p["hareket"] and abs(hedef - p["aci"]) < 0.02:
+            self._pan_bekleyen = None
+            return None
+        # Ayni hedef zaten gitti ve kart henuz yeni PAN1 yollamadi: tekrar yollama.
+        if (self._pan_gonderilen is not None and abs(hedef - self._pan_gonderilen) < 0.02
+                and (p["hareket"] or self.pan_son_t <= self._pan_gonderim_t)):
+            self._pan_bekleyen = None
+            return None
+        self._pan_bekleyen = None
+        self._pan_gonderilen = hedef
+        self._pan_gonderim_t = self._saat()
+        self._yaz(pan_git(hedef))
+        return hedef
+
+    def _pan_hiz_bosalt(self):
+        """Pan hiz kademesini (PZ) kart dururken bildirir; tilt ile ayni kademe."""
+        if not self.pan_destekli or self.pan_durum["hareket"]:
+            return False
+        h, iv = PAN_HIZ_TABLO[self.hiz_seviye]
+        cift = (round(h * PAN_DARBE_DER, 1), round(iv * PAN_DARBE_DER, 1))
+        if cift == self._pan_gonderilen_hiz:
+            return False
+        self._pan_gonderilen_hiz = cift
+        self._yaz(pan_profili(*cift))
+        return True
+
+    def yorunge(self, derece, hiz):
+        """Tilt YORUNGE komutu (otonom takip). Konum kipinin kuyrugu/tekrar-bastirmasi
+        burada YOK: kart referansi kendisi ilerlettigi icin her komut gitmeli, ayni
+        komut bile (150 ms'de bir gelmezse kart durur)."""
+        if not (self.bagli and self.hazir and self.yorunge_destekli):
+            return False
         self._bekleyen_hedef = None
+        self._gonderilen_hedef = None
+        return self._yaz(yorunge(derece, hiz))
+
+    def pan_yorunge(self, derece, hiz):
+        if not (self.bagli and self.pan_destekli and self.yorunge_destekli
+                and self.taze and self.durum["acik"]):
+            return False
+        self._pan_bekleyen = None
+        self._pan_gonderilen = None
+        return self._yaz(pan_yorunge(derece, hiz))
+
+    def pan_sifirla(self):
+        """PR: pan'in SU ANKI konumunu 0 kabul ettir (namlu tam karsiya bakarken)."""
+        if not self.pan_destekli:
+            return False
+        self._pan_bekleyen = None
+        self._pan_gonderilen = None
+        self._son_pan_pos = 0          # bu bir kart reseti degil
+        return self._yaz("PR\n")
+
+    def dur(self):
+        """Hareketi kes ve bekleyen hedefi iptal et (E-Stop / hedef kaybi).
+        Firmware'de X pan'i da durdurur."""
+        self._bekleyen_hedef = None
+        self._pan_bekleyen = None
         if self.bagli:
             self._yaz(DUR)
         return self.ozet()
@@ -1245,6 +1656,89 @@ if __name__ == "__main__":
         assert not b.bagli and b.hata and "açılamadı" in b.hata, b.hata
     finally:
         otomatik_port_bul = _gercek_bul
+
+    # 13c. YORUNGE KIPI: YQ ile yetenek ogrenilir; Y/PY referansi kart ilerletir,
+    #      komut kesilince 150 ms icinde durur; eski firmware'de hic gonderilmez.
+    saat = [7000.0]
+    yk = TiltSurucu("mock", _saat=lambda: saat[0])
+    yk.mock.t = yk.mock.son_canli = saat[0]
+    for _ in range(3):
+        saat[0] += 0.1; yk.yokla()
+    assert yk.yorunge_destekli is True and "YQ" in yk.mock.kayit
+    assert yorunge(12.5, 4) == "Y12.500,4.000\n" and yorunge(99, 999) == f"Y{ACI_MAX:.3f},300.000\n"
+    assert pan_yorunge(-5, -2.5) == "PY-5.000,-2.500\n"
+    for i in range(20):                                   # 2 sn: 10 -> 20 derece @5 der/sn
+        yk.yorunge(10.0 + 0.5 * i, 5.0); yk.pan_yorunge(1.0 * i, 10.0)
+        saat[0] += 0.1; yk.yokla()
+    assert abs(yk.aci - 19.5) < 1.0 and abs(yk.pan_aci - 19.0) < 1.5, (yk.aci, yk.pan_aci)
+    once = (yk.aci, yk.pan_aci)
+    for _ in range(5):                                    # komut YOK -> durmali
+        saat[0] += 0.1; yk.yokla()
+    assert abs(yk.aci - once[0]) < 1.0 and abs(yk.pan_aci - once[1]) < 1.5
+    assert yk.mock.yor_tilt is None and yk.mock.yor_pan is None
+    yk.yorunge(30.0, 0.0); yk.dur()
+    assert yk.mock.yor_tilt is None and yk.mock.yor_pan is None   # X ikisini de keser
+    ey = TiltSurucu("mock", _saat=lambda: saat[0])
+    ey.mock.yorunge_destek = False
+    ey.mock.t = ey.mock.son_canli = saat[0]
+    for _ in range(3):
+        saat[0] += 0.1; ey.yokla()
+    assert ey.yorunge_destekli is False and ey.hata is None and not ey.yorunge(10, 1)
+    assert not any(c.startswith("Y") and c != "YQ" for c in ey.mock.kayit)
+
+    # 13b. kol <-> kamera acisi donusumu: monoton, tersinir, yerel egim tabloyu izler
+    for a in (0.0, 7.3, 25.0, 44.0, 59.0):
+        assert abs(kol_acisi(kamera_acisi(a)) - a) < 1e-6, a
+    egim = lambda a: (kamera_acisi(a + 0.05) - kamera_acisi(a - 0.05)) / 0.1 * KAMERA_PPD_REF
+    assert abs(egim(28.0) - 13.5) < 0.2 and abs(egim(44.0) - 5.3) < 0.3, (egim(28.0), egim(44.0))
+    assert all(kamera_acisi(a + 0.5) > kamera_acisi(a) for a in range(0, 60))
+
+    # 14. PAN (ayni kart, GPIO10/11): PAN1 cozumu, P komutu, kademe, X ile durma
+    assert pan_durum_coz("PAN1,984,984,0,10.003,10.003,-1")["aci"] == 10.003
+    assert pan_durum_coz("PAN1,1,2,3,0,0,-1") is None and pan_durum_coz("STATE3,1") is None
+    assert pan_git(12.5) == "P12.500\n" and pan_git(9999) == f"P{PAN_SINIR - 1:.3f}\n"
+    assert max(h for h, _ in PAN_HIZ_TABLO.values()) * PAN_DARBE_DER <= PAN_HIZ_TAVAN
+    assert max(iv for _, iv in PAN_HIZ_TABLO.values()) * PAN_DARBE_DER <= PAN_IVME_TAVAN
+    saat = [9000.0]
+    pn = TiltSurucu("mock", _saat=lambda: saat[0])
+    pn.mock.t = pn.mock.son_canli = saat[0]
+    for _ in range(3):
+        saat[0] += 0.1; pn.yokla()
+    assert pn.pan_destekli and pn.pan_aci == 0.0
+    assert any(c.startswith("PZ") for c in pn.mock.kayit), pn.mock.kayit   # kademe bildirildi
+    pn.pan_git(-20.0)
+    assert pn.mock.kayit[-1] == "P-20.000", pn.mock.kayit[-1]
+    n = len(pn.mock.kayit)
+    pn.pan_git(-20.0)                                   # ayni hedef tekrar gitmez
+    assert len(pn.mock.kayit) == n
+    for _ in range(20):
+        saat[0] += 0.1; pn.yokla()
+    assert abs(pn.pan_aci + 20.0) < 0.02, pn.pan_aci
+    pn.pan_git(30.0); saat[0] += 0.1; pn.yokla()
+    assert pn.pan_durum["hareket"]
+    pn.dur(); saat[0] += 0.1; pn.yokla()
+    assert not pn.pan_durum["hareket"] and pn.pan_aci < 30.0
+    pn.pan_sifirla(); saat[0] += 0.1; pn.yokla()
+    assert pn.pan_aci == 0.0
+    eski = TiltSurucu("mock", _saat=lambda: saat[0])     # eski firmware: PAN1 yok
+    eski.mock.pan_destek = False
+    eski.mock.t = eski.mock.son_canli = saat[0]
+    for _ in range(3):
+        saat[0] += 0.1; eski.yokla()
+    assert not eski.pan_destekli and eski.pan_git(5.0) is None
+    # Pan sayaci kontrol KAPALIYKEN 0'a donerse (ESP reseti) yakalanir — kol 0'dayken bile
+    rs = TiltSurucu("mock", _saat=lambda: saat[0])
+    rs.mock.t = rs.mock.son_canli = saat[0]
+    for _ in range(3):
+        saat[0] += 0.1; rs.yokla()
+    rs.pan_git(10.0)
+    for _ in range(10):
+        saat[0] += 0.1; rs.yokla()
+    assert rs.pan_aci > 9.0 and not rs.kart_resetlendi
+    rs.mock.pan_pos = rs.mock.pan_hedef = 0; rs.mock.acik = False     # reset taklidi
+    saat[0] += 0.1; rs.yokla()
+    assert rs.kart_resetlendi
+    assert not any(c.startswith("P") for c in eski.mock.kayit)
 
     print("tilt_surucu testleri OK — G bicimi, STATE3 cozumu, en-taze-hedef kuyrugu, "
           "canlilik kilidi, kalibrasyon kapisi, kirpma, kart reset tespiti")

@@ -106,7 +106,7 @@ class Benzetim:
         """arayuz_qt.MainWindow._nisan_geldi'nin dikey eksen aynasi."""
         if self.saat < self._nisan_mesgul_ta:
             return
-        tavan_hiz, tavan_ivme = P.HIZ_TABLO[self.hiz_seviye]
+        _pan, (tavan_hiz, tavan_ivme) = self.k.hiz_profilleri(self.hiz_seviye)
         if self._nisan_son_t is not None:
             dt = min(0.2, self.saat - self._nisan_son_t)
             tavan = tavan_hiz * dt
@@ -282,7 +282,7 @@ if __name__ == "__main__":
         def _nisan_geldi(self, d_pitch):
             if self.saat < self._nisan_mesgul_ta:
                 return
-            tavan_hiz, tavan_ivme = P.HIZ_TABLO[self.hiz_seviye]
+            _pan, (tavan_hiz, tavan_ivme) = self.k.hiz_profilleri(self.hiz_seviye)
             if self._nisan_son_t is not None:
                 tavan = tavan_hiz * min(0.2, self.saat - self._nisan_son_t)
                 d_pitch = max(-tavan, min(tavan, d_pitch))

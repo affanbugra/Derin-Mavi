@@ -214,8 +214,8 @@ zorunluluğunu kaldırır. Tek kamera + bilinen boyut bu bandı doğrulamaya yet
 - **İşlemci:** Laptop (yarışmaya laptopla gidilecek). KTR: HP Victus, i5-12500H, RTX 3060.
 - **Kamera:** KTR'de OAK-D-Pro (stereo). *(Açık karar — bkz. §8; bugün "tek kamera" dendi.)*
 - **Aktüatör:** Her eksende 1× NEMA23 kapalı çevrim step (yaw 360°, pitch min 60°), STEP/DIR.
-  ESP32'ye bağlı **iki motor**: pan = YATAY eksen (STEP 6/DIR 7, ENABLE 16, **15→83 diş
-  redüksiyon**), tilt = DİKEY eksen (STEP 4/DIR 5, ENABLE 17). **Acil stop butonu = GPIO 15**
+  ESP32 pinleri: pan = YATAY eksen (**PULSE 10/DIR 11**, ENABLE 16, normal **15→83 çarklı
+  redüksiyon**), tilt = DİKEY eksen (**PULSE 4/DIR 5**, ENABLE 17). **Acil stop butonu = GPIO 15**
   (NO, basılı=LOW); **lazer = GPIO 18 (PWM)**. Firmware AccelStepper, sürücüler **6400 step/tur**.
 - **Kontrolcü:** ESP32, UART **115200 baud**, PySerial. Komutlar **ASCII satır**:
   `P<derece>` `T<derece>` `S<der/sn>` `A<der/sn²>` `G<%>` `L1/L0` `STOP` `START` — açı **MUTLAK**.
@@ -244,7 +244,7 @@ ama karşılığı yoktu → **atıldı.** Bugün tek kaynak `app/protokol.py` +
 | Komut biçimi | ASCII satır, `\n` ile biter: `P<derece>` `T<derece>` `S<der/sn>` `A<der/sn²>` `L1`/`L0` `STOP` `START`. |
 | Açı semantiği | **MUTLAK** (`moveTo`), delta DEĞİL. Kaybolan komut kalıcı sapma yaratmaz; ateş komutu süregelen hareketi bozmaz. Ekrandaki açı ile kartın hedefi tek kaynaktan türer → **kopma yapısal olarak imkânsız** (§13.1'deki hata sınıfı ortadan kalktı). |
 | Azimut sarması | Ekranda 0–360, **karta sürekli (birikimli) açı gider**: 350°→10° geçişinde `P370`. Yoksa motor kısa yoldan değil 340° geri döner. |
-| **Mekanik [KESİN]** | Sürücü çözünürlüğü **6400 step/tur** (1/32 mikroadım). **Yatay eksende 15→83 diş = 5.533:1 redüksiyon** → **98.37 step/derece.** Dikey eksen: redüksiyon **[VARSAYIM] 1:1** → 17.78 step/derece (⚠ ölçülüp doğrulanmalı; yanlışsa tilt açıları yanlış olur). |
+| **Mekanik [KESİN]** | Sürücü çözünürlüğü **6400 step/tur** (1/32 mikroadım). **Yatay eksen normal çarklı sistemdir:** 15→83 diş = 5.533:1 redüksiyon → **98.37 step/derece**; kol-biyel tilt tablosu pan'a uygulanmaz. Kol-biyel dikey eksen ayrı kartta ölçülmüş çok noktalı kalibrasyonla sürülür (`DERINMAVI_TILT`). Ana karttaki sabit `TILT_GEAR_RATIO` yalnızca eski/tek-kart geri dönüş yoludur. |
 | Hız birimi neden derece/sn | İki eksenin dişli oranı farklı → aynı step/sn iki eksende bambaşka açı hızı demek olurdu. Laptop her yerde **derece** konuşur (P/T de derece); step'e çevirmek kartın işi. Dişli/mikroadım değişirse yalnız firmware sabiti değişir. |
 | Hız düzeyleri | **3 kademe (derece/sn, derece/sn²):** Yavaş `S15/A40` · Normal `S40/A100` · Hızlı `S75/A200`. |
 | Tavanı ne belirledi | **Darboğaz pan ekseni:** 98.37 step/derece → 75°/s bile ~7380 step/sn. AccelStepper adımları yazılımla ürettiği için ESP32'de güvenli üst sınır ≈ **8000 step/sn** (`MAKS_STEP_SN`); tablo bunun altında kalacak şekilde seçildi ve test bunu doğruluyor. |
@@ -377,7 +377,7 @@ laptopa **CH343** USB-seri çipi üzerinden **COM7**'den bağlı. Klasik ESP32 d
 | Arduino kartı | **ESP32S3 Dev Module** (`esp32:esp32:esp32s3`). `esp32:esp32:esp32` ile yüklenmez. |
 | Strapping pinleri | S3'te **GPIO 0, 3, 45, 46**. Kullandığımız pinlerin hiçbiri bunlarda değil → **GPIO 15 strapping uyarısı S3'te GEÇERSİZ** (o klasik ESP32 içindi). Buton basılıyken reset boot'u etkilemez; lazer pini açılışta kaçak tetiklenmez. |
 | **OLMAYAN pinler** ⚠ | **S3'te GPIO 22/23/24/25 YOKTUR** (`soc_caps.h`: `SOC_GPIO_VALID_GPIO_MASK` bu dördünü maskeden çıkarır). Klasik ESP32'de vardılar. Bu numaralara yazmak **sessizce hiçbir şey yapar; derleme hata vermez.** Lazer bu yüzden 25→**18**'e alındı (06.08). |
-| Ayrılmış pinler | S3'te GPIO **26–32** dahili SPI flash, oktal PSRAM'de **33–37** de PSRAM; **43/44** = UART0 (CH343 → laptop), **19/20** = USB D-/D+. Kullandığımız 4/5/6/7/15/16/17/18 tamamen bu bölgelerin dışında ✓ |
+| Ayrılmış pinler | S3'te GPIO **26–32** dahili SPI flash, oktal PSRAM'de **33–37** de PSRAM; **43/44** = UART0 (CH343 → laptop), **19/20** = USB D-/D+. Kullandığımız 4/5/10/11/15/16/17/18 tamamen bu bölgelerin dışında ✓ |
 | USB CDC On Boot | **KAPALI kalmalı** (varsayılan). Kart harici CH343 (UART0) üzerinden konuşuyor; açılırsa `Serial` USB'ye gider ve laptop hiçbir şey duymaz. |
 
 **Ortam:** Arduino IDE 2.x + esp32 core **3.3.11** + AccelStepper **1.64.0**. Firmware
@@ -1112,6 +1112,124 @@ hepsi temiz. Kamera ile ESP farklı USB taraflarındaydı. `tilt_surucu` artık 
 kp 0.60/kd 0.06 seçildi. `sahi=1` takip ID'lerini yok ediyordu → 0. OBSBOT Meet 2:
 1280×720 MJPG @ 60 FPS (ölçüldü). Firmware'e runtime hız profili `Z<hız>,<ivme>` eklendi
 ama **karta henüz yüklenmedi** (kart eski sürümde; sürücü bunu algılayıp uyarıyor).
+
+### 14.1 PAN aynı kartta + SÜREKLİ İKİ EKSEN TAKİP (21–22.09.2026)
+
+**Pan (yatay) de ESP32-S3'te:** GPIO **10 PUL / 11 DIR** (ENA GPIO16 sürülmez), düz dişli
+15→83 = 98.37 darbe/°, 90° sahada doğrulandı. Firmware `pan_core.h`: `P<der>` (mutlak,
+sarmasız), `PR` (sıfırla), `PZ<h>,<iv>` (profil), `PE0/1/-` (ENA teşhis), durum satırı
+`PAN1,pos,target,moving,angle,goal,en` (STATE3 değişmedi). X/D/nabız kaybı pan'ı da durdurur.
+`PAN_DIR_POS_HIGH=true` **takiple doğrulandı** — ilk yön testinde DIR kablosu yanlış
+takılıydı, o gözlem yanıltıcıydı. PC: `Kontrol.pan_ayri` PAN1 görünce pan'ı bu karta yollar.
+Pan hızı: tavan 12000 darbe/s; kademeler 25/60/100 °/s, ivme 200/500/800 °/s².
+Sahada Normal: 60° → 1.2 sn (önceki ivme 100 °/s² ile "yatay çok yavaş" şikâyeti).
+
+**Titreme kök sebebi ve çözüm.** PD + meşgul kapısı her karede küçük adım atıp duruyordu
+(40 sn'de 271 tilt hedefi, 56 dur-kalk; tespit gürültüsü ise küçük: medyan 1.5 px).
+Konum bildiren kartta otonom yol artık `hedef_kestirici.EksenTakip` (her eksen ayrı):
+hedefin **dünya açısı** = karenin çekildiği andaki eksen açısı + hata/ppd → Kalman →
+karta mutlak hedef (25 Hz, firmware durmadan yeniden planlar). Ek kapılar:
+**dişli boşluğu modeli + çalışırken öğrenme**, yön histerezisi, görüntüde ölü bölgedeyse
+komut yok, motor durduktan sonraki karede **yerleşme düzeltmesi**. Benzetimde (ivmeli motor,
+boşluk 0–2°, ppd ±%40, 83 ms gecikme) eski PD'ye göre: yavaş sinüs 24→7 px, hızlı sinüs
+83→58 px, duran hedef 2.3→1.6 px. Eski PD yolu yalnız konum bildirmeyen kartta kalır.
+Ayarlar (`algi.AYAR`): `takip_ppd` 12 (ölçüldü), `takip_bosluk` 1.5 (tilt ~1.6 ölçüldü),
+`kamera_gecikme` 0.04, `pan_takip_siniri` ±170 (otonom kablo sarmasın).
+
+**⚠ Zamanlama kritik:** kontrolcü gecikmeyi **büyük** sanırsa duran hedefte salınır
+(benzetim: +40 ms → 64 yön değişimi), küçük sanması zararsız. Bu yüzden (a) arayüz kartı
+20 ms'de okur (eskiden 100), (b) toplu okunan STATE3/PAN1 satırları 20 ms aralıkla geriye
+damgalanır, (c) `kamera_gecikme` temkinli 0.04. **Ölçülmedi** — kamera ölçüm günü
+karanlık/kapalıydı. Ölçüm: tilt adımında açı ve görüntü yarı-yol zaman farkı.
+
+**22.09 SAHA ÖLÇÜMLERİ (araç elle 0/0'a getirildi, `R`+`PR` ile sıfırlandı):**
+| Ölçü | Değer | Nasıl |
+|---|---|---|
+| Kamera gecikmesi (kart açı satırı → okunan kare) | tilt 40/30/30 ms, pan 25/30/30 ms → **0.03** | açı + görüntü kayması, gecikme/boşluk/ppd ızgara uydurma |
+| Pan px/° | 19.6/18.6/17.8 → **18.7** (gerçek kamera derecesi) | aynı |
+| Tilt px/° | açıya bağlı: 5°:10.5 · 20°:12.7 · 28°:13.5 · 36°:9.1 · 44°:5.3 | ±1.5° ve ±4° adım, iki yön — boşluk değil, GEOMETRİ |
+| Boşluk | tilt 0.1–0.9°, pan 0.2–0.7° | aynı |
+
+⭐ **Tilt'in kamera açısı doğrusal değil** (kol 0–48° → kamera 0–26.5°, 60° → ~30°).
+Sabit ppd ile kontrolcü kolun kendi hareketini hedef hareketi sandı: kol 35→53 fırladı,
+yüksek açıda ±10° salındı. Çözüm `tilt_surucu.kamera_acisi/kol_acisi` (ölçülen tablo):
+tilt ekseni KAMERA AÇISINDA izlenir, komut kola geri çevrilir. Otonom tilt tavanı
+`tilt_takip_ust`=48 (üstü ölçülemedi, kamera çok az dönüyor). **Sonuç: hedefin kamera
+yükselişi ~27–30° ile sınırlı** — üstünde tutulan hedef tavana dayar (sahada görüldü).
+
+**Takip/tespit geliştirmeleri (22.09):**
+- **Kare zamanı** artık `KameraOkuyucu.son_kare_zamani()` (okuma anı), GUI'nin aldığı an değil.
+- **Kamera hareketi telafisi:** eksen açılarından hesaplanan görüntü kayması
+  (`algi.kamera_kaymasi_bildir`) ByteTrack izlerinin Kalman durumuna ve kilit hafızasına
+  (son_det: yeniden kilit yarıçapı + hayalet) uygulanır. Pan 60°/s ≈ 1100 px/s kaydırıyordu.
+- **Kilit penceresi (ROI):** kilitli hedef ana taramada yoksa son yerinin çevresi tam
+  çözünürlükte kırpılıp 640'ta taranır (uzak/küçük hedef 2× büyür: 15 m drone ~10 px → ~20 px).
+  ⚠ AYRI YOLO nesnesiyle — `model.track()` modele ByteTrack geri çağrılarını kalıcı ekler,
+  aynı nesneyle `predict` tracker'ı bozar. Ayar `roi_tespit`, `roi_esik`.
+- **Zor örnek toplama:** `app/veri_toplama/<oturum>/{images,labels}` — `roi` (ana model
+  kaçırdı, etiketli), `dusuk` (düşük güven, etiketli), `kayip` (etiketsiz). 1/sn, oturum
+  başına 300. Etiketler SAHTE — eğitime girmeden gözden geçirilmeli. Ayar `zor_ornek`.
+- `tilt_canli_takip.py --mod surekli --kilit_bekle 90`: süre hedef kilitlenince başlar.
+
+**YÖRÜNGE KİPİ (22.09) — "hedefe gidip duran değil, hedefin hızında akan" takip.**
+Sahadaki dur-kalk/titreşim: konum kipinde PC her 40 ms "şu KONUMA git" diyor, motor
+yeni komuttan önce varınca yavaşlayıp duruyordu; yavaş hedefte hız öngörüsü kapalıydı
+(0.5° adımlar). Elektronik değişiklik YOK. Firmware `yorunge_core.h`: `Y<der>,<der/sn>`
+(tilt) / `PY<der>,<der/sn>` (pan); kart referansı `p0+v·t` olarak kendisi ilerletir,
+motor hızı `v + 8·(konum farkı)`, ivme sınırlı, uçta fren. **150 ms komut gelmezse
+yumuşak durur** (saf hız komutunun "iletişim koptu, motor koşuyor" riski yok). X/D/
+nabız kaybı anında durdurur; `YQ` yetenek sorgusu (eski firmware → konum kipi).
+PC: `EksenTakip.yorunge_komut` (q=300/r=0.3, öngörü YOK — kart ilerletiyor),
+`Kontrol.yorunge`, tek kapı `_aci_hareket(..., hiz=)` (yasak alana 0.2 sn ileriye bakış:
+bölgeye giden eksenin hızı 0). **Duran hedefte** (hız <1°/s, 0.4 sn) konum kipinin
+mantığına döner (histerezis + yerleşme düzeltmesi; yörünge mantığı pan'da ±0.35°
+ileri-geri yaptı). Ölçülen: donanımda rampa hatası pan 0.52→0.09°, tilt 0.30→0.06°;
+yere konmuş drone'da pan 15 sn tek darbe oynamadı; benzetimde rayda sabit hızlı
+hedef 2.8→0.7 px ve 138→0 dur-kalk. Otonomdan çıkışta X ile anında durdurulur.
+
+**ADAPTIVE KALMAN + UZAK HEDEF (22.09 gece, donanımsız; benzetim + kayıtlı kareler):**
+- *Adaptive q (manevra algılama):* trajectory mode'da q, normalize yeniliğe (NIS, asimetrik
+  ortalama) göre 60..800 arasında kayar. 5 tohum ort.: el titremeli duran hedefte namlu yön
+  değişimi 23→11, ivme 72→24; rayda ivme 30→17; bedeli akıcı el hareketinde +1.8 px.
+- ⚠ **Uzak tespit ölçüldü (gerçek drone küçültülüp kayıtlı karelere yapıştırıldı):** tam kare
+  640 taraması **35 px ve altını HİÇ bulamıyor** (15 m'de 30 cm drone ~21 px). Kilit penceresi
+  3x (213 px kesit) 18 px'te %77, 12 px'te %67. Kilit yokken 12 karo 2x tarama 25 px'te %75.
+- *Uzak hedef edinimi (algi):* kilit yokken tam kare `arama_cozunurluk`=1280, her 4 karede
+  12 karo 2x tarama; aday kilit penceresiyle 3 karede doğrulanınca sentetik (negatif) ID ile
+  kilit; ByteTrack sonra görürse kilit gerçek ID'ye devredilir. Kilit penceresi artık 3x.
+  Uçtan uca (gerçek model + ByteTrack): 20 px drone eski sistemde 0/3, yenide 3/3 kilit
+  (6. kare) ve %100 takip; 14 px 2/3. Maliyet GPU'da ~32–40 ms/kare. **GPU yoksa uzak
+  tarama ve 1280 arama kendiliğinden kapanır.**
+- Hata düzeltmesi: hedef yalnız kilit penceresiyle izlenirken ByteTrack kayıp sayacı
+  artıyor, kilit ~1 sn sonra düşüyordu.
+
+**22.09 AKŞAM — başka bir oturumun değişiklikleri incelendi + canlı takip testleri:**
+- *Diğer oturumdan (tutuldu):* kilit yokken arama **640**, 1280 yalnız 15 karede bir (her
+  karede 1280 yakın drone'da güveni %80→%52, gerçek kilidi %99→%0 düşürmüştü — canlı ölçüm);
+  A2/A3'te **anlık kırmızı kanıtı** (kilit/ateş; 12 px'e kadar küçük drone'da %100 çalıştığı
+  ölçüldü); güçlü aday varken uzak taramayı atlama; `_yorunge_sinirla` (trajectory'de 0.25 sn
+  ileriye bakan yazılım sınırı); araçlar `canli_pasif_gozlem.py`, `canli_eksen_dogrulama.py`,
+  `kamera_gecikme_olc.py` (açı zamanlarını ~10 ms geç damgalıyor — küçük kusur).
+- *Sahada görülen:* model **insan gövdesini maket sanıyor** ("F16 0.68" bacakta). Kilit devri
+  kırmızıya bakmadığı için kilit drone'u tutan kişiye geçti (20 sn'de 82 ID değişimi).
+  Düzeltme: A2/A3'te kilit devri ve kilit penceresi **kırmızı şartlı**; kilitli kutu 15 kare
+  kırmızısız kalırsa kilit bırakılır → ID değişimi 82→1–5.
+- *Hareket bulanıklığı:* dönerken drone güveni 0.9→0.5. Kamera **7.8 ms pozlama** (−7) +
+  kazançla parlaklık ayarı (hedef 100–150; olmazsa otomatiğe döner): bulanıklık yarıya.
+  Ayar `kamera_pozlama` (0 = otomatik). Elle pozlamada OBSBOT kazancı da sabitliyor.
+- *Açılış hizalaması:* kart kapanmadan eksenler yerinde kalır; arayüz/Kontrol hedefleri ilk
+  konum raporunda ÖLÇÜLENE eşitler (pan 28° iken "merkezdeyim" sanılıyordu).
+- *Takip gecikmesi analizi (canlı + gerçek el hareketiyle benzetim):* pan hareketli hedefin
+  hep GERİSİNDE (%80 kare), en büyük hata **yön dönüşlerinde** (pan 0.2 sn eski yönde gidiyor).
+  Ayrıştırma: Kalman tahmin gecikmesi 4–8 px, motor sinüs izleme gecikmesi 15–20 ms (donanımda
+  ölçüldü) → kalan hata toplam ~60–80 ms gecikme (kamera **yük altında 40 ms**, doğrudan
+  `cap.read` 60 ms) ve elin 30–60 °/s keskin dönüşleri. Kalman üst sınırını yükseltmek
+  %13 kazanç verip kaba geri bildirimde salınım yaptı → 60..800 korundu. Kart içi K=8→25
+  hatayı ~%25 azaltır ama sarsıntıyı ~%75 artırır (seçilmedi; titreşim şikâyeti).
+
+**Canlı sonuçlar (elde tutulan drone, 40 sn):** ilk PD testi → görülme %87, dikey 19 px,
+yatay 43 px, 34 ID değişimi · sürekli takip + kamera açısı → **%99, dikey 5.5 px, yatay 5 px,
+0 ID değişimi**. Zor senaryo (uzaklaşma, hızlı, kapatma, 45 sn): %92, 3 ROI kurtarma.
 
 ---
 
