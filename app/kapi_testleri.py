@@ -125,7 +125,14 @@ class SahtePencere:
     """MainWindow'un hareket/ates/hiz kapilari icin ihtiyac duydugu asgari yuzey."""
     _aci_hareket = A.MainWindow._aci_hareket
     _hareket_kilitli = A.MainWindow._hareket_kilitli   # E-Stop kilidi: TEK tanim
-    _aci_reset = A.MainWindow._aci_reset               # [R] / gamepad Y — merkeze al
+    _aci_reset = A.MainWindow._aci_reset               # [R] / MERKEZ — kademeli merkeze al
+    _merkez_tik = A.MainWindow._merkez_tik
+    _merkez_durdur = A.MainWindow._merkez_durdur
+    _merkez_kurma_baslat = A.MainWindow._merkez_kurma_baslat
+    _merkez_kurma_iptal = A.MainWindow._merkez_kurma_iptal
+    _merkez_kurma_bitti = A.MainWindow._merkez_kurma_bitti
+    MERKEZ_KURMA_MS = A.MainWindow.MERKEZ_KURMA_MS
+    TEKRAR_PERIYOT_MS = A.MainWindow.TEKRAR_PERIYOT_MS
     _dpad_press = A.MainWindow._dpad_press
     _dpad_release = A.MainWindow._dpad_release
     TEKRAR_GECIKME_MS = A.MainWindow.TEKRAR_GECIKME_MS
@@ -192,6 +199,10 @@ class SahtePencere:
         self._ates_kurma = SahteTimer()
         self._ates_kurma_kaynak = None
         self._gp_ates_basili = False
+        self._merkez_calisiyor = False
+        self._merkez_son_t = time.time()
+        self._merkez_timer = SahteTimer()
+        self._merkez_kurma = SahteTimer()
         self._kol_ui, self._kol_gp = set(), set()
         self.kol_ikon = SahteKol()
         self.aci_adim = 1.0
@@ -512,7 +523,7 @@ class SahteTus:
 
 
 def test_klavye_atesi_space_b_basili_tutma():
-    """Klavyeden ateş: [Space]+[B] birlikte 3 sn basılı → aç; [Esc] → kes.
+    """Klavyeden ateş: [Space]+[B] birlikte 2 sn basılı → aç; [Esc] → kes.
 
     Tek tuş, erken bırakma, E-Stop ve atışa yasak bölge ateşi AÇAMAZ. Klavyenin
     butondan fazla yetkisi olamaz — yoksa E-Stop klavyeden aşılabilirdi (Yetenek 4)."""
@@ -568,7 +579,7 @@ def test_klavye_atesi_space_b_basili_tutma():
     w._ates_kurma_bitti()
     assert w.kontrol.mock.lazer is False, "yasak bolgede Space+B ile ates acildi"
 
-    # [L] artik ates acmaz (tek tusla ates = 3 sn kuralini delerdi)
+    # [L] artik ates acmaz (tek tusla ates = 2 sn kuralini delerdi)
     w.bolge.atis_pan = B.Pencere(False, -180.0, 180.0)
     birak(Qt.Key_Space, Qt.Key_B)
     bas(Qt.Key_L)
@@ -666,7 +677,7 @@ def test_gamepad_ayni_kapilardan_gecer():
     w._gamepad_tik()
     assert w.pan_aci == duran, "E-Stop'ta gamepad ile hareket edildi"
 
-    # --- ATES: L2 + R2 birlikte, 3 sn basili (tek tetik ya da tek dokunus ACMAZ)
+    # --- ATES: L2 + R2 birlikte, 2 sn basili (tek tetik ya da tek dokunus ACMAZ)
     w.thread.estop = False
     w.gamepad = SahteGamepad(basili=("l2",))           # tek tetik
     w._gamepad_tik()
@@ -690,7 +701,7 @@ def test_gamepad_ayni_kapilardan_gecer():
 
     w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
-    w._ates_kurma_bitti()                              # 3 sn doldu, tetikler basili
+    w._ates_kurma_bitti()                              # 2 sn doldu, tetikler basili
     assert w.kontrol.mock.lazer is True, "gamepad ateş açmadı"
 
     # Ates ACIKKEN tek dokunus keser (beklemeye zorlanmaz)
@@ -706,11 +717,21 @@ def test_gamepad_ayni_kapilardan_gecer():
     assert w.kontrol.mock.lazer is False, "yasak bölgede gamepad ile ateş açıldı"
     w.bolge.atis_pan.aktif = False
 
-    # --- MERKEZ: L1 ya da R1
+    # --- MERKEZ: L1/R1 **2 sn basili** (tek dokunus gimbal'i bastan almamali)
     w._aci_hareket(5.0, 5.0)
     w.gamepad = SahteGamepad(basili=("r1",))
     w._gamepad_tik()
-    assert w.pan_aci == 0.0 and w.tilt_aci == 0.0, "R1 merkeze almadı"
+    assert w._merkez_kurma.isActive(), "R1 merkez sayacını başlatmadı"
+    assert (w.pan_aci, w.tilt_aci) != (0.0, 0.0), "tek dokunuşta merkeze alındı"
+    w.gamepad = SahteGamepad(basili=())            # erken birakildi
+    w._gamepad_tik()
+    assert not w._merkez_kurma.isActive(), "tetik bırakılınca sayaç durmadı"
+
+    w.gamepad = SahteGamepad(basili=("l1",))
+    w._gamepad_tik()
+    w._merkez_kurma_bitti()                        # 2 sn doldu
+    _merkeze_yurut(w)
+    assert abs(w.pan_aci) < 0.1 and abs(w.tilt_aci) < 0.1, "L1 merkeze almadı"
 
     # --- Cihaz koparsa arayüz kilitlenmemeli (istisna sızmamalı)
     w.gamepad = SahteGamepad(kopuk=True)
@@ -804,6 +825,52 @@ def test_basili_tutma_estopta_kesilir():
     assert not w._basili_yonler
 
 
+def _merkeze_yurut(w, tik=200):
+    """Kademeli merkeze almayi tamamlanana kadar yurutur (gercek zamanlayici yok)."""
+    for _ in range(tik):
+        if not w._merkez_timer.isActive():
+            return
+        w._merkez_son_t -= 0.05                 # 50 ms gecmis say
+        w._merkez_tik()
+    raise AssertionError("merkeze alma bitmedi")
+
+
+def test_merkeze_alma_kademeli_ve_kesilebilir():
+    """Merkeze alma ANINDA DEGIL, motor hiziyla adim adim olmali.
+
+    Eski surum acilari bir anda 0 yapiyordu; gercek motor o mesafeyi aninda
+    alamaz, ekran sifira ziplarken gimbal yolda kalirdi (ekran-kart kopmasi).
+    Ayrica operator yon verirse ya da E-Stop gelirse donus BIRAKILMALI."""
+    w = SahtePencere()
+    w._aci_hareket(60.0, 40.0)
+    assert w._aci_reset() is True and w._merkez_timer.isActive()
+
+    # Tek tikta hepsi gelmemeli: adim = tavan hiz x gecen sure
+    w._merkez_son_t -= 0.05
+    w._merkez_tik()
+    adim = P.HIZ_TABLO[P.HIZ_VARSAYILAN][0] * 0.05
+    assert abs(60.0 - w.pan_ham) <= adim + 0.01, (w.pan_ham, adim)
+    assert w.pan_ham > 0.0, "tek tikta merkeze zipladi"
+    assert abs(w.kontrol.mock.pan_hedef - w.pan_ham) < 0.01, "kart hedefi ekrandan koptu"
+
+    # Operator yon verirse donus birakilir (iki kaynak hedefi ayni anda surmez)
+    w._aci_hareket(0.0, -1.0)
+    assert not w._merkez_timer.isActive(), "yon komutu merkeze almayi durdurmadi"
+
+    # Yeniden baslat ve tamamla
+    w._aci_reset()
+    _merkeze_yurut(w)
+    assert abs(w.pan_ham) < 0.1 and abs(w.tilt_aci) < 0.1
+
+    # E-Stop yolda gelirse donus durur
+    w._aci_hareket(50.0, 0.0)
+    w._aci_reset()
+    w.kontrol.estop(True)
+    w._merkez_son_t -= 0.05
+    w._merkez_tik()
+    assert not w._merkez_timer.isActive(), "E-Stop merkeze almayi durdurmadi"
+
+
 def test_estopta_r_merkeze_almaz():
     """[R] (ve gamepad Y) E-Stop'ta HICBIR sey yapmamali.
 
@@ -815,12 +882,21 @@ def test_estopta_r_merkeze_almaz():
     w._aci_hareket(40.0, 20.0)
     w.kontrol.estop(True)
     once = (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef)
-    w._dpad_press("center")                              # klavyede [R]
-    assert (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef) == once, "E-Stop'ta R merkeze aldi"
-    # E-Stop kalkinca R yine calisir
+    w._dpad_press("center")                              # MERKEZ'e basildi
+    assert not w._merkez_kurma.isActive(), "E-Stop'ta merkez sayaci basladi"
+    w._merkez_kurma_bitti()                              # sayac yine de dolsa
+    assert not w._merkez_timer.isActive(), "E-Stop'ta merkeze alma basladi"
+    assert (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef) == once, "E-Stop'ta merkeze alindi"
+
+    # E-Stop kalkinca calisir: 2 sn basili tutma + KADEMELI donus
     w.kontrol.estop(False)
     w._dpad_press("center")
-    assert w.pan_ham == 0.0 and w.tilt_aci == 0.0
+    assert w._merkez_kurma.isActive(), "merkez sayaci baslamadi"
+    assert (w.pan_ham, w.tilt_aci) == (40.0, 20.0), "sayac dolmadan merkeze alindi"
+    w._merkez_kurma_bitti()
+    assert w._merkez_timer.isActive(), "kademeli merkeze alma baslamadi"
+    _merkeze_yurut(w)
+    assert abs(w.pan_ham) < 0.1 and abs(w.tilt_aci) < 0.1, (w.pan_ham, w.tilt_aci)
 
 
 def test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar():
@@ -936,6 +1012,7 @@ if __name__ == "__main__":
     test_ates_kapaliyken_tazeleme_gitmez()
     test_basili_tutma_estopta_kesilir()
     test_estopta_r_merkeze_almaz()
+    test_merkeze_alma_kademeli_ve_kesilebilir()
     test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar()
     test_dikey_hareket_penceresi_kullanici_ornegi()
     test_yatay_pencere_arkadan_dolanilamaz()

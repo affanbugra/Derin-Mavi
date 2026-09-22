@@ -417,7 +417,7 @@ Takım kararı: **lazer tam güçle çalıştırılmayacak, varsayılan %40.** E
 | %100'de duty | 255 değil **256** yazılır: 8 bit'te 255 hâlâ kısa bir LOW darbesi bırakır, 256 pini sürekli HIGH yapar. |
 | E-Stop | `setLaser(false)` → **duty 0** (pin sürekli LOW). Güç ayarı kalıcıdır, ateş kesilir — E-Stop sırası değişmedi: önce lazer, sonra hareket, sonra ENABLE. |
 | Açılış | Kart açılışta duty 0; laptop bağlanınca hız düzeyiyle birlikte `G40` gönderir (kart kendi varsayılanında kalmasın). |
-| **ATEŞ butonu** (06.08) | **AKTİF HEDEF kartı kaldırıldı** — gösterdiği her şey zaten üst şeritte vardı (`eng_name`/`eng_sub`); boşalan yer manuel yön kontrollerine verildi (D-pad tuşları 68×54 → 86×68 px). ATEŞ butonu **manuel panelin altına** taşındı ve büyütüldü. **[22.09'da DEĞİŞTİ] Klavye ateşi: `Space`+`B` birlikte 3 sn basılı → aç, `Esc` → kes.** `L` kaldırıldı (tek tuşla ateş, 3 sn kuralını delerdi). Açma `_ates_kurma_bitti` → `_ates_bas` (tek kapı); erken bırakma/odak kaybı kurmayı iptal eder; `Esc` her modda ve sayı kutusu odaktayken bile `_ates_kes`'e gider. Klavyenin butondan **fazla yetkisi yok**: E-Stop'ta buton kilitliyse klavye de açamaz. Gamepad A hâlâ `_ates_kisayolu` ile aç/kes yapar. Kapı testi: `test_klavye_atesi_space_b_basili_tutma`. |
+| **ATEŞ butonu** (06.08) | **AKTİF HEDEF kartı kaldırıldı** — gösterdiği her şey zaten üst şeritte vardı (`eng_name`/`eng_sub`); boşalan yer manuel yön kontrollerine verildi (D-pad tuşları 68×54 → 86×68 px). ATEŞ butonu **manuel panelin altına** taşındı ve büyütüldü. **[22.09'da DEĞİŞTİ] Klavye ateşi: `Space`+`B` birlikte 2 sn basılı → aç, `Esc` → kes.** `L` kaldırıldı (tek tuşla ateş, 2 sn kuralını delerdi). Açma `_ates_kurma_bitti` → `_ates_bas` (tek kapı); erken bırakma/odak kaybı kurmayı iptal eder; `Esc` her modda ve sayı kutusu odaktayken bile `_ates_kes`'e gider. Klavyenin butondan **fazla yetkisi yok**: E-Stop'ta buton kilitliyse klavye de açamaz. Gamepad A hâlâ `_ates_kisayolu` ile aç/kes yapar. Kapı testi: `test_klavye_atesi_space_b_basili_tutma`. |
 | **Arayüz** (06.08) | Sağ kolonda **LAZER kartı**: güç kaydırıcısı (%0–100) + hızlı kademeler (%20/%40/%70/%100) + başlıkta anlık durum (`● ATEŞ · %40` / `○ Kapalı · %40`). MOTOR HIZI gibi **stack'in dışında** → hem Manuel hem Otonom modda görünür. Güç değişiminin tek kapısı `_lazer_guc_degisti`. Güç **kalıcı olarak kaydedilmez**: her açılış güvenli varsayılana (%40) döner — "geçen sefer %100'de bırakmışız" diye başlamak istemeyiz. |
 
 **ATEŞİN ÜÇ KATMANI (06.08 — "bir anda lazer çalışırsa" endişesine karşı).** Lazer çok
@@ -482,7 +482,7 @@ gamepad videoda gösterilecek, doğrudan puan. `app/gamepad.py` + arayüzde 50 m
 | **Tek kapı kuralı** | Gamepad **kendi komut yolunu AÇMAZ**: hareket `_aci_hareket`, ateş `_ates_kisayolu`→`_ates_bas`, merkez `_aci_reset`, E-Stop `_estop_bas`. Geçmişte ikinci bir ateş yolu E-Stop denetimini atlamıştı (§12 B1) — aynı hata sınıfı geri gelmesin. |
 | **Buton haritası** | **SDL GameController API** tercih edilir: SDL'in cihaz veritabanı her padi standart düzene eşler, *A tuşu hangi padde olursa olsun A'dır*. SDL cihazı tanımazsa ham Joystick'e düşülür (XInput numaraları varsayılır). |
 | Neden bu kadar önemli | Ham numaralar padden pade **değişir**: Xbox/XInput'ta `7 = Start`, PlayStation DualSense'te `7 = R2`. Sabit numara yazılsaydı **ACİL DURDUR başka bir pad takıldığında yanlış tuşa düşerdi.** |
-| Düzen **[22.09'da DEĞİŞTİ]** | Sol çubuk + D-pad = gimbal · **L2 + R2 birlikte 3 sn** = ateş AÇ, ateş açıkken **tek dokunuş** = KES · **L1 / R1** = merkeze al · **Options** = ACİL DURDUR / DEVAM. Tek tuşla ateş YOK: klavyedeki `Space+B` kuralının kol karşılığı (kaza ile lazer açılmasın). Kesmek beklemeye zorlanmaz — açmak zor, kapatmak kolay. *(A/Y ve LB/RB hız kademesi kaldırıldı.)* |
+| Düzen **[22.09'da DEĞİŞTİ]** | **Sol çubuk = YALNIZ yatay, sağ çubuk = YALNIZ dikey** (tek çubukta çapraz sürmek iki ekseni birden kaydırıyor, hassas nişanı zorlaştırıyordu) · D-pad = iki eksen · **L2 + R2 birlikte 2 sn** = ateş AÇ, ateş açıkken **tek dokunuş** = KES · **L1 / R1 2 sn basılı** = merkeze al (kademeli) · **Options** = ACİL DURDUR / DEVAM. Tek tuşla ateş YOK: klavyedeki `Space+B` kuralının kol karşılığı (kaza ile lazer açılmasın). Kesmek beklemeye zorlanmaz — açmak zor, kapatmak kolay. *(A/Y ve LB/RB hız kademesi kaldırıldı.)* |
 | Hareket matematiği | Adım = `tavan hız (°/s) × geçen süre × çubuk sapması` — basılı tutmayla (§5.1) aynı mantık, tek farkı analog çarpan. Sabit adım gönderilseydi hedef motorun önüne geçer, çubuk bırakılınca gimbal dönmeye devam ederdi. |
 | Ölü bölge | %15, ve **kalan aralık yeniden 0..1'e yayılır**. Düz kesme yapılsaydı çubuk eşiği geçtiği anda hız 0'dan 0.15'e sıçrardı. Ölü bölge olmasaydı gimbal hiç durmaz, sürüklenirdi. |
 | Kenar tetikleme | Ateş/E-Stop butonları **basıldığı an** okunur. Seviye okunsaydı düğme basılı tutuldukça her 50 ms'de tekrar tetiklenir, lazer yanıp sönerdi. |
@@ -750,7 +750,7 @@ sn) **yeni komut kabul edilmez**. Bir sonraki kabul edilen kare artık kameranı
 (bayat olmayan) görüntüsünü yansıtır, PD gerçek hataya göre karar verir.
 
 ⚠ **Simülasyonla ölçülen gerçek bir ödünleşim var: bu düzeltme yakınsamayı YAVAŞLATIYOR.**
-Gerçekçi (ivmelenen) bir motor benzetiminde meşgul kapısı OLMADAN sistem ~3 sn'de yerleşiyordu;
+Gerçekçi (ivmelenen) bir motor benzetiminde meşgul kapısı OLMADAN sistem ~2 sn'de yerleşiyordu;
 kapıyla birlikte ~8 sn'ye çıktı (salınım kesinlikle YOK — `yön-değişimi=0` — ama daha temkinli).
 **Ayrıca bu benzetim, meşgul kapısı OLMADAN bile salınım ÜRETMEDİ** — yani gerçek donanımdaki
 salınımın tam mekanizmasını laboratuvar dışında birebir yeniden üretemedim; UART gecikmesi,
@@ -767,7 +767,7 @@ profilin hem hızlanma HEM yavaşlama yarısını) bekliyordu — gereğinden ç
 hareketin TAMAMEN durmasını değil, GÖRÜLEBİLİR ölçüde ilerlemesini bekler. Taban da
 `NISAN_MIN_ARALIK` 0.10→0.04 sn'ye indirildi (zaten inference ~15 FPS'te ~0.067 sn'de bir kare
 geldiği için 0.10'un pratik bir etkisi kalmamıştı). Simülasyonla tarandı (oran 0.7→0.2):
-**0.4'te 3 sn'de yerleşme + salınım YOK**, 0.2'de salınım geri gelmeye başlıyor — 0.4 bilinçli
+**0.4'te 2 sn'de yerleşme + salınım YOK**, 0.2'de salınım geri gelmeye başlıyor — 0.4 bilinçli
 bir güvenlik payıyla seçildi. Gerçek donanımda hâlâ yavaşsa **bir sonraki adım
 `NISAN_MESGUL_ORANI`'yi kademeli yükseltmek** (0.5, 0.6…) veya salınım geri gelirse düşürmek
 (`arayuz_qt.py`, tek sabit); `NISAN_MIN_ARALIK` ikinci bir tavan.
@@ -1117,6 +1117,11 @@ ayar kutularına ±90'dan büyük değer **yazılamaz**. Pan sarmasız hesapland
 arkadan dolanmak da mümkün değildir. Açı karosunda **yalnız ön yarı boyanır** — arka yarı
 erişilemez olduğu için orayı sarıya boyamak "yasak alan" değil "olmayan alan" gösterirdi.
 Kapı testi: `test_yatay_on_yariyi_gecemez`.
+**Aktif pencerenin SINIR ÇİZGİLERİ (22.09):** pencere tüm erişilebilir aralıkla aynıysa
+(ör. hareket ±90 = yapısal tavan) yasak alan kalmaz, dolayısıyla renkli dilim de
+çizilmez — operatör anahtarı açıyor, ekranda hiçbir şey değişmiyordu ("harekete yasak
+alan çalışmıyor" şikâyeti). Artık aktif her pencerenin iki sınırına renkli ince bir
+çizgi çizilir: kuralın AÇIK olduğu ve sınırın nerede olduğu her durumda görünür.
 **Hazır ayarlar (22.09):** pencereler KAPALI gelir ama kutular dolu: hareket yatay ±90 /
 dikey ±30, **atış yatay ±30 / dikey ±15** — ateş alanı hareket alanından DAR başlar
 (gidilebilen her yere ateş izni vermek güvenli taraf değildir).
@@ -1126,7 +1131,12 @@ Ayrı "Maksimum Yükseliş" kaydırıcısı kaldırıldı (hareket penceresi o i
 **Açı karoları:** azimut (üstten görünüş, saat yönünde döner) + yükseliş (yandan görünüş,
 namlu sistem açısı − 30 kadar kalkar) resimleri; büyük ortalı derece; namludan kırmızı
 lazer ışığı **yalnız gerçek lazer açıkken** (kontrol katmanının kartla eşlenmiş durumu).
-Merkeze alma yalnız **[R]** (Space/C kaldırıldı) + MERKEZ butonu.
+**Merkeze alma (22.09):** MERKEZ butonu / [R] / L1-R1 **2 sn basılı** tutulmalı (kazara
+dokunuş gimbal'i baştan almasın) ve dönüş **ANINDA DEĞİL, motorun tavan hızıyla adım
+adım** yapılır — eski sürüm açıları bir anda 0 yapıyordu, gerçek motor o mesafeyi anında
+alamaz ve ekran gerçek konumdan koparadı (§5.1'in kaçındığı hata sınıfı). Yolda operatör
+yön verirse ya da E-Stop gelirse dönüş bırakılır. Kapı testi:
+`test_merkeze_alma_kademeli_ve_kesilebilir`.
 **Yasak alan dilimleri (22.09):** açık olan pencereler karolarda saydam renkli dilim
 olarak çizilir — **sarı** = harekete yasak (hareket penceresinin dışı), **kırmızı** =
 atışa yasak (hareket içinde, atış dışında), **soluk yeşil** = atış izni. Dilimler dünyaya

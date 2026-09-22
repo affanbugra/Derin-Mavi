@@ -4,9 +4,10 @@
 Sartname Yetenek 1 kullanici komut arayuzlerini "UI/joystick/klavye" diye sayar; joystick
 video icin dogrudan puandir (CLAUDE.md §2).
 
-DUZEN (takim karari 22.09): D-pad = yon · L2+R2 birlikte 3 sn = ATES ac (tekrar
-basinca kes) · L1/R1 = merkeze al · Options = ACIL DURDUR / DEVAM. Tek tusla ates
-YOKTUR — klavyedeki "Space+B 3 sn" kuralinin kol karsiligi budur.
+DUZEN (takim karari 22.09): SOL cubuk = yatay, SAG cubuk = dikey, D-pad = iki
+eksen · L2+R2 birlikte 2 sn = ATES ac (tekrar basinca kes) · L1/R1 2 sn = merkeze
+al (kademeli) · Options = ACIL DURDUR / DEVAM. Tek tusla ates
+YOKTUR — klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
 
 ⚠ BU MODUL KOMUT URETMEZ, YALNIZCA OKUR. Arayuz okunan durumu kendi guvenlik kapilarindan
   gecirir (`_aci_hareket`, `_ates_bas`, `_estop_bas`). Gamepad'in kendi yolu OLMAMALIDIR:
@@ -58,14 +59,17 @@ OLU_BOLGE = 0.15
 # takildiginda yanlis tusa duserdi — kabul edilemez.
 if PYGAME_VAR:
     # Takim karari 22.09: ATES iki omuz TETIGI birden (L2+R2) — tek tusla ates
-    # istemiyoruz, klavyedeki "Space+B 3 sn" kuralinin kol karsiligi budur.
+    # istemiyoruz, klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
     CB_MERKEZ = (pygame.CONTROLLER_BUTTON_LEFTSHOULDER,     # L1 / R1: merkeze al
                  pygame.CONTROLLER_BUTTON_RIGHTSHOULDER)
     CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # Options: ACIL DURDUR / DEVAM
     CB_TETIK = (pygame.CONTROLLER_AXIS_TRIGGERLEFT,     # L2 / R2 (analog)
                 pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
+    # Takim karari 22.09: SOL cubuk yalniz YATAY (pan), SAG cubuk yalniz DIKEY (tilt).
+    # Tek cubukta capraz surmek iki ekseni ayni anda kaydiriyor ve hassas nisan
+    # zorlasiyordu; eksenleri iki ele bolmek her ekseni bagimsiz kontrol ettirir.
     CB_EKSEN_PAN = pygame.CONTROLLER_AXIS_LEFTX
-    CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_LEFTY
+    CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_RIGHTY
     # GameController'da D-pad ayri bir "hat" degil, dort dugmedir.
     CB_DPAD = ((pygame.CONTROLLER_BUTTON_DPAD_UP, 0.0, 1.0, "up"),
                (pygame.CONTROLLER_BUTTON_DPAD_DOWN, 0.0, -1.0, "down"),
@@ -85,10 +89,11 @@ BTN_L2, BTN_R2 = 6, 7     # DualSense'te tetikler dugme olarak da gorunur
 BTN_ESTOP = 9             # Options/Start (ham duzende cogu padde 9)
 EKSEN_L2, EKSEN_R2 = 4, 5       # tetikler eksen olarak gelirse
 
-# Sol analog cubuk. Y ekseni SDL'de yukari = NEGATIF; tilt'te yukari = ARTI oldugu icin
-# isaret cevrilir (yoksa cubugu yukari itince namlu asagi inerdi).
-EKSEN_PAN = 0
-EKSEN_TILT = 1
+# Analog cubuklar (ham yol): SOL X = pan, SAG Y = tilt. Y ekseni SDL'de yukari =
+# NEGATIF; tilt'te yukari = ARTI oldugu icin isaret cevrilir (yoksa cubugu yukari
+# itince namlu asagi inerdi).
+EKSEN_PAN = 0             # sol cubuk X
+EKSEN_TILT = 3            # sag cubuk Y (XInput/DirectInput duzeninde 3)
 
 
 def _olu_bolge(v):
@@ -107,7 +112,7 @@ class Durum:
 
     * `pan`/`tilt`  : -1..1 (cubuk veya D-pad)
     * `basili`      : O AN basili tuslarin adlari — arayuzdeki kol resmini yakar
-                      ve "iki tetik birlikte 3 sn" gibi SURE kurallarini besler.
+                      ve "iki tetik birlikte 2 sn" gibi SURE kurallarini besler.
     * `kenar`       : bu yoklamada YENI basilanlar — ac/kapa komutlari icin.
 
     Neden iki kume: ates/E-Stop birer ac-kapa (kenar gerekir), ama atesi kurmak
@@ -131,7 +136,13 @@ class Durum:
 
     @property
     def merkez(self):
+        """L1/R1 BU yoklamada basildi mi (kurma sayacini baslatmak icin)."""
         return bool({"l1", "r1"} & self.kenar)
+
+    @property
+    def merkez_basili(self):
+        """L1/R1 hala basili mi (2 sn kuralini surdurmek icin)."""
+        return bool({"l1", "r1"} & self.basili)
 
     @property
     def ates_basili(self):
@@ -345,7 +356,8 @@ if __name__ == "__main__":
               f"  hat: {g.js.get_numhats()}")
         print("       Yanlis tusa dusuyorsa gamepad.py'deki BTN_* numaralarini asagidaki")
         print("       'basili' ciktisina bakarak duzeltin.")
-    print("\nDuzen: D-pad = yon · L2+R2 (3 sn) = ates · L1/R1 = merkez · Options = E-STOP")
+    print("\nDuzen: sol cubuk=yatay, sag cubuk=dikey, D-pad=yon · L2+R2 (2 sn)=ates"
+          " · L1/R1 (2 sn)=merkez · Options=E-STOP")
     print("Cubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
     try:
         while True:

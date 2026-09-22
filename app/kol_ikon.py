@@ -12,8 +12,8 @@ gerçek gamepad okumasından beslenir — yani ekranda yanan tuş, sistemin ger�
 aldığı komuttur (klavye, ekrandaki D-pad ve kol aynı ışığı yakar).
 
 Düzen (CLAUDE.md §5.4, 22.09'da güncellendi):
-    D-pad          → yön        · L2 + R2 (3 sn) → ateş aç, tekrar bas → kes
-    L1 / R1        → merkeze al · Options        → ACİL DURDUR / DEVAM
+    D-pad          → yön        · L2 + R2 (2 sn) → ateş aç, tekrar bas → kes
+    L1 / R1 (2 sn) → merkeze al · Options        → ACİL DURDUR / DEVAM
 
 Kendi kendini test:  python app/kol_ikon.py   (pencere açmaz)
 """
@@ -88,8 +88,8 @@ class KolGostergesi(QWidget):
         self._yanan = set()
         self._govde = govde_yolu()
         self.setAttribute(Qt.WA_TransparentForMouseEvents)   # tıklanmaz: gösterge
-        self.setToolTip("Oyun kolu — D-pad: yön · L2+R2 (3 sn): ateş · "
-                        "L1/R1: merkeze al · Options: ACİL DURDUR")
+        self.setToolTip("Oyun kolu — D-pad: yön · L2+R2 (2 sn): ateş · "
+                        "L1/R1 (2 sn): merkeze al · Options: ACİL DURDUR")
 
     def isik(self, ad, acik=True):
         if ad not in TUSLAR:

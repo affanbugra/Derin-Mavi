@@ -168,12 +168,12 @@ tarafından standarda eşlenir, yani Xbox/PlayStation fark etmez. Teşhis: `pyth
 Gamepad yoksa uygulama normal çalışır, yalnızca bu özellik kapalı kalır.
 
 **Klavye:** `W/A/S/D` veya ok tuşları — gimbal yönü (basılı tutunca sürekli hareket) ·
-`R` — merkeze al · **`Space` + `B` birlikte 3 sn basılı tut — ateşi aç** (erken bırakılırsa
+`R` (2 sn basılı) — merkeze al · **`Space` + `B` birlikte 2 sn basılı tut — ateşi aç** (erken bırakılırsa
 iptal) · **`Esc` — ateşi kes** (her modda, bir sayı kutusu seçiliyken bile). Tek tuşla ateş
 yoktur; kaza ile lazer açılmasın diye. E-Stop'ta veya atışa yasak bölgede klavye de ateş açamaz.
 
-**Oyun kolu (gamepad):** D-pad — gimbal yönü · **L2 + R2 birlikte 3 sn** — ateş aç
-(ateş açıkken tek dokunuş keser) · **L1 / R1** — merkeze al · **Options** — ACİL DURDUR / DEVAM.
+**Oyun kolu (gamepad):** sol çubuk — yatay · sağ çubuk — dikey · D-pad — iki eksen · **L2 + R2 birlikte 2 sn** — ateş aç
+(ateş açıkken tek dokunuş keser) · **L1 / R1 (2 sn basılı)** — merkeze al (kademeli döner) · **Options** — ACİL DURDUR / DEVAM.
 Manuel paneldeki kol resminde basılan tuş yanar; aynı resim klavye ve ekrandaki D-pad ile
 verilen komutları da gösterir. Kol yoksa özellik sessizce kapalıdır.
 

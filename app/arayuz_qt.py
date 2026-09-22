@@ -300,6 +300,31 @@ class _AciKarosu(QWidget):
             p.setPen(Qt.NoPen)
             p.setBrush(g)
             p.drawPath(yol)
+
+        # Aktif pencerelerin SINIR CIZGILERI. Neden gerekli: pencere tum erisilebilir
+        # aralikla ayni oldugunda (or. hareket ±90 = yapisal tavan) yasak alan
+        # KALMAZ, dolayisiyla renkli dilim de cizilmez — operator anahtari aciyor ve
+        # ekranda hicbir sey degismiyor sanıyordu (kullanici bildirdi 22.09).
+        # Sinir cizgisi "bu kural ACIK ve siniri burasi" der.
+        for tur, pencere in (("hareket", self.hareket), ("atis", self.atis)):
+            if not pencere or not pencere[0]:
+                continue
+            renk = QColor(self.DILIM_RENK[tur])
+            renk.setAlphaF(0.55)
+            kalem = QPen(renk, 1.6)
+            kalem.setCapStyle(Qt.RoundCap)
+            p.setPen(kalem)
+            p.setBrush(Qt.NoBrush)
+            lo, hi = self.ARALIK
+            for aci in pencere[1:]:
+                if not (lo - 0.01 <= aci <= hi + 0.01):
+                    continue
+                yon = math.radians(self.qt_aci(aci))
+                ic, dis = r * 0.72, r * 1.0
+                p.drawLine(QPointF(merkez.x() + math.cos(yon) * ic,
+                                   merkez.y() - math.sin(yon) * ic),
+                           QPointF(merkez.x() + math.cos(yon) * dis,
+                                   merkez.y() - math.sin(yon) * dis))
         p.restore()
 
     def paintEvent(self, e):
@@ -2141,6 +2166,15 @@ class MainWindow(QMainWindow):
         # Klavyeden ATES: [Space]+[B] birlikte ATES_KURMA_MS basili tutulmali. Kaza
         # ile tek tusa basmak lazeri acmasin diye kasitli olarak zor bir hareket.
         self._kol_ui, self._kol_gp = set(), set()   # kol gostergesindeki isik kaynaklari
+        # Merkeze alma: kademeli yurutme + "basili tut" sayaci (MERKEZ butonu, L1/R1)
+        self._merkez_calisiyor = False
+        self._merkez_son_t = 0.0
+        self._merkez_timer = QTimer(self)
+        self._merkez_timer.setInterval(self.TEKRAR_PERIYOT_MS)
+        self._merkez_timer.timeout.connect(self._merkez_tik)
+        self._merkez_kurma = QTimer(self)
+        self._merkez_kurma.setSingleShot(True)
+        self._merkez_kurma.timeout.connect(self._merkez_kurma_bitti)
         self._ates_tuslari = set()
         self._ates_kurma_kaynak = None             # "klavye" | "kol"
         self._gp_ates_basili = False               # kolun iki tetigi su an basili mi
@@ -2470,9 +2504,8 @@ class MainWindow(QMainWindow):
         if direction in ("home", "center"):
             if hasattr(self, "btn_center"):
                 self.btn_center.setStyleSheet(self._key_center_active_style)
-            self._kol_parla(("l1", "r1"))     # koldaki karsiligi: L1/R1
-            self._aci_reset()                 # E-Stop denetimi _aci_reset'in icinde
-            return
+            self._merkez_kurma_baslat("MERKEZ")   # 2 sn basili tut (kaza ile merkeze
+            return                                #  donus gimbal'i bastan alir)
         ad, kpan, ktilt = self.YON_TABLO[direction]
         getattr(self, ad).setStyleSheet(self._key_active_style)
         self._kol_isik(direction, True)
@@ -2485,6 +2518,7 @@ class MainWindow(QMainWindow):
         if direction in ("home", "center"):
             if hasattr(self, "btn_center"):
                 self.btn_center.setStyleSheet(self._key_center_normal_style)
+            self._merkez_kurma_iptal(erken=True)
             return
         getattr(self, self.YON_TABLO[direction][0]).setStyleSheet(self._key_normal_style)
         self._kol_isik(direction, False)
@@ -2544,7 +2578,7 @@ class MainWindow(QMainWindow):
             self._estop_bas()
             return                                  # ayni tikta baska komut isleme
 
-        # ATES (takim karari 22.09): L2 + R2 BIRLIKTE. Kapali iken 3 sn basili tutmak
+        # ATES (takim karari 22.09): L2 + R2 BIRLIKTE. Kapali iken 2 sn basili tutmak
         # acar (klavyedeki Space+B ile ayni kural); ACIKKEN tek dokunus keser —
         # kesmek her zaman kolay olmalidir, beklemeye zorlanmaz.
         if d.ates_kenar:
@@ -2559,8 +2593,12 @@ class MainWindow(QMainWindow):
                                     f'Ateş iptal — tetik erken bırakıldı')
             self._ates_kurma_iptal()
 
+        # MERKEZ: L1/R1 **2 sn basili** (ates gibi). Tek dokunusla merkeze donmek
+        # gimbal'i bastan alir; kazara dokunmak pahaliya mal olurdu.
         if d.merkez:
-            self._aci_reset()                 # E-Stop denetimi _aci_reset'in icinde
+            self._merkez_kurma_baslat("L1/R1")
+        elif not d.merkez_basili:
+            self._merkez_kurma_iptal(erken=True)
 
         # HAREKET: adim = tavan hiz x gecen sure x cubugun sapmasi. Basili tutma
         # (`_tekrar_tik`) ile ayni matematik — tek farki analog carpan. Sabit adim
@@ -2648,7 +2686,13 @@ class MainWindow(QMainWindow):
         """
         # B2 — E-Stop: hicbir hareket komutu gecmez, aci etiketleri de DEGISMEZ.
         if self._hareket_kilitli():
+            self._merkez_durdur()
             return False
+
+        # Operator yon verdiyse merkeze donus BIRAKILIR: iki kaynak ayni anda
+        # hedefi surerse gimbal iki istegin arasinda gider gelir.
+        if not getattr(self, "_merkez_calisiyor", False):
+            self._merkez_durdur("yön komutu geldi")
 
         # Hareket penceresi (sartname §4.2 harekete-yasak alan): pencere DISINA
         # cikilamaz. Komut reddedilmez, SINIRDA KIRPILIR — sinira 3° kalmisken 5°'lik
@@ -2905,19 +2949,80 @@ class MainWindow(QMainWindow):
         return bool(getattr(self, "kontrol", None) and self.kontrol.estop_aktif)
 
     def _aci_reset(self):
-        """Merkeze al (0°, 0°). Kendi E-Stop kapisi VAR: eskiden bu koruma yalniz
-        MERKEZ butonunun devre disi kalmasina dayaniyordu ve klavyedeki [R] onu
-        atliyordu — E-Stop'ta ekrandaki acilar sifirlanip karta 'eve don' gidiyordu."""
+        """Merkeze al (0°, 0°) — ANINDA DEGIL, motor hiziyla KADEMELI.
+
+        Kendi E-Stop kapisi VAR: eskiden bu koruma yalniz MERKEZ butonunun devre
+        disi kalmasina dayaniyordu, klavyedeki [R] onu atliyordu.
+
+        ⚠ NEDEN KADEMELI (kullanici uyarisi 22.09): eski surum acilari bir anda 0
+        yapip karta "eve don" diyordu. Gercek dunyada motor o mesafeyi ANINDA
+        alamaz; ekran sifira ziplarken gimbal hala yoldaydi, yani ekrandaki aci
+        gercek konumdan koptu (§5.1'in kacindigi hata sinifi). Artik merkeze
+        donus, D-pad'i basili tutmakla AYNI matematikle (tavan hiz x gecen sure)
+        adim adim yapilir; yolda operator yon verirse ya da E-Stop gelirse durur."""
         if self._hareket_kilitli():
             return False
-        self.pan_aci = 0.0
-        self.pan_ham = 0.0
-        self.tilt_aci = 0.0
-        self._pan_goster()
-        self._tilt_goster()
-        if hasattr(self, "kontrol") and self.kontrol and self.kontrol.bagli:
-            self.kontrol.home()
+        self._merkez_son_t = time.time()
+        self._merkez_timer.start(self.TEKRAR_PERIYOT_MS)
+        self.sb_msg.setText(f'<span style="color:{BLUE}">●</span>&nbsp;Merkeze alınıyor…')
         return True
+
+    MERKEZ_KURMA_MS = 2000       # MERKEZ butonu / L1-R1: basili tutma suresi
+
+    def _merkez_kurma_baslat(self, kaynak):
+        """Merkeze alma 2 sn basili tutmayi ister: kaza ile dokunmak gimbal'i
+        bastan almasin (ates kurmasiyla ayni desen)."""
+        if self._hareket_kilitli() or self._merkez_kurma.isActive():
+            return
+        self._kol_isik("l1", True)
+        self._kol_isik("r1", True)
+        self._merkez_kurma.start(self.MERKEZ_KURMA_MS)
+        self.sb_msg.setText(f'<span style="color:{BLUE}">●</span>&nbsp;'
+                            f'MERKEZ: {kaynak} basılı tut… (2 sn)')
+
+    def _merkez_kurma_iptal(self, erken=False):
+        sonlandi = self._merkez_kurma.isActive()
+        self._merkez_kurma.stop()
+        self._kol_isik("l1", False)
+        self._kol_isik("r1", False)
+        if erken and sonlandi:
+            self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;'
+                                f'Merkeze alma iptal — erken bırakıldı')
+
+    def _merkez_kurma_bitti(self):
+        self._kol_isik("l1", False)
+        self._kol_isik("r1", False)
+        self._aci_reset()                 # E-Stop denetimi _aci_reset'in icinde
+
+    def _merkez_durdur(self, sebep=None):
+        if getattr(self, "_merkez_timer", None) is not None and self._merkez_timer.isActive():
+            self._merkez_timer.stop()
+            if sebep:
+                self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;'
+                                    f'Merkeze alma durduruldu — {sebep}')
+
+    def _merkez_tik(self):
+        """Bir adim merkeze. Adim = motorun tavan hizi x gecen sure (bkz. `_tekrar_tik`)."""
+        simdi = time.time()
+        dt = min(0.2, simdi - self._merkez_son_t)
+        self._merkez_son_t = simdi
+        adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt
+
+        kalan_pan = -B.pan_isaretli(self.pan_ham)      # 0'a olan isaretli mesafe
+        kalan_tilt = -self.tilt_aci
+        if abs(kalan_pan) < 0.05 and abs(kalan_tilt) < 0.05:
+            self._merkez_durdur()
+            self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;Merkeze alındı')
+            return
+        d_pan = max(-adim, min(adim, kalan_pan))
+        d_tilt = max(-adim, min(adim, kalan_tilt))
+        self._merkez_calisiyor = True
+        try:
+            ok = self._aci_hareket(d_pan, d_tilt)
+        finally:
+            self._merkez_calisiyor = False
+        if not ok:                                     # E-Stop / yasak alan
+            self._merkez_durdur("hareket engellendi")
 
     def _asama1_panel(self):
         """Asama 1: zarf sirasina gore dizilen 4 hedef karti."""
@@ -3122,7 +3227,7 @@ class MainWindow(QMainWindow):
         self._ates_bas()
 
     ATES_TUSLARI = frozenset({Qt.Key_Space, Qt.Key_B})
-    ATES_KURMA_MS = 3000
+    ATES_KURMA_MS = 2000          # ates icin basili tutma suresi (takim karari 22.09)
 
     def _ates_kurma_iptal(self):
         if hasattr(self, "_ates_kurma"):
@@ -3140,13 +3245,13 @@ class MainWindow(QMainWindow):
             self._kol_isik(ad, acik)
 
     def _ates_kurma_baslat(self, kaynak):
-        """Ateş kurma sayacı: 3 sn dolunca ateş açılır. Kaynak klavye ya da kol."""
+        """Ateş kurma sayacı: 2 sn dolunca ateş açılır. Kaynak klavye ya da kol."""
         self._ates_kurma_kaynak = kaynak
         self._ates_kurma.start(self.ATES_KURMA_MS)
         self._ates_isigi()
         self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;'
                             f'ATEŞ: {"Space + B" if kaynak == "klavye" else "L2 + R2"} '
-                            f'basılı tut… (3 sn)')
+                            f'basılı tut… (2 sn)')
 
     def _ates_kurma_gecerli(self):
         """Sayaç dolduğunda tuşlar HÂLÂ basılı mı? (erken bırakma ateş açmamalı)"""
@@ -3157,7 +3262,7 @@ class MainWindow(QMainWindow):
         return False
 
     def _ates_kurma_bitti(self):
-        """3 sn doldu: iki tus HALA basiliysa ateş acilir — yine TEK kapidan (`_ates_bas`).
+        """2 sn doldu: iki tus HALA basiliysa ateş acilir — yine TEK kapidan (`_ates_bas`).
         Buton devre disiysa (E-Stop) gecmez: klavyenin butondan fazla yetkisi olamaz."""
         self._ates_kurma.stop()        # tek atislik sayac: sonuc ne olursa olsun BITTI
         if not self._ates_kurma_gecerli():
