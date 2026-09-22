@@ -146,7 +146,7 @@ VARSAYILAN_AYAR = {
     # Otonom takipte cikilabilecek en yuksek OPERATOR acisi (tilt_surucu "IKI ACI
     # CERCEVESI": 0 = kol 30, aralik -30..+30). Kol 48'in ustu olculemedi (kamera
     # tavana bakiyor) ve kamera kol derecesi basina cok az donuyor -> 48-30 = 18.
-    "tilt_takip_ust": 18.0,
+    "tilt_takip_ust": 25.0,
     # Disli boslugu baslangic tahmini (derece). Olculen: tilt 0.1-0.9, pan 0.2-0.7.
     # Kontrolcu calisirken kendisi ogrenir (EksenTakip.bosluk_kest).
     "takip_bosluk": 0.8,
@@ -162,7 +162,7 @@ VARSAYILAN_AYAR = {
     # OTONOM takipte pan'in acilis konumuna gore gidebilecegi en uzak aci (+-derece).
     # Firmware sarmasiz +-400'e izin verir (manuel tam tur icin); otonom kovalamada
     # bu, kablolarin bir turdan fazla sarilmasi demekti. Hedef alani onde.
-    "pan_takip_siniri": 170.0,
+    "pan_takip_siniri": 60.0,
     # KILIT PENCERESI: kilitli hedef ana taramada bulunamazsa son yerinin cevresi
     # TAM COZUNURLUKTE kirpilip ikinci kez taranir (kucuk/uzak hedef 2x buyur).
     "roi_tespit": 1,

@@ -363,7 +363,7 @@ class AracAciGostergesi(_AciKarosu):
                 ys.append(py + kx * sin(a) + ky * cos(a))
         return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
-    ARALIK = (FIZIKSEL_ALT, FIZIKSEL_ALT + MEKANIK_ARALIK)   # fiziksel −30..+30
+    ARALIK = (B.TILT_CALISMA_MIN, B.TILT_CALISMA_MAX)  # izinli çalışma alanı
     # Yelpaze dar oldugu icin renk namlunun hemen otesinde baslar (tabandaki
     # rampa daha erken acilsa govdenin arkasinda harcanirdi).
     DILIM_DURAK = ((0.0, 0.0), (0.45, 0.0), (0.88, 0.95), (1.0, 0.30))
@@ -2240,7 +2240,8 @@ class MainWindow(QMainWindow):
         self.pan_aci = 0.0            # azimut, 0-360 (EKRAN icin sarmali)
         self.pan_ham = 0.0
         self.tilt_aci = 0.0           # operator acisi, -30..+30; 0 yatay
-        self.max_tilt_limit = 30.0 if P.TILT_MAX >= 30 else float(P.TILT_MAX)
+        self.max_tilt_limit = (B.TILT_CALISMA_MAX if P.TILT_MAX >= B.TILT_CALISMA_MAX
+                               else float(P.TILT_MAX))
         self.aci_adim = 1.0           # tek dokunus = 1° (sabit; arayuzde secim yok — 22.09)
 
         # Harekete / atisa IZINLI pencereler (disi yasak). Birimler ve kurallar:
@@ -2777,7 +2778,7 @@ class MainWindow(QMainWindow):
     YORUNGE_UFUK_S = 0.2
 
     def tilt_taban_deg(self):
-        return TS.ACI_MIN if getattr(self.kontrol, "tilt_ayri", False) else 0.0
+        return B.TILT_CALISMA_MIN if getattr(self.kontrol, "tilt_ayri", False) else 0.0
 
     def _acilis_hizala(self):
         k = getattr(self, "kontrol", None)
@@ -2792,6 +2793,18 @@ class MainWindow(QMainWindow):
         if not self._acilis_yukselisi and k.tilt_ayri:
             self._acilis_yukselisi = True
             self._acilis_yukselisi_bekliyor = True
+
+    def _acilis_yukselisini_dene(self):
+        """Kart acilinca ilk STATE3 kilitli gelebilir; hazir olmadan denemeyi tuketme."""
+        if not self._acilis_yukselisi_bekliyor:
+            return
+        if self._hareket_kilitli() or not self.kontrol.tilt.hazir:
+            return
+        if abs(self.tilt_aci) <= 0.2:
+            self._acilis_yukselisi_bekliyor = False
+            return
+        if self._aci_hareket(0.0, -self.tilt_aci):
+            self._acilis_yukselisi_bekliyor = False
 
     def _aci_hareket(self, d_pan, d_tilt, taban_olculen=False, hiz=None):
         """Tek hareket kapisi: geri bildirim, mekanik limit, izinli pencere, E-Stop."""
@@ -2965,7 +2978,7 @@ class MainWindow(QMainWindow):
             pr = self._pan_takip.yorunge_komut(simdi, k.pan_olculen, -sinir, sinir,
                                                hata_px=ex, olu_px=olu_x)
             tr = self._tilt_takip.yorunge_komut(
-                simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(TS.ACI_MIN),
+                simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(B.TILT_CALISMA_MIN),
                 TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y)
             if pr is None and tr is None:
                 return
@@ -2974,7 +2987,7 @@ class MainWindow(QMainWindow):
                 d_pan, pan_v = pr[0] - self.pan_ham, pr[1]
             if tr is not None:
                 # kamera acisi -> kol acisi; hiz yerel egimle (kol-biyel dogrusal degil)
-                kol = max(TS.ACI_MIN, min(ust, TS.kol_acisi(tr[0])))
+                kol = max(B.TILT_CALISMA_MIN, min(ust, TS.kol_acisi(tr[0])))
                 egim = (TS.kamera_acisi(kol + 0.05) - TS.kamera_acisi(kol - 0.05)) / 0.1
                 d_tilt, tilt_v = kol - self.tilt_aci, tr[1] / max(1e-3, egim)
             if self._aci_hareket(d_pan or 0.0, d_tilt or 0.0, hiz=(pan_v, tilt_v)):
@@ -2984,10 +2997,10 @@ class MainWindow(QMainWindow):
                                       hata_px=ex, olu_px=olu_x)
         ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 18.0)))
         tilt_k = TS.kol_acisi(self._tilt_takip.komut(
-            simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(TS.ACI_MIN), TS.kamera_acisi(ust),
+            simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(B.TILT_CALISMA_MIN), TS.kamera_acisi(ust),
             hata_px=ey, olu_px=olu_y))
         if tilt_k is not None:
-            tilt_k = max(TS.ACI_MIN, min(ust, tilt_k))
+            tilt_k = max(B.TILT_CALISMA_MIN, min(ust, tilt_k))
         if pan_k is None and tilt_k is None:
             return
         d_pan = 0.0 if pan_k is None else pan_k - self.pan_ham
@@ -3038,7 +3051,7 @@ class MainWindow(QMainWindow):
         # Kutularin araligi YAPISAL sinirdir: yataya 100 yazilamaz (namlu on yarinin
         # disina cikamaz, B.PAN_MAX), dikeye 40 yazilamaz. Operator yalniz DARALTIR.
         for satir, (eksen, ad, sinir) in enumerate(
-                (("pan", "Yatay", int(B.PAN_MAX)), ("tilt", "Dikey", int(B.TILT_ARALIK / 2)))):
+                (("pan", "Yatay", int(B.PAN_MAX)), ("tilt", "Dikey", int(B.TILT_CALISMA_MAX)))):
             p = getattr(self.bolge, f"{tur}_{eksen}")
             lbl = QLabel(ad)
             lbl.setObjectName("ayarlbl")
@@ -3613,6 +3626,8 @@ class MainWindow(QMainWindow):
         self.estop_btn.setText("▶ DEVAM ET" if aktif else "⏻ ACİL DURDUR")
         # 1. ATES kapisi (Yetenek 4) — kesme islemi tek yoldan (_ates_kes) gecer.
         if aktif:
+            # DEVAM'da gecikmis bir acilis hareketi kendiliginden baslamasin.
+            self._acilis_yukselisi_bekliyor = False
             self._ates_kes("ACİL DURDUR")
         self.fire_btn.setEnabled(not aktif)
         # 2. HAREKET kapisi (Yetenek 3): manuel yon kontrolleri kilitlenir.
@@ -3772,12 +3787,9 @@ class MainWindow(QMainWindow):
         # BEKLEYEMEZ: kart konumunu bildirir bildirmez arayuz ona uymali, cunku
         # acilis yukselisi de o degerden hesaplanir.
         self._acilis_hizala()
-        if getattr(self, "_acilis_yukselisi_bekliyor", False):
-            self._acilis_yukselisi_bekliyor = False
-            # Namlu calisma araliginin ORTASINA (operator 0). Bir kez denenir;
-            # E-Stop gibi bir sebeple gecmezse operator MERKEZ dugmesine basar.
-            if abs(self.tilt_aci) > 0.2:
-                self._aci_hareket(0.0, -self.tilt_aci)
+        # Namlu calisma araliginin ORTASINA (operator 0). Ilk STATE3 kart kilitliyken
+        # gelebilir; deneme ancak kart hazir oldugunda tuketilir.
+        self._acilis_yukselisini_dene()
 
         # FIRMWARE GUNCEL MI? Kart acilista kendi TILT_MAX'ini yazar; bizimkiyle
         # uyusmuyorsa firmware yuklenmemis demektir ve gimbal ESKI limitte takilir

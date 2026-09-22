@@ -64,16 +64,23 @@ def pencere():
 
 
 def test_hareket_ve_ates(w):
+    assert w.max_tilt_limit == 25.0
+    assert (w.bolge.hareket_pan.alt, w.bolge.hareket_pan.ust) == (-60.0, 60.0)
+    assert (w.bolge.hareket_tilt.alt, w.bolge.hareket_tilt.ust) == (-25.0, 25.0)
+    assert all((spin.minimum(), spin.maximum()) == (-60, 60)
+               for spin in w.bolge_spin[("hareket", "pan")])
+    assert all((spin.minimum(), spin.maximum()) == (-25, 25)
+               for spin in w.bolge_spin[("hareket", "tilt")])
     assert w._aci_hareket(15, -30)
-    assert (w.pan_ham, w.tilt_aci) == (15.0, -30.0)
-    assert (w.kontrol.pan_hedef, w.kontrol.tilt_hedef) == (15.0, -30.0)
+    assert (w.pan_ham, w.tilt_aci) == (15.0, -25.0)
+    assert (w.kontrol.pan_hedef, w.kontrol.tilt_hedef) == (15.0, -25.0)
     assert w._aci_hareket(100, -10)
-    assert (w.pan_ham, w.tilt_aci) == (90.0, -30.0)
-    assert w._aci_hareket(-90, 60)
-    assert (w.pan_ham, w.tilt_aci) == (0.0, 30.0)
+    assert (w.pan_ham, w.tilt_aci) == (60.0, -25.0)
+    assert w._aci_hareket(-60, 60)
+    assert (w.pan_ham, w.tilt_aci) == (0.0, 25.0)
 
     w.bolge.hareket_tilt = B.Pencere(True, -10, 10)
-    assert w._aci_hareket(0, -30)
+    assert w._aci_hareket(0, -25)
     assert w.tilt_aci == 0.0
     w.bolge.atis_tilt = B.Pencere(True, -5, 5)
     w.fire_btn.setChecked(True)
@@ -95,6 +102,21 @@ def test_kart_kilidi_ve_hizalama(w):
     assert w._acilis_yukselisi_bekliyor
     assert w._aci_hareket(0, 30)
     assert w.tilt_aci == 0.0
+
+
+def test_acilis_yukselisi_kart_hazir_olana_kadar_bekler(w):
+    w._acilis_yukselisi = False
+    w._acilis_yukselisi_bekliyor = False
+    w.kontrol.tilt.hazir = False
+    w.kontrol.acilis_hizalama = (0.0, -30.0)
+    w._acilis_hizala()
+    w._acilis_yukselisini_dene()
+    assert w._acilis_yukselisi_bekliyor
+    assert w.kontrol.tilt_hedef == 0.0 and w.tilt_aci == -30.0
+    w.kontrol.tilt.hazir = True
+    w._acilis_yukselisini_dene()
+    assert not w._acilis_yukselisi_bekliyor
+    assert w.tilt_aci == w.kontrol.tilt_hedef == 0.0
 
 
 def test_tip_secimi(w):
@@ -124,6 +146,7 @@ if __name__ == "__main__":
     try:
         test_hareket_ve_ates(win)
         test_kart_kilidi_ve_hizalama(win)
+        test_acilis_yukselisi_kart_hazir_olana_kadar_bekler(win)
         test_tip_secimi(win)
         test_kare_arayuze_ulasir(win)
         print("Birlesik arayuz kapi testleri OK")
