@@ -2496,10 +2496,13 @@ class MainWindow(QMainWindow):
     GP_TARAMA_TIK = 40      # cihaz yokken kac tikta bir yeniden taransin (~2 sn)
 
     def _gamepad_durum_yaz(self):
+        """Alt cubuk: kol BAGLI ise YESIL nokta + cihaz adi, degilse KIRMIZI nokta.
+        Soluk gri kullanilmaz — "yok" ile "bakmadim" ayni gorunurdu; operator tek
+        bakista kolun hazir olup olmadigini bilmeli (video cekiminde de oyle)."""
         if self.gamepad.bagli:
             self._ci("Gamepad", GRN, f"· {self.gamepad.ad[:26]}")
         else:
-            self._ci("Gamepad", BD2, "· yok")
+            self._ci("Gamepad", RED, "· bağlı değil")
 
     def _gamepad_tik(self):
         """Gamepad'i yoklar ve komutlari MEVCUT KAPILARDAN gecirir.
