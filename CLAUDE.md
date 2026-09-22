@@ -1117,6 +1117,9 @@ ayar kutularına ±90'dan büyük değer **yazılamaz**. Pan sarmasız hesapland
 arkadan dolanmak da mümkün değildir. Açı karosunda **yalnız ön yarı boyanır** — arka yarı
 erişilemez olduğu için orayı sarıya boyamak "yasak alan" değil "olmayan alan" gösterirdi.
 Kapı testi: `test_yatay_on_yariyi_gecemez`.
+**Hazır ayarlar (22.09):** pencereler KAPALI gelir ama kutular dolu: hareket yatay ±90 /
+dikey ±30, **atış yatay ±30 / dikey ±15** — ateş alanı hareket alanından DAR başlar
+(gidilebilen her yere ateş izni vermek güvenli taraf değildir).
 Dikey: fiziksel −30…+30 girilir, panel ekrandaki karşılığını (0…60) yanında gösterir.
 Ayrı "Maksimum Yükseliş" kaydırıcısı kaldırıldı (hareket penceresi o işi görür).
 

@@ -62,10 +62,17 @@ class Pencere:
 
 @dataclass
 class Bolgeler:
-    hareket_pan: Pencere = field(default_factory=lambda: Pencere(False, -90.0, 90.0))
+    """Hazır ayarlar (takım kararı 22.09): pencereler KAPALI gelir ama kutular
+    makul değerlerle dolu olur — operatör anahtarı açınca hemen kullanılabilir bir
+    aralık bulur, sıfırdan sayı girmesi gerekmez.
+
+    * hareket: yatay ±90 (yapısal tavan, bkz. PAN_MAX) · dikey ±30 (mekanik tavan)
+    * atış   : yatay ±30 · dikey ±15 — ateş alanı hareket alanından DAR başlar;
+      güvenli taraf budur (gidilebilen her yere ateş izni vermek değil)."""
+    hareket_pan: Pencere = field(default_factory=lambda: Pencere(False, -PAN_MAX, PAN_MAX))
     hareket_tilt: Pencere = field(default_factory=lambda: Pencere(False, -30.0, 30.0))
-    atis_pan: Pencere = field(default_factory=lambda: Pencere(False, -90.0, 90.0))
-    atis_tilt: Pencere = field(default_factory=lambda: Pencere(False, -30.0, 30.0))
+    atis_pan: Pencere = field(default_factory=lambda: Pencere(False, -30.0, 30.0))
+    atis_tilt: Pencere = field(default_factory=lambda: Pencere(False, -15.0, 15.0))
 
 
 # durum kodları (arayüz şeridi bunlara göre renk/metin seçer)
@@ -176,6 +183,18 @@ if __name__ == "__main__":
     assert pan_hareket(-40.0, -20.0, p) == (-45.0, KIRPILDI)
     ham, d = pan_hareket(360.0 + 40.0, 20.0, p)                # tam tur sonrası da aynı
     assert (ham, d) == (405.0, KIRPILDI), (ham, d)
+
+    # hazır ayarlar: pencereler kapalı ama kutular dolu gelir (22.09)
+    v = Bolgeler()
+    assert not any(p.aktif for p in (v.hareket_pan, v.hareket_tilt,
+                                     v.atis_pan, v.atis_tilt)), "pencereler kapali gelmeli"
+    assert (v.hareket_pan.alt, v.hareket_pan.ust) == (-PAN_MAX, PAN_MAX)
+    assert (v.hareket_tilt.alt, v.hareket_tilt.ust) == (-30.0, 30.0)
+    assert (v.atis_pan.alt, v.atis_pan.ust) == (-30.0, 30.0)
+    assert (v.atis_tilt.alt, v.atis_tilt.ust) == (-15.0, 15.0)
+    # atis alani hareket alanindan DAR baslamali (harmanlama sonrasi da bozulmamali)
+    atis_uyumla(v)
+    assert (v.atis_pan.alt, v.atis_pan.ust) == (-30.0, 30.0)
 
     # atış: iki eksen birlikte
     b = Bolgeler()
