@@ -231,16 +231,37 @@ def test_ekran_aci_kart_hedefi_ayni():
 
 
 def test_azimut_sarmasiz_gider():
-    """Ekranda azimut 0-360 sarmalidir ama karta SUREKLI aci gitmeli.
+    """Ekranda azimut 0-360 sarmalidir ama karta SUREKLI (isaretli) aci gitmeli.
 
-    350°'den 10°'ye gecerken "P370" denmezse motor kisa yoldan gitmez, 340° geri
-    doner (AccelStepper mutlak konuma gider)."""
+    Sola 30° donulunce ekran 330 yazar, kart −30 hedefi alir. Kart da 330 alsaydi
+    motor kisa yoldan degil 330° geri donerdi (AccelStepper mutlak konuma gider)."""
     w = SahtePencere()
-    w._aci_hareket(350.0, 0.0)
-    assert w.pan_aci == 350.0 and w.kontrol.mock.pan_hedef == 350.0
-    w._aci_hareket(20.0, 0.0)                 # sarma noktasi
-    assert w.pan_aci == 10.0, w.pan_aci                       # EKRAN sarmali
-    assert w.kontrol.mock.pan_hedef == 370.0, w.kontrol.mock.pan_hedef   # KART surekli
+    w._aci_hareket(-30.0, 0.0)
+    assert w.pan_aci == 330.0, w.pan_aci                      # EKRAN sarmali
+    assert w.kontrol.mock.pan_hedef == -30.0, w.kontrol.mock.pan_hedef   # KART isaretli
+    w._aci_hareket(60.0, 0.0)
+    assert w.pan_aci == 30.0 and w.kontrol.mock.pan_hedef == 30.0
+
+
+def test_yatay_on_yariyi_gecemez():
+    """[KESİN] Namlu ÖN YARIDAN çıkamaz: ±90°. Operatör aracın arkasında durur,
+    namlu onun eksenine asla giremez (şartname §4.2). Bu bir operatör tercihi
+    DEĞİL yapısal sınırdır — hareket penceresi KAPALI olsa da uygulanır ve
+    pencere onu yalnızca DARALTABİLİR."""
+    w = SahtePencere()
+    assert not w.bolge.hareket_pan.aktif, "varsayilan pencere kapali olmali"
+    w._aci_hareket(120.0, 0.0)                 # 120° istendi
+    assert w.pan_ham == 90.0 and w.kontrol.mock.pan_hedef == 90.0, w.pan_ham
+    w._aci_hareket(30.0, 0.0)                  # sinirda: daha ileri YOK
+    assert w.pan_ham == 90.0
+    w._aci_hareket(-200.0, 0.0)                # diger uca: yine sinirda durur
+    assert w.pan_ham == -90.0 and w.kontrol.mock.pan_hedef == -90.0, w.pan_ham
+    assert w.pan_aci == 270.0, w.pan_aci       # ekranda 270 (=-90)
+
+    # Pencere yalniz daraltir: ±45 verilince ±45'te durulur
+    w.bolge.hareket_pan = B.Pencere(True, -45.0, 45.0)
+    w._aci_hareket(200.0, 0.0)
+    assert w.pan_ham == 45.0, w.pan_ham
 
 
 def test_ates_sirasinda_yasak_alan():
@@ -266,13 +287,13 @@ def test_harekete_yasak_alan():
     """Hareket penceresinin DISINA cikilamaz: komut sinirda KIRPILIR, kart hedefi
     de ayni sinirda kalir (sartname §4.2 — yasak bolgeye donmesine izin verilmez)."""
     w = SahtePencere()
-    w.bolge.hareket_pan = B.Pencere(True, -90.0, 90.0)
-    assert w._aci_hareket(80.0, 0.0) is True and w.pan_aci == 80.0
-    w._aci_hareket(20.0, 0.0)                              # 100'e gitmek isterdi
-    assert w.pan_ham == 90.0 and w.kontrol.pan_hedef == 90.0, (w.pan_ham, w.kontrol.pan_hedef)
+    w.bolge.hareket_pan = B.Pencere(True, -60.0, 60.0)
+    assert w._aci_hareket(50.0, 0.0) is True and w.pan_aci == 50.0
+    w._aci_hareket(20.0, 0.0)                              # 70'e gitmek isterdi
+    assert w.pan_ham == 60.0 and w.kontrol.pan_hedef == 60.0, (w.pan_ham, w.kontrol.pan_hedef)
     # sinirda: daha ileri gitmek ENGELLENIR, geri donmek serbest
-    assert w._aci_hareket(5.0, 0.0) is False and w.pan_ham == 90.0
-    assert w._aci_hareket(-10.0, 0.0) is True and w.pan_ham == 80.0
+    assert w._aci_hareket(5.0, 0.0) is False and w.pan_ham == 60.0
+    assert w._aci_hareket(-10.0, 0.0) is True and w.pan_ham == 50.0
 
 
 def test_estop_hareketi_keser():
@@ -406,26 +427,26 @@ def test_estopta_iki_eksen_de_oldugu_yerde_donar():
     (90'a giderken 45'te E-Stop) laptop'un hedefi gerçekten ayrışır — bildirilmezse
     ekrandaki açı gerçek konumu göstermezdi."""
     w = SahtePencere()
-    w._aci_hareket(120.0, 90.0)                      # hedef: pan 120, tilt 90
+    w._aci_hareket(60.0, 90.0)                      # hedef: pan 60, tilt 90
     # Motor hedefe VARMADAN durduruluyor: gerçek konum 45'te.
-    w.kontrol.mock.pan, w.kontrol.mock.tilt = 120.0, 45.0
+    w.kontrol.mock.pan, w.kontrol.mock.tilt = 60.0, 45.0
 
     w.kontrol.estop(True)
     w._estop_konum_uygula()                          # arayüz tarafı (_estop_bas yolu)
 
     # Kart: iki eksenin de hedefi konumuna çekildi
-    assert w.kontrol.mock.pan_hedef == 120.0
+    assert w.kontrol.mock.pan_hedef == 60.0
     assert w.kontrol.mock.tilt_hedef == 45.0, "tilt olduğu yerde donmadı"
     # Ekran: kartın bildirdiği GERÇEK konumu gösterir (90 değil, 45)
-    assert w.pan_aci == 120.0 and w.pan_ham == 120.0
+    assert w.pan_aci == 60.0 and w.pan_ham == 60.0
     assert w.tilt_aci == 45.0, (w.tilt_aci, "ekran gerçek konuma çekilmedi")
-    assert w.kontrol.pan_hedef == 120.0 and w.kontrol.tilt_hedef == 45.0
+    assert w.kontrol.pan_hedef == 60.0 and w.kontrol.tilt_hedef == 45.0
 
     # Zamanı ilerlet: HİÇBİR eksen hareket etmemeli.
     for _ in range(20):
         w.kontrol.mock._son_t -= 0.25
         w.kontrol.mock.islet("")
-    assert w.kontrol.mock.pan == 120.0, "acil durdurmada pan hareket etti"
+    assert w.kontrol.mock.pan == 60.0, "acil durdurmada pan hareket etti"
     assert w.kontrol.mock.tilt == 45.0, "acil durdurmada tilt hareket etti"
 
 
@@ -436,17 +457,17 @@ def test_devam_edince_referans_korunur():
     mil kayıyordu). ENABLE artık hiç kesilmediğine göre sıfırlamak, her acil durdurmada
     mutlak açıları kaydırmak demek olurdu."""
     w = SahtePencere()
-    w._aci_hareket(120.0, 30.0)
-    w.kontrol.mock.pan, w.kontrol.mock.tilt = 120.0, 30.0
+    w._aci_hareket(60.0, 30.0)
+    w.kontrol.mock.pan, w.kontrol.mock.tilt = 60.0, 30.0
     w.kontrol.estop(True)
     w._estop_konum_uygula()
 
     w.kontrol.estop(False)
-    assert (w.pan_aci, w.tilt_aci) == (120.0, 30.0), "DEVAM'da ekran açısı sıfırlandı"
-    assert w.pan_ham == 120.0
-    assert (w.kontrol.mock.pan, w.kontrol.mock.tilt) == (120.0, 30.0), \
+    assert (w.pan_aci, w.tilt_aci) == (60.0, 30.0), "DEVAM'da ekran açısı sıfırlandı"
+    assert w.pan_ham == 60.0
+    assert (w.kontrol.mock.pan, w.kontrol.mock.tilt) == (60.0, 30.0), \
         "DEVAM'da kartın referansı sıfırlandı"
-    assert w.kontrol.pan_hedef == 120.0 and w.kontrol.tilt_hedef == 30.0
+    assert w.kontrol.pan_hedef == 60.0 and w.kontrol.tilt_hedef == 30.0
 
     # Durulan noktadan hareket normal sürer (referans kaymadığı için sıçrama yok).
     w._aci_hareket(0.0, 10.0)
@@ -564,12 +585,15 @@ def test_aci_karosu_yasak_alan_dilimleri():
         return cls.dilimler(o)
     yon = A.AracYonGostergesi
     assert dilimler(yon, (False, -90, 90), (False, -90, 90)) == []
-    assert dilimler(yon, (True, -120, 120), (True, -60, 45)) == [
-        ("hareket", -180.0, -120), ("hareket", 120, 180.0),
-        ("atis", -120, -60), ("atis", 45, 120), ("izin", -60, 45)]
+    # Yatayda eksen YALNIZ on yaridir (±90): arka yari yapisal olarak erisilemez,
+    # orayi boyamak "yasak alan" degil "olmayan alan" gosterirdi.
+    assert yon.ARALIK == (-B.PAN_MAX, B.PAN_MAX)
+    assert dilimler(yon, (True, -70, 70), (True, -40, 30)) == [
+        ("hareket", -90.0, -70), ("hareket", 70, 90.0),
+        ("atis", -70, -40), ("atis", 30, 70), ("izin", -40, 30)]
     # yalniz atis acik: hareket penceresi tum eksen sayilir
     assert dilimler(yon, (False, 0, 0), (True, -45, 45)) == [
-        ("atis", -180.0, -45), ("atis", 45, 180.0), ("izin", -45, 45)]
+        ("atis", -90.0, -45), ("atis", 45, 90.0), ("izin", -45, 45)]
     # dikey: yalniz mekanik aralik (-30..+30) boyanir
     assert dilimler(A.AracAciGostergesi, (True, -20, 25), (False, 0, 0)) == [
         ("hareket", -30.0, -20), ("hareket", 25, 30.0)]
@@ -891,6 +915,7 @@ def test_odunc_kapilar_gercek_pencerede_de_metot():
 if __name__ == "__main__":
     test_ekran_aci_kart_hedefi_ayni()
     test_azimut_sarmasiz_gider()
+    test_yatay_on_yariyi_gecemez()
     test_ates_sirasinda_yasak_alan()
     test_harekete_yasak_alan()
     test_estop_hareketi_keser()

@@ -177,6 +177,10 @@ yoktur; kaza ile lazer açılmasın diye. E-Stop'ta veya atışa yasak bölgede 
 Manuel paneldeki kol resminde basılan tuş yanar; aynı resim klavye ve ekrandaki D-pad ile
 verilen komutları da gösterir. Kol yoksa özellik sessizce kapalıdır.
 
+**Hareket sınırı:** namlu yatayda **±90°** ile sınırlıdır (ön yarı) — operatör aracın
+arkasında durduğu için bu yapısal bir güvenlik sınırıdır, kapatılamaz; yasak alan ayarı onu
+yalnızca daraltabilir. Dikeyde mekanik aralık 60° (fiziksel −30…+30).
+
 **Lazer gücü:** arayüzdeki *LAZER* kartından ayarlanır (hem Manuel hem Otonom modda) —
 kaydırıcı %0–100 veya hızlı kademeler (%20/%40/%70/%100). Varsayılan **%40**; tam güç
 kullanılmıyor. Güç ile ateş ayrı şeylerdir: kart `G<yüzde>` ile "ne kadar"ı, ATEŞ butonu

@@ -1107,8 +1107,16 @@ kamera varsa açılır; yoksa "Kamera bulunamadı"; sonradan takılınca kendili
 aralığı değil **izin verilen pencereyi** yazar, dışı yasaktır. Her eksende iki pencere:
 hareket (dışına çıkılamaz, sınırda **kırpılır** — eskiden komut komple reddediliyordu)
 ve atış (yalnız içinde ateş; dışına çıkılınca ateş kesilir). Atış penceresi hareket
-penceresinin dışına taşamaz (**"harmanlama"**, `atis_uyumla`). Yatay: ön = 0°, ±180,
-fiziksel sınır yok ama pencere varken **arkadan dolanılamaz** (pan sarmasız hesaplanır).
+penceresinin dışına taşamaz (**"harmanlama"**, `atis_uyumla`).
+**[KESİN — takım kararı 22.09] Yatayda YAPISAL SINIR ±90° (`bolge.PAN_MAX`):** ön = 0°,
+namlu **ön yarıdan çıkamaz** — operatör aracın arkasında durur, namlunun onun eksenine
+girmesi kabul edilemez (şartname §4.2 "sadece hedeflerin olduğu tarafa bakabilme").
+Bu bir operatör tercihi DEĞİL, tilt'teki 60° gibi yapısal sınırdır: hareket penceresi
+**kapalı olsa da** uygulanır (sessizce kırpılır), pencere onu yalnızca **daraltabilir**;
+ayar kutularına ±90'dan büyük değer **yazılamaz**. Pan sarmasız hesaplandığı için
+arkadan dolanmak da mümkün değildir. Açı karosunda **yalnız ön yarı boyanır** — arka yarı
+erişilemez olduğu için orayı sarıya boyamak "yasak alan" değil "olmayan alan" gösterirdi.
+Kapı testi: `test_yatay_on_yariyi_gecemez`.
 Dikey: fiziksel −30…+30 girilir, panel ekrandaki karşılığını (0…60) yanında gösterir.
 Ayrı "Maksimum Yükseliş" kaydırıcısı kaldırıldı (hareket penceresi o işi görür).
 

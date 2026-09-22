@@ -240,6 +240,7 @@ class _AciKarosu(QWidget):
     # Operator acisi (yatayda on=0 saga +, dikeyde yere paralel=0 yukari +) -> Qt
     # acisi (3 yonu = 0, saat YONUNUN TERSI +). Alt siniflar tanimlar.
     ARALIK = (-180.0, 180.0)                 # eksenin tum araligi (operator acisi)
+
     DILIM_RENK = {"hareket": T.SARI, "atis": T.KIRMIZI, "izin": T.YESIL}
     DILIM_ALFA = {"hareket": 0.15, "atis": 0.15, "izin": 0.07}
     # Dolgunun yaricap boyunca alfa carpani. Iki karoda da renk ARACIN CEVRESINDE
@@ -459,6 +460,10 @@ class AracYonGostergesi(_AciKarosu):
     # Tam daire: renk arac siluetinin cevresinde bir hale olarak durur; taban
     # rampasi biraz daha guclu, cunku alan genis ve renk her iki uca soner.
     DILIM_ALFA = {"hareket": 0.19, "atis": 0.19, "izin": 0.09}
+
+    # Yalniz GIDILEBILEN yari boyanir: arka yari yapisal olarak erisilemez
+    # (B.PAN_MAX), orayi sariya boyamak "yasak alan" degil "olmayan alan" gosterirdi.
+    ARALIK = (-B.PAN_MAX, B.PAN_MAX)
 
     def qt_aci(self, a):
         return 90.0 - a                       # on = yukari, + = saat yonu
@@ -2772,7 +2777,10 @@ class MainWindow(QMainWindow):
         izgara = QGridLayout()
         izgara.setHorizontalSpacing(8)
         izgara.setVerticalSpacing(8)
-        for satir, (eksen, ad, sinir) in enumerate((("pan", "Yatay", 180), ("tilt", "Dikey", 30))):
+        # Kutularin araligi YAPISAL sinirdir: yataya 100 yazilamaz (namlu on yarinin
+        # disina cikamaz, B.PAN_MAX), dikeye 40 yazilamaz. Operator yalniz DARALTIR.
+        for satir, (eksen, ad, sinir) in enumerate(
+                (("pan", "Yatay", int(B.PAN_MAX)), ("tilt", "Dikey", int(B.TILT_ARALIK / 2)))):
             p = getattr(self.bolge, f"{tur}_{eksen}")
             lbl = QLabel(ad)
             lbl.setObjectName("ayarlbl")
