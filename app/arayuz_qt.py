@@ -23,7 +23,8 @@ import cv2
 from ultralytics import YOLO
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect, QPointF
-from PySide6.QtGui import QImage, QPixmap, QFont, QColor, QPainter, QPen, QLinearGradient, QRadialGradient
+from PySide6.QtGui import (QImage, QPixmap, QFont, QColor, QPainter, QPen, QLinearGradient,
+                           QRadialGradient, QPainterPath)
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
@@ -154,6 +155,8 @@ class _AciKarosu(QWidget):
         super().__init__(parent)
         self.aci = 0.0
         self.lazer_acik = False        # isik YALNIZ gercek lazer acikken cizilir
+        self.hareket = None            # bu eksenin bolge.Pencere'leri (yasak alan dilimleri)
+        self.atis = None
         self.deger = QLabel("0.0°", self)
         self.deger.setObjectName("turn")
         self.deger.setAlignment(Qt.AlignCenter)
@@ -223,8 +226,98 @@ class _AciKarosu(QWidget):
         p.drawEllipse(uc, r, r)
         p.restore()
 
+    def bolge_ayarla(self, hareket, atis):
+        """Bu eksenin yasak alan pencereleri (bolge.Pencere; KOPYA saklanir ki
+        kaydedilmemis duzenleme ekrana yansimasin)."""
+        kopya = lambda w: (w.aktif, w.alt, w.ust)
+        yeni = (kopya(hareket), kopya(atis))
+        if yeni != (self.hareket, self.atis):
+            self.hareket, self.atis = yeni
+            self.update()
+
+    # --- yasak alan dilimleri -------------------------------------------------
+    # Operator acisi (yatayda on=0 saga +, dikeyde yere paralel=0 yukari +) -> Qt
+    # acisi (3 yonu = 0, saat YONUNUN TERSI +). Alt siniflar tanimlar.
+    ARALIK = (-180.0, 180.0)                 # eksenin tum araligi (operator acisi)
+    DILIM_RENK = {"hareket": T.SARI, "atis": T.KIRMIZI, "izin": T.YESIL}
+    DILIM_ALFA = {"hareket": 0.26, "atis": 0.26, "izin": 0.13}
+
+    def qt_aci(self, a):
+        raise NotImplementedError
+
+    def dilim_merkezi(self):
+        """(merkez, dis yaricap, ic yaricap) — karo koordinatinda. Ic yaricap 0 ise
+        dilim tam pasta; degilse yalniz halka bandi. Alt siniflar tanimlar."""
+        raise NotImplementedError
+
+    def dilimler(self):
+        """[(tur, alt, ust)] — cizilecek renkli dilimler (operator acisi).
+        Harekete yasak = hareket penceresinin disi (sari); atisa yasak = hareket
+        penceresinin ICINDE kalan ama atis penceresinin disi (kirmizi); atis izni =
+        atis penceresi (soluk yesil). Atis penceresi hareket penceresinin disina
+        tasamadigi (bolge.atis_uyumla) icin dilimler ust uste binmez."""
+        if self.hareket is None:
+            return []
+        lo, hi = self.ARALIK
+        h_aktif, h0, h1 = self.hareket
+        a_aktif, a0, a1 = self.atis
+        if not h_aktif:
+            h0, h1 = lo, hi
+        out = []
+        if h_aktif:
+            out += [("hareket", lo, h0), ("hareket", h1, hi)]
+        if a_aktif:
+            a0, a1 = max(a0, h0), min(a1, h1)
+            out += [("atis", h0, a0), ("atis", a1, h1), ("izin", a0, a1)]
+        return [(t, x, y) for t, x, y in out if y - x > 0.05]
+
+    def bolge_ciz(self, p):
+        dilimler = self.dilimler()
+        if not dilimler:
+            return
+        merkez, r, r_ic = self.dilim_merkezi()
+        kutu = QRectF(merkez.x() - r, merkez.y() - r, 2 * r, 2 * r)
+        ic_kutu = QRectF(merkez.x() - r_ic, merkez.y() - r_ic, 2 * r_ic, 2 * r_ic)
+        bas = r_ic / r if r > 0 else 0.0
+        p.save()
+        p.setRenderHint(QPainter.Antialiasing)
+        for tur, x, y in dilimler:
+            renk, alfa = QColor(self.DILIM_RENK[tur]), self.DILIM_ALFA[tur]
+            if r_ic > 0:                                # halka bandi
+                yol = QPainterPath()
+                yol.arcMoveTo(kutu, self.qt_aci(y))
+                yol.arcTo(kutu, self.qt_aci(y), y - x)
+                yol.arcTo(ic_kutu, self.qt_aci(x), -(y - x))
+                yol.closeSubpath()
+            else:                                       # tam pasta dilimi
+                yol = QPainterPath(merkez)
+                yol.arcTo(kutu, self.qt_aci(y), y - x)  # qt_aci azalan: y'den x'e CCW
+                yol.closeSubpath()
+            # Merkeze dogru sonen dolgu: arac okunur kalir, renk kenarda belirginlesir.
+            g = QRadialGradient(merkez, r)
+            duraklar = (((0.0, 0.0), (bas, 0.5), (1.0, 1.0)) if r_ic > 0
+                        else ((0.0, 0.0), (0.35, 0.15), (1.0, 1.0)))
+            for konum, carpan in duraklar:
+                c = QColor(renk)
+                c.setAlphaF(alfa * carpan)
+                g.setColorAt(konum, c)
+            p.setPen(Qt.NoPen)
+            p.setBrush(g)
+            p.drawPath(yol)
+            # dis yay: dilimin sinirini netlestiren ince cizgi
+            c = QColor(renk)
+            c.setAlphaF(min(1.0, alfa * 2.6))
+            kalem = QPen(c, 2)
+            kalem.setCapStyle(Qt.FlatCap)
+            p.setPen(kalem)
+            p.setBrush(Qt.NoBrush)
+            ic = kutu.adjusted(1, 1, -1, -1)
+            p.drawArc(ic, int(self.qt_aci(y) * 16), int((y - x) * 16))
+        p.restore()
+
     def paintEvent(self, e):
         p = QPainter(self)
+        self.bolge_ciz(p)                      # dilimler aracin ARKASINDA
         uc, yon = self.ciz(p, self.resim_alani(), self.aci)
         if self.lazer_acik:
             self.lazer_ciz(p, uc, yon, self.width() * self.ISIK_BOY)
@@ -282,8 +375,30 @@ class AracAciGostergesi(_AciKarosu):
                 ys.append(py + kx * sin(a) + ky * cos(a))
         return QRectF(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 
+    ARALIK = (FIZIKSEL_ALT, FIZIKSEL_ALT + MEKANIK_ARALIK)   # fiziksel −30..+30
+
     def ciz(self, p, hedef, aci):
         return self.ciz_saf(p, hedef, self._govde, self._namlu, aci)
+
+    def qt_aci(self, a):
+        return 180.0 - a                      # namlu SOLA bakar; + = yukari
+
+    def dilim_merkezi(self):
+        """Namlunun donme ekseni (ciz_saf ile ayni donusum) + namlu boyunca yaricap."""
+        hedef = self.resim_alani()
+        if self._govde.isNull() or self._namlu.isNull():
+            return hedef.center(), min(hedef.width(), hedef.height()) / 2
+        kutu = self.sahne_kutusu((self._govde.width(), self._govde.height()),
+                                 (self._namlu.width(), self._namlu.height()))
+        olcek = min(hedef.width() / kutu.width(), hedef.height() / kutu.height())
+        ox = hedef.x() + (hedef.width() - kutu.width() * olcek) / 2
+        oy = hedef.y() + (hedef.height() - kutu.height() * olcek) / 2
+        merkez = QPointF(ox + (self.GOVDE_PIVOT[0] - kutu.x()) * olcek,
+                         oy + (self.GOVDE_PIVOT[1] - kutu.y()) * olcek)
+        # Dilim namlu AGZININ OTESINDE bir halka bandi: pasta olsaydi namlu ve govdenin
+        # arkasinda kalip gorunmezdi (denendi).
+        namlu = (self.NAMLU_PIVOT[0] - self.NAMLU_AGZI[0]) * olcek
+        return merkez, min(namlu * 1.32, merkez.x() - 4), namlu * 1.02
 
     @classmethod
     def ciz_saf(cls, p, hedef, govde, namlu, aci):
@@ -351,6 +466,16 @@ class AracYonGostergesi(_AciKarosu):
 
     def ciz(self, p, hedef, aci):
         return self.ciz_saf(p, hedef, self._resim, aci, self._yaricap)
+
+    def qt_aci(self, a):
+        return 90.0 - a                       # on = yukari, + = saat yonu
+
+    def dilim_merkezi(self):
+        """Arac merkezi (ciz_saf ile ayni); yaricap aracin biraz disi — resim alani
+        tum karonun %80'i oldugu icin dilimler aracin cevresinde bir halka gibi durur."""
+        merkez = self.resim_alani().center()
+        w, h = self.width(), self.height() - self.YAZI_BOYU - 2
+        return merkez, min(w, h) / 2 - 3, 0.0
 
     @classmethod
     def ciz_saf(cls, p, hedef, resim, aci, yaricap):
@@ -2646,6 +2771,15 @@ class MainWindow(QMainWindow):
         acik = acik if acik in ("atis", "hareket") else None
         self._bolge_kutulari_yenile(haric=acik)
         self._yasak_dugmeleri_guncelle()
+        self._bolge_karolari_yenile()
+
+    def _bolge_karolari_yenile(self):
+        """Aci karolarindaki renkli yasak alan dilimleri (KAYITLI pencereler)."""
+        b = self.bolge
+        if hasattr(self, "arac_yon_ikon"):
+            self.arac_yon_ikon.bolge_ayarla(b.hareket_pan, b.atis_pan)
+        if hasattr(self, "arac_ikon"):
+            self.arac_ikon.bolge_ayarla(b.hareket_tilt, b.atis_tilt)
 
     def _bolge_kutulari_yenile(self, haric=None):
         """Kutulari KAYITLI degerlere getirir (kaydedilmemis duzenlemeyi atar)."""

@@ -1105,6 +1105,14 @@ Ayrı "Maksimum Yükseliş" kaydırıcısı kaldırıldı (hareket penceresi o i
 namlu sistem açısı − 30 kadar kalkar) resimleri; büyük ortalı derece; namludan kırmızı
 lazer ışığı **yalnız gerçek lazer açıkken** (kontrol katmanının kartla eşlenmiş durumu).
 Merkeze alma yalnız **[R]** (Space/C kaldırıldı) + MERKEZ butonu.
+**Yasak alan dilimleri (22.09):** açık olan pencereler karolarda saydam renkli dilim
+olarak çizilir — **sarı** = harekete yasak (hareket penceresinin dışı), **kırmızı** =
+atışa yasak (hareket içinde, atış dışında), **soluk yeşil** = atış izni. Dilimler dünyaya
+sabittir (araç döner, dilim dönmez), aracın ARKASINDA kalır, merkeze doğru söner.
+Azimutta tam daire; yükselişte yalnız mekanik aralık (−30…+30) ve namlu ağzının ötesinde
+bir yay bandı (pasta dilimi namlu/gövde arkasında kayboluyordu). Kaydedilmemiş düzenleme
+yansımaz (`_bolge_karolari_yenile`, `_AciKarosu.dilimler`; test:
+`test_aci_karosu_yasak_alan_dilimleri`).
 
 **Bu iş sırasında bulunan GERÇEK hatalar:**
 1. **E-Stop'ta [R] merkeze alıyordu** — koruma yalnız MERKEZ butonunun devre dışı

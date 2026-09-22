@@ -526,6 +526,27 @@ def test_klavye_atesi_space_b_basili_tutma():
     assert w.kontrol.mock.lazer is False, "[L] hala ates aciyor"
 
 
+def test_aci_karosu_yasak_alan_dilimleri():
+    """Açı karolarındaki renkli dilimler KAYITLI pencereleri doğru bölmeli:
+    sarı = hareket penceresinin dışı, kırmızı = hareket içinde ama atış dışında,
+    yeşil = atış penceresi. Hiçbir alan kapalıyken dilim çizilmez."""
+    import types
+    def dilimler(cls, h, a):
+        o = types.SimpleNamespace(ARALIK=cls.ARALIK, hareket=h, atis=a)
+        return cls.dilimler(o)
+    yon = A.AracYonGostergesi
+    assert dilimler(yon, (False, -90, 90), (False, -90, 90)) == []
+    assert dilimler(yon, (True, -120, 120), (True, -60, 45)) == [
+        ("hareket", -180.0, -120), ("hareket", 120, 180.0),
+        ("atis", -120, -60), ("atis", 45, 120), ("izin", -60, 45)]
+    # yalniz atis acik: hareket penceresi tum eksen sayilir
+    assert dilimler(yon, (False, 0, 0), (True, -45, 45)) == [
+        ("atis", -180.0, -45), ("atis", 45, 180.0), ("izin", -45, 45)]
+    # dikey: yalniz mekanik aralik (-30..+30) boyanir
+    assert dilimler(A.AracAciGostergesi, (True, -20, 25), (False, 0, 0)) == [
+        ("hareket", -30.0, -20), ("hareket", 25, 30.0)]
+
+
 def test_gamepad_ayni_kapilardan_gecer():
     """Gamepad KENDI komut yolunu açmamalı — klavye/D-pad ile aynı kapılardan geçmeli.
 
@@ -797,6 +818,7 @@ if __name__ == "__main__":
     test_devam_edince_referans_korunur()
     test_basili_tutma_motor_hizini_asmaz()
     test_klavye_atesi_space_b_basili_tutma()
+    test_aci_karosu_yasak_alan_dilimleri()
     test_gamepad_ayni_kapilardan_gecer()
     test_lazer_gucu_arayuzden_karta_gider()
     test_ates_tazelemesi_kesilirse_lazer_soner()
