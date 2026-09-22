@@ -240,7 +240,7 @@ class _AciKarosu(QWidget):
     # acisi (3 yonu = 0, saat YONUNUN TERSI +). Alt siniflar tanimlar.
     ARALIK = (-180.0, 180.0)                 # eksenin tum araligi (operator acisi)
     DILIM_RENK = {"hareket": T.SARI, "atis": T.KIRMIZI, "izin": T.YESIL}
-    DILIM_ALFA = {"hareket": 0.26, "atis": 0.26, "izin": 0.13}
+    DILIM_ALFA = {"hareket": 0.15, "atis": 0.15, "izin": 0.07}
 
     def qt_aci(self, a):
         raise NotImplementedError
@@ -306,8 +306,8 @@ class _AciKarosu(QWidget):
             p.drawPath(yol)
             # dis yay: dilimin sinirini netlestiren ince cizgi
             c = QColor(renk)
-            c.setAlphaF(min(1.0, alfa * 2.6))
-            kalem = QPen(c, 2)
+            c.setAlphaF(min(1.0, alfa * 2.2))
+            kalem = QPen(c, 1.5)
             kalem.setCapStyle(Qt.FlatCap)
             p.setPen(kalem)
             p.setBrush(Qt.NoBrush)
@@ -1571,7 +1571,7 @@ class MainWindow(QMainWindow):
         self.ayar_kapat_btn.setObjectName("ayarkapat")
         self.ayar_kapat_btn.setFixedSize(24, 24)
         self.ayar_kapat_btn.setCursor(Qt.PointingHandCursor)
-        self.ayar_kapat_btn.clicked.connect(lambda: self.ayar_panel.setVisible(False))
+        self.ayar_kapat_btn.clicked.connect(self._ayar_kapat)
         brow.addWidget(self.ayar_kapat_btn)
         pv.addLayout(brow)
 
@@ -1761,11 +1761,17 @@ class MainWindow(QMainWindow):
             deger_lbl.setStyleSheet(
                 ETIKET_ONERI if onerilen else ETIKET_DEGISIK)
 
+    def _ayar_kapat(self):
+        self.ayar_panel.setVisible(False)
+        self._odak_geri()                 # kaydirici odagi kalirsa klavye gimbal'a gitmez
+
     def _ayar_toggle(self):
         gorunur = not self.ayar_panel.isVisible()
         self.ayar_panel.setVisible(gorunur)
         if gorunur:
             self.ayar_panel.raise_()
+        else:
+            self._odak_geri()
 
     def eventFilter(self, obj, event):
         """Ayar paneli acikken panelin/butonun DISINA tiklaninca paneli kapat.
@@ -1788,7 +1794,7 @@ class MainWindow(QMainWindow):
                     return QRect(tl, w.size()).contains(sahne)
 
                 if not (_icinde(self.ayar_panel) or _icinde(self.ayar_btn)):
-                    self.ayar_panel.setVisible(False)
+                    self._ayar_kapat()
             except Exception:
                 pass
         if (event.type() == QEvent.MouseButtonPress
@@ -1826,12 +1832,29 @@ class MainWindow(QMainWindow):
                 return True
         return super().eventFilter(obj, event)
 
+    def _odak_geri(self):
+        """Odagi canli goruntuye geri verir.
+
+        ⚠ GERCEK HATA (22.09): bir ayar kutucugundaki sayi kutusuna tiklayip kutucugu
+        kapatinca odak GIZLENEN kutuda kaliyordu; Qt tus olaylarini odak bileşenine
+        yolladigi icin W/A/S/D ve oklar gimbal'a hic ulasmiyordu — operatorun kontrolu
+        sessizce oluyordu. Kapanan her panel/kutucuk odagi buradan geri verir."""
+        gorunum = getattr(self, "view", None)
+        if gorunum is not None:
+            gorunum.setFocus(Qt.OtherFocusReason)
+
     def _metin_girisi_odakta(self):
         """Odak bir sayi/metin kutusundaysa (yasak alan Alt/Ust, lazer kaydiricisi)
-        ok tuslari ONU ayarlamali, gimbal'i degil."""
+        ok tuslari ONU ayarlamali, gimbal'i degil. GIZLI bir bileşen sayilmaz:
+        kapanmis bir kutucugun kutusu klavyeyi rehin alamaz (yukaridaki nota bak)."""
         odak = self.content.focusWidget() if hasattr(self, "content") else None
         from PySide6.QtWidgets import QAbstractSpinBox, QLineEdit
-        return isinstance(odak, (QAbstractSpinBox, QLineEdit, QSlider))
+        if not isinstance(odak, (QAbstractSpinBox, QLineEdit, QSlider)):
+            return False
+        if not odak.isVisible():
+            self._odak_geri()
+            return False
+        return True
 
     def _ayar_sifirla(self):
         algi.ayar_guncelle(**algi.VARSAYILAN_AYAR)
@@ -2089,6 +2112,7 @@ class MainWindow(QMainWindow):
         if ad is None:
             return
         self.pencereler[ad].setVisible(False)
+        self._odak_geri()
         if ad == "lazer":
             self._lazer_taslak_ayarla(self.lazer_guc)
             self._lazer_vazgec()
@@ -2751,6 +2775,7 @@ class MainWindow(QMainWindow):
                 p.ust = p.alt
         self.pencereler[tur].setVisible(False)        # once kapat: tum kutular yenilensin
         self._acik_pencere = None
+        self._odak_geri()
         self._bolge_uygula()
 
     def _yasak_anahtar(self, tur, acik):

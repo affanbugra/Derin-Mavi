@@ -1113,6 +1113,13 @@ Azimutta tam daire; yükselişte yalnız mekanik aralık (−30…+30) ve namlu 
 bir yay bandı (pasta dilimi namlu/gövde arkasında kayboluyordu). Kaydedilmemiş düzenleme
 yansımaz (`_bolge_karolari_yenile`, `_AciKarosu.dilimler`; test:
 `test_aci_karosu_yasak_alan_dilimleri`).
+**⚠ GERÇEK HATA (22.09, kullanıcı bildirdi):** bir ayar kutucuğundaki sayı kutusuna
+tıklayıp kutucuğu kapatınca **ok tuşları ölüyordu** — odak GİZLENEN kutuda kalıyor,
+`_metin_girisi_odakta()` "kutu odakta" deyip okları gimbal'a vermiyordu (W/A/S/D
+pencereye düştüğü için çalışmaya devam ediyordu, bu yüzden geç fark edildi). İki
+katman: kapanan her panel/kutucuk odağı `_odak_geri()` ile canlı görüntüye verir ve
+`_metin_girisi_odakta()` **görünmeyen** bileşeni saymaz. Eski sürümle ölçülerek
+doğrulandı (kutucuk sonrası ok tuşu: eski 0°, yeni 1°).
 
 **Bu iş sırasında bulunan GERÇEK hatalar:**
 1. **E-Stop'ta [R] merkeze alıyordu** — koruma yalnız MERKEZ butonunun devre dışı
