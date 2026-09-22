@@ -482,12 +482,23 @@ gamepad videoda gösterilecek, doğrudan puan. `app/gamepad.py` + arayüzde 50 m
 | **Tek kapı kuralı** | Gamepad **kendi komut yolunu AÇMAZ**: hareket `_aci_hareket`, ateş `_ates_kisayolu`→`_ates_bas`, merkez `_aci_reset`, E-Stop `_estop_bas`. Geçmişte ikinci bir ateş yolu E-Stop denetimini atlamıştı (§12 B1) — aynı hata sınıfı geri gelmesin. |
 | **Buton haritası** | **SDL GameController API** tercih edilir: SDL'in cihaz veritabanı her padi standart düzene eşler, *A tuşu hangi padde olursa olsun A'dır*. SDL cihazı tanımazsa ham Joystick'e düşülür (XInput numaraları varsayılır). |
 | Neden bu kadar önemli | Ham numaralar padden pade **değişir**: Xbox/XInput'ta `7 = Start`, PlayStation DualSense'te `7 = R2`. Sabit numara yazılsaydı **ACİL DURDUR başka bir pad takıldığında yanlış tuşa düşerdi.** |
-| Düzen | Sol çubuk + D-pad = gimbal · **A** = ateş (aç/kes) · **Y** = merkeze al · **Start** = ACİL DURDUR / DEVAM · *(LB/RB hız kademesi 22.09'da kaldırıldı — hız sabit)* |
+| Düzen **[22.09'da DEĞİŞTİ]** | Sol çubuk + D-pad = gimbal · **L2 + R2 birlikte 3 sn** = ateş AÇ, ateş açıkken **tek dokunuş** = KES · **L1 / R1** = merkeze al · **Options** = ACİL DURDUR / DEVAM. Tek tuşla ateş YOK: klavyedeki `Space+B` kuralının kol karşılığı (kaza ile lazer açılmasın). Kesmek beklemeye zorlanmaz — açmak zor, kapatmak kolay. *(A/Y ve LB/RB hız kademesi kaldırıldı.)* |
 | Hareket matematiği | Adım = `tavan hız (°/s) × geçen süre × çubuk sapması` — basılı tutmayla (§5.1) aynı mantık, tek farkı analog çarpan. Sabit adım gönderilseydi hedef motorun önüne geçer, çubuk bırakılınca gimbal dönmeye devam ederdi. |
 | Ölü bölge | %15, ve **kalan aralık yeniden 0..1'e yayılır**. Düz kesme yapılsaydı çubuk eşiği geçtiği anda hız 0'dan 0.15'e sıçrardı. Ölü bölge olmasaydı gimbal hiç durmaz, sürüklenirdi. |
 | Kenar tetikleme | Ateş/E-Stop butonları **basıldığı an** okunur. Seviye okunsaydı düğme basılı tutuldukça her 50 ms'de tekrar tetiklenir, lazer yanıp sönerdi. |
 | Sıcak takma | Cihaz yokken ~2 sn'de bir taranır; uygulama açıkken pad takılabilir (yarışma günü kablo çıkar/takılır). Kopma da yakalanır, arayüz kilitlenmez. |
 | Yokluğu | pygame kurulu değilse **veya** pad takılı değilse özellik sessizce kapalı, uygulama normal açılır (ilke 7). Alt çubukta "Gamepad · yok". |
+
+**Ekranda oyun kolu (`app/kol_ikon.py`, 22.09):** manuel panelde D-pad'in yanında,
+arayüzün diliyle **çizilmiş** bir DualSense; basılan tuş yanar. Ürün fotoğrafı
+KULLANILMADI: koyu arayüzde sırıtıyor ve fotoğrafta tek bir tuş aydınlatılamaz.
+Işıklar iki kaynaktan gelir ve **ayrı kümelerde** tutulup birleşimi çizilir
+(`_kol_ui` = klavye/ekran D-pad'i/durum, `_kol_gp` = gerçek kol) — tek küme olsaydı
+50 ms'de bir gelen gamepad yoklaması klavyenin yaktığı ışığı hemen söndürürdü.
+Yanan ışık **sistemin gerçekten aldığı komuttur**: ateş açıkken L2/R2, E-Stop
+sürerken Options yanar; merkeze alma L1/R1'i kısa süre parlatır. Kapı testi:
+`test_kol_gostergesi_gercek_durumu_yansitir` (ışık bağlantısı koparılınca kırmızıya
+düştüğü doğrulandı).
 
 **Teşhis:** `python app/gamepad.py` — hangi yolun kullanıldığını (standart/ham), çubuk
 değerlerini ve basılan düğmeleri canlı gösterir. Ham yolda yanlış tuşa düşerse `BTN_*`

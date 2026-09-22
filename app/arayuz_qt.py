@@ -37,7 +37,8 @@ import algi
 import kamera as kamera_mod   # YALNIZ harici (USB-C) kamera — bkz. kamera.py
 import nisan
 import tasarim as T          # Apple tasarim katmani — renk/olcu/stil TEK KAYNAK
-import bolge as B            # harekete/atisa izinli pencereler (sartname §4.2)
+import bolge as B
+import kol_ikon as KI            # harekete/atisa izinli pencereler (sartname §4.2)
 import gamepad as gamepad_mod
 import kontrol as kontrol_mod
 import protokol as P          # hiz duzeyi/durum sabitleri — TEK KAYNAK (bkz. protokol.py)
@@ -2134,7 +2135,10 @@ class MainWindow(QMainWindow):
 
         # Klavyeden ATES: [Space]+[B] birlikte ATES_KURMA_MS basili tutulmali. Kaza
         # ile tek tusa basmak lazeri acmasin diye kasitli olarak zor bir hareket.
+        self._kol_ui, self._kol_gp = set(), set()   # kol gostergesindeki isik kaynaklari
         self._ates_tuslari = set()
+        self._ates_kurma_kaynak = None             # "klavye" | "kol"
+        self._gp_ates_basili = False               # kolun iki tetigi su an basili mi
         self._ates_kurma = QTimer(self)
         self._ates_kurma.setSingleShot(True)
         self._ates_kurma.timeout.connect(self._ates_kurma_bitti)
@@ -2153,7 +2157,15 @@ class MainWindow(QMainWindow):
         self.bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
         dv.addWidget(self.bolge_status)
 
-        dv.addWidget(self._dpad_izgarasi(), 0, Qt.AlignCenter)
+        self.kol_ikon = KI.KolGostergesi()
+        self.kol_ikon.setFixedSize(150, 112)
+        satir = QHBoxLayout()
+        satir.setSpacing(14)
+        satir.addStretch(1)
+        satir.addWidget(self._dpad_izgarasi(), 0, Qt.AlignVCenter)
+        satir.addWidget(self.kol_ikon, 0, Qt.AlignVCenter)
+        satir.addStretch(1)
+        dv.addLayout(satir)
         dv.addLayout(self._ates_satiri())
         dv.addStretch(1)                               # artan yer en altta kalir
         return sayfa
@@ -2421,14 +2433,44 @@ class MainWindow(QMainWindow):
     TEKRAR_PERIYOT_MS = 50
     CAM_KUTU_EN = 300           # yasak alan / lazer cam kutucuk genisligi
 
+    # ---- kol gostergesi (hangi tusa basildi) -------------------------------
+    # Isiklar IKI kaynaktan gelir: arayuzun kendi durumu (klavye, ekrandaki D-pad,
+    # ates/E-Stop) ve gercek gamepad okumasi. Ikisi AYRI kumede tutulur, ekranda
+    # birlesimleri yanar — yoksa 50 ms'de bir gelen gamepad yoklamasi klavyenin
+    # yaktigi isigi hemen sondururdu.
+    def _kol_isik(self, ad, acik=True):
+        if not hasattr(self, "kol_ikon"):
+            return
+        (self._kol_ui.add if acik else self._kol_ui.discard)(ad)
+        self._kol_yenile()
+
+    def _kol_gamepad_isik(self, adlar):
+        if not hasattr(self, "kol_ikon"):
+            return
+        self._kol_gp = set(adlar)
+        self._kol_yenile()
+
+    def _kol_yenile(self):
+        self.kol_ikon.isiklari_ayarla(self._kol_ui | self._kol_gp)
+
+    def _kol_parla(self, adlar, ms=220):
+        """Anlik komutlar (merkeze al) icin kisa parlama."""
+        if not hasattr(self, "kol_ikon"):
+            return
+        for ad in adlar:
+            self._kol_isik(ad, True)
+        QTimer.singleShot(ms, lambda: [self._kol_isik(ad, False) for ad in adlar])
+
     def _dpad_press(self, direction):
         if direction in ("home", "center"):
             if hasattr(self, "btn_center"):
                 self.btn_center.setStyleSheet(self._key_center_active_style)
+            self._kol_parla(("l1", "r1"))     # koldaki karsiligi: L1/R1
             self._aci_reset()                 # E-Stop denetimi _aci_reset'in icinde
             return
         ad, kpan, ktilt = self.YON_TABLO[direction]
         getattr(self, ad).setStyleSheet(self._key_active_style)
+        self._kol_isik(direction, True)
         self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)   # tek dokunus
         self._basili_yonler.add(direction)
         if not self._tekrar_timer.isActive():
@@ -2440,6 +2482,7 @@ class MainWindow(QMainWindow):
                 self.btn_center.setStyleSheet(self._key_center_normal_style)
             return
         getattr(self, self.YON_TABLO[direction][0]).setStyleSheet(self._key_normal_style)
+        self._kol_isik(direction, False)
         self._basili_yonler.discard(direction)
         if not self._basili_yonler:
             self._tekrar_durdur()
@@ -2484,13 +2527,29 @@ class MainWindow(QMainWindow):
 
         # E-STOP her kosulda islenir (digerlerinden ONCE): acil durdurma bir moda ya da
         # baska bir kosula bagli olamaz. Ayni buton DEVAM icin de kullanilir.
+        # Koldaki gercek tuslar ekrandaki kol resminde yanar (durum gostergesi).
+        self._kol_gamepad_isik(d.basili)
+        self._gp_ates_basili = d.ates_basili
+
         if d.estop:
             self.estop_btn.setChecked(not self.estop_btn.isChecked())
             self._estop_bas()
             return                                  # ayni tikta baska komut isleme
 
-        if d.ates:
-            self._ates_kisayolu()                   # -> _ates_bas (tek kapi)
+        # ATES (takim karari 22.09): L2 + R2 BIRLIKTE. Kapali iken 3 sn basili tutmak
+        # acar (klavyedeki Space+B ile ayni kural); ACIKKEN tek dokunus keser —
+        # kesmek her zaman kolay olmalidir, beklemeye zorlanmaz.
+        if d.ates_kenar:
+            if self.fire_btn.isChecked():
+                self._ates_kes("kol (L2+R2)")
+                self._ates_kurma_iptal()
+            elif not self._ates_kurma.isActive():
+                self._ates_kurma_baslat("kol")
+        elif not d.ates_basili and self._ates_kurma_kaynak == "kol":
+            if self._ates_kurma.isActive():
+                self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;'
+                                    f'Ateş iptal — tetik erken bırakıldı')
+            self._ates_kurma_iptal()
 
         if d.merkez:
             self._aci_reset()                 # E-Stop denetimi _aci_reset'in icinde
@@ -2542,10 +2601,11 @@ class MainWindow(QMainWindow):
             return
         self._tekrar_durdur()
         self._ates_kurma_iptal()                       # odak gitti: yarim kalan kurma sayilmaz
-        for ad, _, _ in self.YON_TABLO.values():
+        for yon, (ad, _, _) in self.YON_TABLO.items():
             b = getattr(self, ad, None)
             if b is not None and hasattr(self, "_key_normal_style"):
                 b.setStyleSheet(self._key_normal_style)
+            self._kol_isik(yon, False)
 
     def changeEvent(self, e):
         # Pencere odagi giderse (Alt+Tab, baska uygulamaya tiklama) tusun BIRAKMA olayi
@@ -3057,17 +3117,49 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_ates_kurma"):
             self._ates_kurma.stop()
             self._ates_tuslari.clear()
+            self._ates_kurma_kaynak = None
+            self._ates_isigi()
+
+    def _ates_isigi(self):
+        """Koldaki L2/R2: ateş açıkken YANAR, kurma sürerken de yanar (basılı olan
+        tuşlar gerçekten onlar). Kurma bitince ateş açılmadıysa söner."""
+        acik = (getattr(self, "fire_btn", None) is not None and self.fire_btn.isChecked()) \
+            or self._ates_kurma.isActive()
+        for ad in ("l2", "r2"):
+            self._kol_isik(ad, acik)
+
+    def _ates_kurma_baslat(self, kaynak):
+        """Ateş kurma sayacı: 3 sn dolunca ateş açılır. Kaynak klavye ya da kol."""
+        self._ates_kurma_kaynak = kaynak
+        self._ates_kurma.start(self.ATES_KURMA_MS)
+        self._ates_isigi()
+        self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;'
+                            f'ATEŞ: {"Space + B" if kaynak == "klavye" else "L2 + R2"} '
+                            f'basılı tut… (3 sn)')
+
+    def _ates_kurma_gecerli(self):
+        """Sayaç dolduğunda tuşlar HÂLÂ basılı mı? (erken bırakma ateş açmamalı)"""
+        if self._ates_kurma_kaynak == "klavye":
+            return self._ates_tuslari == self.ATES_TUSLARI
+        if self._ates_kurma_kaynak == "kol":
+            return self._gp_ates_basili
+        return False
 
     def _ates_kurma_bitti(self):
         """3 sn doldu: iki tus HALA basiliysa ateş acilir — yine TEK kapidan (`_ates_bas`).
         Buton devre disiysa (E-Stop) gecmez: klavyenin butondan fazla yetkisi olamaz."""
-        if self._ates_tuslari != self.ATES_TUSLARI:
+        self._ates_kurma.stop()        # tek atislik sayac: sonuc ne olursa olsun BITTI
+        if not self._ates_kurma_gecerli():
+            self._ates_isigi()
             return
+        self._ates_kurma_kaynak = None
         if not hasattr(self, "fire_btn") or not self.fire_btn.isEnabled() \
                 or self.fire_btn.isChecked():
+            self._ates_isigi()
             return
         self.fire_btn.setChecked(True)
         self._ates_bas()
+        self._ates_isigi()
 
     def _ates_tusu(self, event, basildi):
         """[Space]+[B] basili tutma. HER MODDA calisir (ATES butonu Otonom'da gorunmez
@@ -3084,9 +3176,7 @@ class MainWindow(QMainWindow):
             return True
         self._ates_tuslari.add(event.key())
         if self._ates_tuslari == self.ATES_TUSLARI and not self.fire_btn.isChecked():
-            self._ates_kurma.start(self.ATES_KURMA_MS)
-            self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;'
-                                f'ATEŞ: Space + B basılı tut… (3 sn)')
+            self._ates_kurma_baslat("klavye")
         return True
 
     def _tus_bas(self, event):
@@ -3182,6 +3272,7 @@ class MainWindow(QMainWindow):
         ediyor" gibi gorunur). Artik hareket kapisi da E-Stop'ta kapaniyor.
         """
         aktif = self.estop_btn.isChecked()
+        self._kol_isik("start", aktif)      # koldaki Options: E-Stop suresince yanar
         self.thread.estop = aktif
         self.inference_thread.estop = aktif
         self.estop_btn.setText("▶ DEVAM ET" if aktif else "⏻ ACİL DURDUR")
@@ -3262,6 +3353,7 @@ class MainWindow(QMainWindow):
         ac = self.fire_btn.isChecked()
         d = self.kontrol.ates(ac)
         self.fire_btn.setText(ATES_METIN_ACIK if ac else ATES_METIN_KAPALI)
+        self._ates_isigi()
         renk = RED if ac else GRN
         kaynak = "mock" if self.kontrol.mock_mu else self.kontrol.kaynak
         self.sb_msg.setText(f'<span style="color:{renk}">●</span>&nbsp;'
@@ -3278,6 +3370,7 @@ class MainWindow(QMainWindow):
             return
         self.fire_btn.setChecked(False)
         self.fire_btn.setText(ATES_METIN_KAPALI)
+        self._ates_isigi()
         if self.kontrol.bagli:
             self._esp_goster(self.kontrol.ates(False))
         self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;Ateş kesildi — {sebep}')

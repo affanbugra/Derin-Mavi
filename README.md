@@ -172,6 +172,11 @@ Gamepad yoksa uygulama normal çalışır, yalnızca bu özellik kapalı kalır.
 iptal) · **`Esc` — ateşi kes** (her modda, bir sayı kutusu seçiliyken bile). Tek tuşla ateş
 yoktur; kaza ile lazer açılmasın diye. E-Stop'ta veya atışa yasak bölgede klavye de ateş açamaz.
 
+**Oyun kolu (gamepad):** D-pad — gimbal yönü · **L2 + R2 birlikte 3 sn** — ateş aç
+(ateş açıkken tek dokunuş keser) · **L1 / R1** — merkeze al · **Options** — ACİL DURDUR / DEVAM.
+Manuel paneldeki kol resminde basılan tuş yanar; aynı resim klavye ve ekrandaki D-pad ile
+verilen komutları da gösterir. Kol yoksa özellik sessizce kapalıdır.
+
 **Lazer gücü:** arayüzdeki *LAZER* kartından ayarlanır (hem Manuel hem Otonom modda) —
 kaydırıcı %0–100 veya hızlı kademeler (%20/%40/%70/%100). Varsayılan **%40**; tam güç
 kullanılmıyor. Güç ile ateş ayrı şeylerdir: kart `G<yüzde>` ile "ne kadar"ı, ATEŞ butonu

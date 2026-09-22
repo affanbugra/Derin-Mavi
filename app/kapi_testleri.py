@@ -72,14 +72,15 @@ class SahteGamepad:
     `kopuk=True` cihazin okuma sirasinda cikarilmasini taklit eder: `oku()` bos durum
     dondurur ve `bagli` False'a duser (gercek modulun kopma davranisi)."""
 
-    def __init__(self, pan=0.0, tilt=0.0, ates=False, estop=False, merkez=False,
-                 kopuk=False):
+    def __init__(self, pan=0.0, tilt=0.0, basili=(), kenar=None, kopuk=False):
         self.ad = "Sahte Pad"
         self._kopuk = kopuk
         self.bagli = not kopuk
         self._d = gamepad_mod.Durum()
         self._d.pan, self._d.tilt = pan, tilt
-        self._d.ates, self._d.estop, self._d.merkez = ates, estop, merkez
+        self._d.basili = set(basili)
+        # kenar verilmezse "yeni basildi" sayilir (tek yoklamalik testler icin)
+        self._d.kenar = set(basili if kenar is None else kenar)
 
     def oku(self):
         if self._kopuk:
@@ -110,18 +111,37 @@ class SahteTimer:
         return self.aktif
 
 
+class SahteKol:
+    """Kol gostergesinin test yuzu: yanan tuslari tutar (cizim yapmaz)."""
+
+    def __init__(self):
+        self.yanan = set()
+
+    def isiklari_ayarla(self, adlar):
+        self.yanan = set(adlar)
+
+
 class SahtePencere:
     """MainWindow'un hareket/ates/hiz kapilari icin ihtiyac duydugu asgari yuzey."""
     _aci_hareket = A.MainWindow._aci_hareket
     _hareket_kilitli = A.MainWindow._hareket_kilitli   # E-Stop kilidi: TEK tanim
     _aci_reset = A.MainWindow._aci_reset               # [R] / gamepad Y — merkeze al
     _dpad_press = A.MainWindow._dpad_press
+    _dpad_release = A.MainWindow._dpad_release
+    TEKRAR_GECIKME_MS = A.MainWindow.TEKRAR_GECIKME_MS
     _ates_bas = A.MainWindow._ates_bas
     _ates_kes = A.MainWindow._ates_kes
     _ates_kisayolu = A.MainWindow._ates_kisayolu
     _ates_tusu = A.MainWindow._ates_tusu
     _ates_kurma_bitti = A.MainWindow._ates_kurma_bitti
     _ates_kurma_iptal = A.MainWindow._ates_kurma_iptal
+    _ates_kurma_baslat = A.MainWindow._ates_kurma_baslat
+    _ates_kurma_gecerli = A.MainWindow._ates_kurma_gecerli
+    _ates_isigi = A.MainWindow._ates_isigi
+    _kol_isik = A.MainWindow._kol_isik
+    _kol_parla = A.MainWindow._kol_parla
+    _kol_gamepad_isik = A.MainWindow._kol_gamepad_isik
+    _kol_yenile = A.MainWindow._kol_yenile
     _tus_bas = A.MainWindow._tus_bas
     _tus_birak = A.MainWindow._tus_birak
     _tus_yonu = A.MainWindow._tus_yonu
@@ -170,6 +190,14 @@ class SahtePencere:
         self._tekrar_timer = SahteTimer()
         self._ates_tuslari = set()
         self._ates_kurma = SahteTimer()
+        self._ates_kurma_kaynak = None
+        self._gp_ates_basili = False
+        self._kol_ui, self._kol_gp = set(), set()
+        self.kol_ikon = SahteKol()
+        self.aci_adim = 1.0
+        self._key_normal_style = self._key_active_style = ""
+        for ad, _, _ in A.MainWindow.YON_TABLO.values():
+            setattr(self, ad, SahteButon())
         self.gamepad = SahteGamepad()
         self._gp_son_t = time.time()
         self._gp_tarama = 0
@@ -547,6 +575,40 @@ def test_aci_karosu_yasak_alan_dilimleri():
         ("hareket", -30.0, -20), ("hareket", 25, 30.0)]
 
 
+def test_kol_gostergesi_gercek_durumu_yansitir():
+    """Ekrandaki oyun kolunda YANAN tuş, sistemin gerçekten aldığı komut olmalı.
+
+    Gösterge yalnız kolu değil KLAVYE ve ekrandaki D-pad'i de yansıtır (üçü aynı
+    kapılardan geçer). Yanlış yanan bir ışık operatöre "komut gitti" dedirtir —
+    en yanıltıcı hata sınıfı bu (CLAUDE.md §5.1 'hedef mi ölçüm mü' notu)."""
+    w = SahtePencere()
+    w.thread = A.VideoThread(None, None, None)
+
+    # 1. Yon: basinca yanar, birakinca soner
+    w._dpad_press("up")
+    assert "up" in w.kol_ikon.yanan, w.kol_ikon.yanan
+    w._dpad_release("up")
+    assert "up" not in w.kol_ikon.yanan
+
+    # 2. Ates kurma (Space+B ya da L2+R2) -> L2/R2 yanar; ates acilinca YANIK KALIR
+    w._ates_kurma_baslat("klavye")
+    assert {"l2", "r2"} <= w.kol_ikon.yanan, "kurma sirasinda tetikler yanmadi"
+    w._gp_ates_basili = False
+    w._ates_tuslari = set(w.ATES_TUSLARI)
+    w._ates_kurma_bitti()
+    assert w.fire_btn.isChecked() and {"l2", "r2"} <= w.kol_ikon.yanan
+    w._ates_kes("test")
+    assert not ({"l2", "r2"} & w.kol_ikon.yanan), "ates kesildi ama tetikler yanik kaldi"
+
+    # 3. Gamepad'den gelen tuslar arayuzun yaktigi isigi SILMEZ (iki kaynak ayri)
+    w._dpad_press("left")
+    w._kol_gamepad_isik({"r1"})
+    assert {"left", "r1"} <= w.kol_ikon.yanan, w.kol_ikon.yanan
+    w._kol_gamepad_isik(set())
+    assert "left" in w.kol_ikon.yanan, "gamepad yoklamasi klavyenin isigini sondurdu"
+    w._dpad_release("left")
+
+
 def test_gamepad_ayni_kapilardan_gecer():
     """Gamepad KENDI komut yolunu açmamalı — klavye/D-pad ile aynı kapılardan geçmeli.
 
@@ -580,28 +642,51 @@ def test_gamepad_ayni_kapilardan_gecer():
     w._gamepad_tik()
     assert w.pan_aci == duran, "E-Stop'ta gamepad ile hareket edildi"
 
-    # --- E-STOP'ta ateş geçmemeli (buton kilitliyse gamepad de geçmez)
-    w.fire_btn.setEnabled(False)
-    w.gamepad = SahteGamepad(ates=True)
+    # --- ATES: L2 + R2 birlikte, 3 sn basili (tek tetik ya da tek dokunus ACMAZ)
+    w.thread.estop = False
+    w.gamepad = SahteGamepad(basili=("l2",))           # tek tetik
     w._gamepad_tik()
+    assert not w._ates_kurma.isActive(), "tek tetik ateşi kurmaya başladı"
+
+    w.fire_btn.setEnabled(False)                       # E-Stop benzeri kilit
+    w.thread.estop = True
+    w.gamepad = SahteGamepad(basili=("l2", "r2"))
+    w._gamepad_tik()
+    w._ates_kurma_bitti()
     assert w.kontrol.mock.lazer is False, "E-Stop'ta gamepad ile ateş açıldı"
 
-    # --- Ateş normal koşulda çalışmalı
     w.thread.estop = False
     w.fire_btn.setEnabled(True)
-    w.gamepad = SahteGamepad(ates=True)
+    w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
+    assert w._ates_kurma.isActive(), "iki tetik ateşi kurmadı"
+    w._gp_ates_basili = False                          # tetikler erken birakildi
+    w._ates_kurma_bitti()
+    assert w.kontrol.mock.lazer is False, "erken bırakılan tetikle ateş açıldı"
+
+    w.gamepad = SahteGamepad(basili=("l2", "r2"))
+    w._gamepad_tik()
+    w._ates_kurma_bitti()                              # 3 sn doldu, tetikler basili
     assert w.kontrol.mock.lazer is True, "gamepad ateş açmadı"
-    w.gamepad = SahteGamepad(ates=True)
+
+    # Ates ACIKKEN tek dokunus keser (beklemeye zorlanmaz)
+    w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
     assert w.kontrol.mock.lazer is False, "gamepad ateşi kesmedi"
 
     # --- Atışa yasak bölgede ateş reddedilmeli (ortak kapı)
     w.bolge.atis_pan = B.Pencere(True, 100.0, 110.0)  # pan 0 -> pencere DISI
-    w.gamepad = SahteGamepad(ates=True)
+    w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
+    w._ates_kurma_bitti()
     assert w.kontrol.mock.lazer is False, "yasak bölgede gamepad ile ateş açıldı"
     w.bolge.atis_pan.aktif = False
+
+    # --- MERKEZ: L1 ya da R1
+    w._aci_hareket(5.0, 5.0)
+    w.gamepad = SahteGamepad(basili=("r1",))
+    w._gamepad_tik()
+    assert w.pan_aci == 0.0 and w.tilt_aci == 0.0, "R1 merkeze almadı"
 
     # --- Cihaz koparsa arayüz kilitlenmemeli (istisna sızmamalı)
     w.gamepad = SahteGamepad(kopuk=True)
@@ -819,6 +904,7 @@ if __name__ == "__main__":
     test_basili_tutma_motor_hizini_asmaz()
     test_klavye_atesi_space_b_basili_tutma()
     test_aci_karosu_yasak_alan_dilimleri()
+    test_kol_gostergesi_gercek_durumu_yansitir()
     test_gamepad_ayni_kapilardan_gecer()
     test_lazer_gucu_arayuzden_karta_gider()
     test_ates_tazelemesi_kesilirse_lazer_soner()
