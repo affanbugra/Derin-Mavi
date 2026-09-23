@@ -154,8 +154,10 @@ def calistir(args):
     pan_acik = args.pan and k.pan_ayri
     print(f"PAN takibi: {'ACIK (sinir +-%.0f derece)' % args.pan_sinir if pan_acik else 'KAPALI'}")
     A, T = (args.sanal if args.sanal else (0.0, 1.0))
+    AX, TX = (args.sanal_x if args.sanal_x else (0.0, 1.0))
     satirlar = []
-    print(f"MOD={args.mod} | sanal A={A:.0f}px T={T:.1f}s | kesinti={args.kesinti}s/2s | "
+    print(f"MOD={args.mod} | sanal Y={A:.0f}px/{T:.1f}s X={AX:.0f}px/{TX:.1f}s | "
+          f"kesinti={args.kesinti}s/2s | "
           f"kp={algi.AYAR['kp']} ppd={args.ppd} gecikme={args.gecikme} ileri={args.ileri} "
           f"g={args.g} q={args.q} r={args.r}")
     t0 = time.time()
@@ -208,6 +210,7 @@ def calistir(args):
         if hedef_var:
             kutu = dets[ai]["box"]
             hx, hy = algi.nisan_noktasi(kutu, balonlar)
+            hx += AX * math.sin(2 * math.pi * t / TX)        # pan icin tekrarlanabilir hedef
             hy += A * math.sin(2 * math.pi * t / T)          # sanal hareket (A=0: gercek)
             hata_px = hy - h * 0.5
             hata_x = hx - w * 0.5
@@ -346,6 +349,8 @@ def ozet(satirlar, dosya):
         e_s = sorted(e)
         print(f"  |hata| ORT {st.mean(e):5.1f} px | medyan {st.median(e):5.1f} | "
               f"%95 {e_s[int(0.95 * (len(e_s) - 1))]:5.1f} | en buyuk {max(e):5.1f}")
+    if kol:
+        print(f"  tilt araligi {min(kol):+.2f} .. {max(kol):+.2f} derece")
     # HIZ DALGALANMASI (titresimin dogrudan gostergesi): 0.1 sn'lik pencerelerde eksen
     # hizi, ardisik pencereler arasi ortalama |hiz degisimi| / 0.1 sn = der/sn^2.
     # Kartin "hareket" bayragi yorunge kipinde surekli acik oldugu icin dur-kalk
@@ -385,6 +390,8 @@ if __name__ == "__main__":
                     help="baslangic acisi etrafindaki test penceresi (+/- derece)")
     ap.add_argument("--sanal", type=lambda s: tuple(map(float, s.split(","))), default=None,
                     help="A,T: sanal hedef genligi (px) ve periyodu (sn)")
+    ap.add_argument("--sanal-x", type=lambda s: tuple(map(float, s.split(","))), default=None,
+                    help="A,T: yatay sanal hedef genligi (px) ve periyodu (sn)")
     ap.add_argument("--kesinti", type=float, default=0.0, help="her 2 sn'de kor sure (sn)")
     ap.add_argument("--kp", type=float, default=None)
     # 21.09 olculdu (--olc_ppd, drone ~40 cm): 2-6 derece 9.6, 6-10 derece 17.4, medyan 13.4.

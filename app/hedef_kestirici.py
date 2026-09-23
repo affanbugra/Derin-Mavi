@@ -287,6 +287,9 @@ class KalmanTakipKontrolu:
         return hedef
 
 
+BOSLUK_OGRENME_TAVANI = 1.0      # derece — calisirken ogrenilen boslugun ust siniri
+
+
 class EksenTakip:
     """TEK eksenin surekli takip kontrolcusu (pan veya tilt) — arayuzun otonom yolu.
 
@@ -367,6 +370,9 @@ class EksenTakip:
         self._son_aci = None
         self._hareket_yon = 0
         self._yon_gecmisi = [(float("-inf"), 0)]    # [(t, yon)] — yon degisim anlari
+        self._namlu = None                          # bosluk modelindeki namlu acisi
+        self._motor = None                          # son bildirilen motor acisi
+        self._ofset_gecmisi = [(float("-inf"), 0.0)]  # [(t, motor - namlu)]
         self._son_hareket_t = float("-inf")         # aci en son ne zaman degisti
         self._son_kare = None                       # (t_kare, hata_px, ppd)
         # CALISIRKEN OGRENILEN BOSLUK (derece). Baslangic bosluk x telafi. Yerlesme
@@ -380,6 +386,7 @@ class EksenTakip:
         self._yor_yon = 0                           # yorunge kipi: bosluk tarafi (histerezisli)
         self._duragan = True                        # yorunge kipi: hedef duruyor mu (histerezisli)
         self._yavas_t = None                        # hiz esigin altina ne zaman indi
+        self._hiz_gecmisi = []                      # [(t_kare, hiz)] — son ~1 sn
         self._kayip_durdu = False                   # kayipta tek hiz-sifir komutu
 
     @property
@@ -400,23 +407,45 @@ class EksenTakip:
             k.q_min = k.q_max = None
 
     def _ofset(self, t=None):
-        """Motor sayimi - namlu (derece) `t` aninda: namlu hareket yonunde bosluk/2
-        geride. Olcumde KARE ANININ yonu kullanilir: motor yon degistirdigi an hattaki
-        eski kareler hala eski yonde cekilmistir; simdiki yon kullanilirsa olcum bosluk
-        kadar sicrar ve hiz kestirimi +-15 derece/sn'e firlar (benzetimde goruldu)."""
-        yon = self._hareket_yon
+        """Motor sayimi - namlu (derece) `t` aninda. Olcumde KARE ANININ degeri
+        kullanilir (hattaki eski kareler eski konumda cekildi).
+
+        ⚠ BOSLUK = "PLAY" MODELI, basamak DEGIL. Eski model ofseti yon * bosluk/2 diye
+        hesapliyordu: motor yon degistirdigi AN ofset bir uctan obur uca SICRIYORDU.
+        Gercekte namlu sicramaz — motor once boslugu kapatir, namlu o sure YERINDE
+        bekler. Sahte sicrama Kalman'a "hedef bosluk kadar kaydi" diye giriyor, hiz
+        kestirimi firliyor, yorunge kipi motoru o hizla surup yonu yine ceviriyordu:
+        KENDINI BESLEYEN SALINIM. 23.09 benzetim (1.5 px tespit gurultusu, duran
+        hedef): tilt 18 kosunun 9'unda ~2.6 derece tepe-tepe sonmeyen salinim; sahada
+        da tilt salinimi goruldu. Play modelinde ofset surekli degisir: namlu motorun
+        +-bosluk/2 bandinda kalir, yalniz bandin kenari onu ittiginde hareket eder."""
+        if t is None:
+            return 0.0 if self._namlu is None else self._motor - self._namlu
+        for t_o, o in reversed(self._ofset_gecmisi):
+            if t_o <= t:
+                return o
+        return 0.0
+
+    def _bosluk_guncelle(self, aci, t):
+        """Play operatoru: namlu, motorun +-bosluk/2 bandinin icinde kalir."""
+        yari = self.bosluk_kest * 0.5
+        if self._namlu is None:
+            self._namlu = aci            # hangi tarafa dayali oldugu bilinmiyor: ortada
+        self._motor = aci
+        self._namlu = min(max(self._namlu, aci - yari), aci + yari)
         if t is not None:
-            for t_y, y in reversed(self._yon_gecmisi):
-                if t_y <= t:
-                    yon = y
-                    break
-        return yon * self.bosluk_kest * 0.5
+            o = aci - self._namlu
+            if abs(o - self._ofset_gecmisi[-1][1]) > 1e-6:
+                self._ofset_gecmisi.append((float(t), o))
+                del self._ofset_gecmisi[:-200]
 
     def aci_bildir(self, aci, t=None):
-        """Eksenin bildirilen acisini izler; son hareket YONUNU (bosluk modeli) tutar."""
+        """Eksenin bildirilen acisini izler; son hareket YONUNU ve bosluk modelindeki
+        namlu acisini tutar."""
         if aci is None:
             return
         aci = float(aci)
+        self._bosluk_guncelle(aci, t)
         if self._son_aci is None:
             self._son_aci = aci
         elif abs(aci - self._son_aci) > 0.02:
@@ -439,7 +468,15 @@ class EksenTakip:
         kabul = self.kestirici.guncelle(t_kare, z)
         if kabul:
             self._kayip_durdu = False
+            self._hiz_gecmisi.append((float(t_kare), self.kestirici.hiz))
+            while self._hiz_gecmisi and self._hiz_gecmisi[0][0] < t_kare - 1.0:
+                self._hiz_gecmisi.pop(0)
         return kabul
+
+    def _ort_hiz(self, simdi, pencere):
+        """Son `pencere` saniyedeki hiz kestirimlerinin ortalamasi (yoksa anlik hiz)."""
+        v = [h for t, h in self._hiz_gecmisi if t >= simdi - pencere]
+        return sum(v) / len(v) if v else self.kestirici.hiz
 
     def komut(self, simdi, aci, alt, ust, olu=None, hata_px=None, olu_px=None):
         """Yeni MUTLAK eksen hedefi ya da None (komut gerekmez).
@@ -486,7 +523,11 @@ class EksenTakip:
                 # Onceki ters duzeltmenin sonucu: ayni yone devam gerekiyorsa eksik
                 # kalmis (bosluk buyuk), geri donmek gerekiyorsa asmis (bosluk kucuk).
                 if yon_namlu == self._ters_duzeltme:
-                    self.bosluk_kest = min(3.0, self.bosluk_kest + 0.5 * abs(e))
+                    # TAVAN 1.0 derece (eskiden 3.0). Sahada olculen bosluk tilt
+                    # 0.1-0.9, pan 0.2-0.7. 23.09 benzetim: bosluk kestirimi 0.75'e
+                    # cikinca yorunge kipinde duran hedefte salinim basliyor (8 kosunun
+                    # 6'si, eski kod); ogrenmenin kendini o bolgeye tasimasi engellenir.
+                    self.bosluk_kest = min(BOSLUK_OGRENME_TAVANI, self.bosluk_kest + 0.5 * abs(e))
                 else:
                     self.bosluk_kest = max(0.0, self.bosluk_kest - abs(e))
                 self._ters_duzeltme = 0
@@ -586,11 +627,19 @@ class EksenTakip:
         # (1 -> 2 der/sn) ve 0.4 sn bekleme: elde tasinan hedef yon degistirirken hizi
         # bir an sifirdan gecer; beklemesiz gecis orada kip degistirip hareketi
         # sarsiyordu (benzetim: el hareketinde ort ivme 51 -> 174).
-        if abs(hiz) >= 1.0:
+        #
+        # ⚠ ANLIK hiz degil, kisa pencere ORTALAMASI. 23.09 benzetim (1.5 px tespit
+        # gurultusu, duran hedef, operator -15): hiz kestirimi ~0.2 sn periyotla +-5
+        # der/sn salliyordu — namlunun kendi salinimi (bosluk modeli ile gercek arasindaki
+        # fark hiz ileri beslemesiyle buyuyor). Anlik |hiz| 1'in altina HIC inmedigi icin
+        # duran hedef kipine gecilemiyor, salinim sonmuyordu. Salinimin ortalamasi
+        # sifirdir; gercekten hareket eden hedefin hizi ayni isarette kalir.
+        v_uzun, v_kisa = self._ort_hiz(simdi, 0.5), self._ort_hiz(simdi, 0.2)
+        if abs(v_uzun) >= 1.0:
             self._yavas_t = None
         elif self._yavas_t is None:
             self._yavas_t = simdi
-        if self._duragan and abs(hiz) > 2.0:
+        if self._duragan and abs(v_kisa) > 2.0:
             self._duragan = False
         elif (not self._duragan and self._yavas_t is not None
               and simdi - self._yavas_t >= 0.4):

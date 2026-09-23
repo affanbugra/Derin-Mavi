@@ -16,6 +16,7 @@ Kareler numpy BGR olarak verilir (algı zinciri değişmedi); arayüz tarafı
 """
 import os
 import threading
+import time
 
 import cv2
 import numpy as np
@@ -63,9 +64,16 @@ def en_yakin_format(cihaz, genislik, yukseklik, fps):
 
     def puan(f):
         r = f.resolution()
+        min_fps, max_fps = float(f.minFrameRate()), float(f.maxFrameRate())
+        # Ayni cozunurlukte 60 FPS istenirken 150 FPS profilini secmek kameranin
+        # gercekte 30'a dusmesine yol acabiliyor. Once istenen FPS'i kapsayan araligi,
+        # sonra da tavani istenene en yakin profili sec.
+        fps_uzaklik = (min_fps - fps if fps < min_fps else
+                       fps - max_fps if fps > max_fps else 0.0)
         return (abs(r.width() * r.height() - genislik * yukseklik),
-                0 if f.maxFrameRate() >= fps - 0.5 else 1,
-                -f.maxFrameRate())
+                fps_uzaklik,
+                abs(max_fps - fps),
+                abs(min_fps - fps))
     return min(formatlar, key=puan)
 
 
@@ -78,7 +86,7 @@ class Kamera(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._kilit = threading.Lock()
-        self._kare, self._sira = None, 0
+        self._kare, self._sira, self._kare_t = None, 0, 0.0
         self._kamera = None
         self.secili_id = None
         self.kapali = False              # operatör "Kapalı" seçti
@@ -138,7 +146,8 @@ class Kamera(QObject):
         self._kamera = kamera
         self.secili_id = bytes(cihaz.id())
         r = fmt.resolution() if fmt is not None else None
-        ek = f" · {r.width()}×{r.height()}" if r is not None else ""
+        ek = (f" · {r.width()}×{r.height()} @{fmt.maxFrameRate():.0f} FPS"
+              if r is not None else "")
         self.durum.emit(f"Kamera açıldı: {cihaz.description()}{ek}", False)
 
     def kapat(self):
@@ -167,6 +176,7 @@ class Kamera(QObject):
             self._kamera = None
         with self._kilit:
             self._kare = None
+            self._kare_t = 0.0
 
     def durdur(self):
         """Uygulama kapanırken."""
@@ -176,17 +186,24 @@ class Kamera(QObject):
 
     # ---- kareler ----
     def _kare_geldi(self, kare):
+        # Zaman damgasini donusum/kopyalama ve GUI kuyrugundan ONCE al. Takip,
+        # karede gorulen hedefi motorun ayni andaki acisiyla eslestirir; tuketicinin
+        # kareyi daha sonra aldigi zamani kullanmak yuk altinda faz hatasi ve salinim
+        # uretir. QVideoFrame.startTime akisa goreli oldugu icin duvar saatiyle
+        # motor gecmisine dogrudan karistirilamaz; callback zamani ortak saat alanidir.
+        kare_t = time.time()
         img = kare.toImage()
         if img.isNull():
             return
         img = img.convertToFormat(QImage.Format_BGR888)
         w, h, satir = img.width(), img.height(), img.bytesPerLine()
         dizi = np.frombuffer(img.constBits(), np.uint8, count=satir * h)
-        self._kare_koy(dizi.reshape(h, satir)[:, :w * 3].reshape(h, w, 3).copy())
+        self._kare_koy(dizi.reshape(h, satir)[:, :w * 3].reshape(h, w, 3).copy(), kare_t)
 
-    def _kare_koy(self, bgr):
+    def _kare_koy(self, bgr, kare_t=None):
         with self._kilit:
             self._kare = bgr
+            self._kare_t = time.time() if kare_t is None else float(kare_t)
             self._sira += 1
 
     def oku(self, son_sira=None):
@@ -195,6 +212,18 @@ class Kamera(QObject):
             if self._kare is None or (son_sira is not None and self._sira == son_sira):
                 return None, self._sira
             return self._kare, self._sira
+
+    def oku_zamanli(self, son_sira=None):
+        """En taze kareyi atomik olarak ``(kare, sira, okuma_zamani)`` verir.
+
+        ``oku`` geriye uyumluluk icin iki deger dondurmeye devam eder. Takip yolu bu
+        metodu kullanir; boylece kare ile ona ait zaman damgasi arasina yeni bir
+        kamera callback'i girip ikisini farkli karelerden yapamaz.
+        """
+        with self._kilit:
+            if self._kare is None or (son_sira is not None and self._sira == son_sira):
+                return None, self._sira, self._kare_t
+            return self._kare, self._sira, self._kare_t
 
 
 class _DosyaOkuyucu:
@@ -244,4 +273,29 @@ if __name__ == "__main__":
     for ad in kalmali:
         assert harici_mi(_Sahte(ad)), f"harici sayılmalıydı: {ad}"
     assert not harici_mi(_Sahte("Camera", QCameraDevice.FrontFace))
-    print("kamera testleri OK — dahili/telefon/sanal eleme, harici kabul")
+
+    class _Boyut:
+        def __init__(self, w, h): self._w, self._h = w, h
+        def width(self): return self._w
+        def height(self): return self._h
+    class _Format:
+        def __init__(self, w, h, mn, mx): self._r, self._mn, self._mx = _Boyut(w, h), mn, mx
+        def resolution(self): return self._r
+        def minFrameRate(self): return self._mn
+        def maxFrameRate(self): return self._mx
+    class _Cihaz:
+        def __init__(self, fs): self._fs = fs
+        def videoFormats(self): return self._fs
+
+    f30, f60, f150 = (_Format(1280, 720, 30, 30), _Format(1280, 720, 30, 60),
+                       _Format(1280, 720, 30, 150))
+    assert en_yakin_format(_Cihaz([f150, f30, f60]), 1280, 720, 60) is f60
+
+    # Zaman damgasi kareyle ayni kilit altinda saklanmali; iki asamali okuma yeni
+    # callback araya girdiginde baska karenin zamanini verebilirdi.
+    k = Kamera.__new__(Kamera)
+    k._kilit, k._kare, k._sira, k._kare_t = threading.Lock(), None, 0, 0.0
+    k._kare_koy(np.zeros((1, 1, 3), dtype=np.uint8), 123.5)
+    _im, _sira, _t = k.oku_zamanli()
+    assert _sira == 1 and _t == 123.5
+    print("kamera testleri OK — cihaz eleme, format secimi, atomik kare zamani")

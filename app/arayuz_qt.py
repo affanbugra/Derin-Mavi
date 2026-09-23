@@ -988,7 +988,7 @@ class VideoThread(QThread):
                     self.msleep(3)
                     continue
 
-                frame, sira = self.kaynak.oku(son_sira)
+                frame, sira, kare_t = self.kaynak.oku_zamanli(son_sira)
                 if frame is None:
                     self.msleep(3)
                     continue
@@ -1009,7 +1009,9 @@ class VideoThread(QThread):
                 with self.veri.kilit:
                     self.veri.kare = frame
                     self.veri.kare_sira = sira
-                    self.veri.kare_t = time.time()
+                    # Kameranin callback anini koru. GUI/inference yogunluguna bagli
+                    # tuketim zamani motor gecmisiyle eslestirmede kullanilamaz.
+                    self.veri.kare_t = kare_t
                     self.veri.kamera_fps = kamera_fps
                     dets = list(self.veri.dets)
                     balonlar = list(self.veri.balonlar)
