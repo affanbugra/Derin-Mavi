@@ -877,6 +877,7 @@ def takip_sifirla():
     _uzak.update(aday=None, iyi=0, kotu=0, sayac=0)
     _vurulanlar.clear()
     _kilit_son_gercek[:] = [None, 0.0]
+    _dost_kaniti[0] = 0
 
 
 def hedef_vuruldu(saniye, simdi=None):
@@ -1035,15 +1036,19 @@ def _taraf_belirle(frame, box, tid):
     return taraf
 
 
-def anlik_kirmizi_kaniti(frame, box):
-    """Otonom hareket/ates icin *bu karede* gorulen kirmizi kaniti.
-
-    Taraf hafizasi burada kullanilmaz: hedef ortulurse onceki 'Dusman'
-    karari ates iznine donusmemelidir. Bu yalniz ek bir kapidir; insan
-    tespiti veya fiziksel lazer emniyeti yerine gecmez.
-    """
+def anlik_taraf_kaniti(frame, box):
+    """Bu karede yeterince guclu ve ayrik renk kaniti varsa tarafini dondurur."""
     kirmizi, cyan = renk_oranlari(frame, box)
-    return kirmizi >= RENK_ESIK and kirmizi - cyan >= RENK_FARK_ESIK
+    if kirmizi >= RENK_ESIK and kirmizi - cyan >= RENK_FARK_ESIK:
+        return "Düşman"
+    if cyan >= RENK_ESIK and cyan - kirmizi >= RENK_FARK_ESIK:
+        return "Dost"
+    return None
+
+
+def anlik_kirmizi_kaniti(frame, box):
+    """Bu karede guvenilir kirmizi kaniti var mi? Taraf hafizasi kullanmaz."""
+    return anlik_taraf_kaniti(frame, box) == "Düşman"
 
 
 def _karar_ver(tid, sinif_adi, conf, onay_esigi, onay_tekrari):
@@ -1183,11 +1188,13 @@ def _kaymayi_uygula(model):
 # bozar. Ayni agirliklar ikinci bir YOLO nesnesiyle acilir (roi_modeli_ayarla ile
 # disaridan da verilebilir — testler sahte model verir).
 ROI_AZAMI_KAYIP = 90          # kare: bundan uzun kayipta pencere taramasi birakilir
-# A2/A3: kilitli kutu bu kadar ARDISIK karede kirmizi gorunmezse kilit birakilir.
-# Sahada (22.09 aksam) ByteTrack/kilit devri kilidi drone'u tutan kisinin govdesine
-# ("F16 0.68" yanlis tespiti) tasidi ve kilit orada kaldi.
-KIRMIZISIZ_AZAMI = 15
-_kirmizisiz = [0]
+# A3: kilitli hedefte guvenilir CYAN (Dost) kaniti gorulurse kilit birakilir.
+# "Kirmizi okunamadi" artik kilit kaybi degildir: isik, uzaklik ve hareket
+# bulanikligi kirmizi oranini anlik dusururken YOLO kutusu hedefi dogru izlemeye devam
+# edebilir. Eski kirmizisiz-kare sayaci bu durumda kutu ekranda dururken nisangahi
+# kaybediyordu. Dost kaniti ise gercek bir taraf celiskisidir ve A3'te kilidi keser.
+DOST_KANITI_AZAMI = 1
+_dost_kaniti = [0]
 ROI_EN_KUCUK = 213            # px: 640'lik girdide 3x buyutme
 _roi_model = None
 _roi_model_denendi = False
@@ -1569,7 +1576,7 @@ def _ana_taramada_guclu_aday(dets, a, asama=None):
     return any(d.get("id") is not None and d.get("conf", 0) >=
                100 * float(a["onay_esigi"]) and not d.get("hayalet")
                and _tip_uygun(d.get("cls")) and not vurulan_mi(d)
-               and (asama not in (2, 3) or d.get("anlik_kirmizi", False)) for d in dets)
+               and (asama != 3 or d.get("anlik_kirmizi", False)) for d in dets)
 
 
 def _cift_kutulari_ele(dets, esik):
@@ -1615,11 +1622,14 @@ def _kayiplari_temizle(gorulen_id_seti, kayip_esigi):
             continue
         _kayip_sayaclari[tid] = _kayip_sayaclari.get(tid, 0) + 1
         if _kayip_sayaclari[tid] >= kayip_esigi:
+            # Kilitli ID'nin hafizasi burada silinmez. Tracker birkac kare ID
+            # uretmese bile ayni yerdeki GERCEK kutu ile konumsal devam kurulabilir;
+            # kilidin gercekten bitmesine asagidaki KILIT_BIRAKMA_S zaman kapisi
+            # karar verir. Burada silmek, kutu gorunurken nisangahi yok ediyordu.
+            if tid == _kilitli_track_id:
+                continue
             _takip_durumlari.pop(tid, None)
             _kayip_sayaclari.pop(tid, None)
-            if tid == _kilitli_track_id:
-                _kilitli_track_id = None
-                _kilit_kayip_kare = 0
 
 
 # ---------------- SAHI: Dilimli Cikarim (uzak/kucuk nesneler) ----------------
@@ -1752,8 +1762,9 @@ def analiz_et(model, frame, estop=False, asama=None):
 
     asama (sartname davranisi):
       1   : tanima/manuel secim; tum tespitler gosterilir
-      2-3 : otonom ilk kilit icin anlik kirmizi kaniti gerekir; A3'te ayrica
-            yalniz "Dusman" kilitlenir. Kutular renk kaniti olmasa da gosterilir.
+      2   : tum tespitler hedeftir; sinif onaylaninca kilitlenir
+      3   : ilk otonom kilit icin anlik kirmizi + "Dusman" karari gerekir.
+            Kilit kurulduktan sonra renk anlik okunamasa da gorunen kutu izlenir.
 
     dets        : [{cls, ham, ad, tip, conf, box, id}, ...]
     balonlar    : [(x1,y1,x2,y2), ...] — nisan noktalari
@@ -1900,11 +1911,13 @@ def analiz_et(model, frame, estop=False, asama=None):
     # sinif etiketli ciftleri temizleyemez — bkz. _cift_kutulari_ele).
     dets = _cift_kutulari_ele(dets, float(a["ortusme"]))
 
-    # Model, bir kisiyi yuksek guvenle maket sanabilir. A2/A3 otomatik kilitte
-    # yalniz bu KARENIN kirmizisini kabul et; taraf hafizasi edinim izni degildir.
+    # Anlik taraf kaniti hafizadan bagimsizdir. A3'te ilk dusman ediniminde ve
+    # kilitli hedefte gercek bir cyan celiskisini anlamakta kullanilir. A2'de tum
+    # hedefler dusmandir; renk, kilit/nisangah kapisi degildir.
     if asama in (2, 3):
         for d in dets:
-            d["anlik_kirmizi"] = anlik_kirmizi_kaniti(frame, d["box"])
+            d["anlik_taraf"] = anlik_taraf_kaniti(frame, d["box"])
+            d["anlik_kirmizi"] = d["anlik_taraf"] == "Düşman"
 
     _hafiza_buda(canli_idler)
     _kayiplari_temizle(canli_idler, int(a["kararlilik"]))
@@ -1928,10 +1941,12 @@ def analiz_et(model, frame, estop=False, asama=None):
             if _kilitli_track_id is None:
                 # HIC KILIT YOK: Ilk defa kilitlenmek uzere hedef ara
                 if time.time() >= _kilitleme_yasagi_t:
-                    if asama in (2, 3):
+                    if asama == 3:
                         aday = [i for i, d in enumerate(dets)
-                                if d["anlik_kirmizi"] and (asama != 3 or d["tip"] == "Düşman")]
+                                if d["anlik_kirmizi"] and d["tip"] == "Düşman"]
                     else:
+                        # A2'de tum maketler dusmandir. Renk okunmasini beklemek,
+                        # %90 guvenli kutu gorunurken bile nisangahi rastgele geciktiriyordu.
                         aday = list(range(len(dets)))
                     # Operator hangi TIPI aradigini sectiyse yalniz onlara kilitlen.
                     aday = [i for i in aday if _tip_uygun(dets[i]["cls"])
@@ -1952,16 +1967,37 @@ def analiz_et(model, frame, estop=False, asama=None):
                 if _kilitli_track_id in _takip_durumlari and "son_det" in _takip_durumlari[_kilitli_track_id]:
                     # Son goruldugu yerin YAKININDA (kutuyla olcekli yaricap) bir kutu var mi?
                     son_det = _takip_durumlari[_kilitli_track_id]["son_det"]
-                    # A2/A3: yeni ID ancak BU KAREDE kirmizi gorunuyorsa devralabilir;
-                    # yoksa drone'u tutan kisinin yanlis "maket" kutusu kilidi calar.
+                    # Kilit bir kez kurulduktan sonra anlik renk kaybi devri engellemez.
+                    # Uzaklik/hareket bulanikligi rengi kaybettirse de kutunun konumu ve
+                    # boyutu ayni fiziksel hedefi gostermeye devam eder. A3'te acik bir
+                    # Dost/Dusman tersligi _yeniden_kilit_uyumlu tarafindan reddedilir.
+                    son_taraf = son_det.get("renk_tip", son_det.get("tip"))
                     ayni_yerdekiler = [i for i, d in enumerate(dets)
                                        if _yeniden_kilit_uyumlu(d, son_det)
                                        and not vurulan_mi(d)
-                                       and (asama not in (2, 3) or d.get("anlik_kirmizi"))]
+                                       and (asama != 3 or son_taraf == "Düşman")]
                     if ayni_yerdekiler:
-                        # Ayni nesne yeni ID almis! Kilidi buna devret (guven onemli degil)
+                        # Ayni nesne yeni ID almis veya tracker bu kare ID vermemis.
+                        # Her iki durumda da GERCEK kutuyu aktif tut; ID yoksa eski kilidi
+                        # koru ki sonraki karede yeniden sifirdan onay beklenmesin.
                         en_iyi = max(ayni_yerdekiler, key=lambda i: dets[i]["conf"])
-                        _kilitli_track_id = dets[en_iyi]["id"]
+                        yeni_id = dets[en_iyi].get("id")
+                        if yeni_id is not None:
+                            if asama == 3 and son_taraf == "Düşman" \
+                                    and dets[en_iyi].get("renk_tip") == "Belirsiz":
+                                # Yeni ID'nin ilk renksiz karesinde onayli dusman tarafini
+                                # devret. Guvenilir cyan cikarsa sonraki karelerde duzelir.
+                                _taraf_hafiza[yeni_id] = "Düşman"
+                                dets[en_iyi]["renk_tip"] = "Düşman"
+                                if dets[en_iyi].get("cls") != "belirsiz":
+                                    dets[en_iyi]["tip"] = "Düşman"
+                            _kilitli_track_id = yeni_id
+                            if yeni_id in _takip_durumlari:
+                                _takip_durumlari[yeni_id]["son_det"] = dict(dets[en_iyi])
+                        else:
+                            gecici = dict(son_det)
+                            gecici.update(box=dets[en_iyi]["box"], conf=dets[en_iyi]["conf"])
+                            _takip_durumlari[_kilitli_track_id]["son_det"] = gecici
                         active_idx = en_iyi
 
                 # Ayni yerde degilse, veya hafiza tamamen silindiyse HICBIR SEY YAPMA.
@@ -2007,26 +2043,25 @@ def analiz_et(model, frame, estop=False, asama=None):
             # artmaya devam etse kilit `kararlilik` kare sonra (~1 sn) duserdi.
             _kayip_sayaclari[_kilitli_track_id] = 0
 
-    # KIRMIZI KAYBI — YALNIZ ASAMA 3 (23.09'da A2'den kaldirildi): kilitli GERCEK kutu
-    # art arda kirmizisiz kalirsa kilit baska bir nesneye (cogunlukla hedefi tutan
-    # insana) kaymis demektir; birak ki gercek hedef yeniden edinilsin.
-    # ⚠ A2'de artik calismaz: orada TUM hedefler dusmandir, rengi okuyamamak
-    #   (isik/boya/uzaklik) kilidi birakmak icin sebep degildir — sistem hedefi
-    #   takip edemez hale geliyordu. A3'te ise renk dost/dusman demektir, kalir.
+    # TARAF CELISKISI — YALNIZ ASAMA 3: ilk kilit zaten guvenilir kirmizi/Dusman
+    # kanitiyla kuruldu. Sonraki karelerde rengin OKUNAMAMASI kilidi dusurmez; isik,
+    # uzaklik ve hareket bulanikligi yuzunden bu cok sik olur ve kutu gorunurken
+    # nisangahi yok eder. Yalniz guvenilir CYAN (Dost) kaniti gelirse kilit
+    # kesilir. A2'de tum hedefler dusman oldugu icin renk hicbir zaman kilit kapisi degil.
     if asama == 3 and _kilitli_track_id is not None and 0 <= active_idx < len(dets):
         d_ = dets[active_idx]
         if not d_.get("hayalet") and not d_.get("roi"):
-            kirmizi_ = d_.get("anlik_kirmizi")
-            if kirmizi_ is None:
-                kirmizi_ = anlik_kirmizi_kaniti(frame, d_["box"])
-            _kirmizisiz[0] = 0 if kirmizi_ else _kirmizisiz[0] + 1
-            if _kirmizisiz[0] >= KIRMIZISIZ_AZAMI:
-                _kirmizisiz[0] = 0
+            taraf_kaniti = d_.get("anlik_taraf")
+            if taraf_kaniti is None:
+                taraf_kaniti = anlik_taraf_kaniti(frame, d_["box"])
+            _dost_kaniti[0] = _dost_kaniti[0] + 1 if taraf_kaniti == "Dost" else 0
+            if _dost_kaniti[0] >= DOST_KANITI_AZAMI:
+                _dost_kaniti[0] = 0
                 _kilitli_track_id = None
                 _kilit_kayip_kare = 0
                 active_idx = -1
     else:
-        _kirmizisiz[0] = 0
+        _dost_kaniti[0] = 0
 
     # ZAMANLA KILIT BIRAKMA (bkz. KILIT_BIRAKMA_S): buraya kadar GERCEK bir kutu
     # (kendi ID'si, yeni ID devri ya da kilit penceresi) bulunamadiysa ve son gercek
@@ -2522,36 +2557,47 @@ if __name__ == "__main__":
     roi_modeli_ayarla(None)
     takip_sifirla()
 
-    # KIRMIZI KAPISI KILIT DEVRINDE (A2): kilitli kirmizi drone bir kare kaybolur,
-    # yaninda koyu renkli yanlis "maket" kutusu (insan) belirir -> kilit ONA GECMEZ.
-    # Kilitli ID'nin kutusu insana kayarsa KIRMIZISIZ_AZAMI kare sonra kilit birakilir.
+    # NISANGAH SUREKLILIGI: A2'de tum hedefler dusmandir; renk okunmasa bile yuksek
+    # guvenli kutu kilitlenir. ByteTrack ID degistirirse veya bir kare ID vermezse
+    # ayni yerdeki gercek kutu aktif kalir ve nisangah kaybolmaz.
     takip_sifirla()
     roi_modeli_ayarla(None)
     sahne = _np.zeros((480, 640, 3), _np.uint8)
     sahne[:] = (200, 200, 200)
-    sahne[100:180, 100:200] = (0, 0, 255)                 # kirmizi drone
-    sahne[100:180, 180:280] = (60, 60, 60)                # koyu gri insan govdesi
-    drn = _SahteKutu(0, 0.95, (100, 100, 200, 180), 7)
-    ins = _SahteKutu(0, 0.90, (180, 100, 280, 180), 8)
+    drn = _SahteKutu(0, 0.95, (100, 100, 200, 180), 7)    # gri/renksiz hedef
     sahte.kutular = [drn]
     for _ in range(5):
         dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
-    assert _kilitli_track_id == 7, _kilitli_track_id
-    sahte.kutular = [ins]                                  # drone kayip, insan yakinda
+    assert _kilitli_track_id == 7 and aktif >= 0, (_kilitli_track_id, aktif)
+
+    sahte.kutular = [_SahteKutu(0, 0.90, (104, 100, 204, 180), 8)]
     dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
-    assert _kilitli_track_id == 7 and (aktif < 0 or dets[aktif].get("hayalet")), (_kilitli_track_id, dets)
-    # ByteTrack kilitli ID'yi (7) insanin kutusuna tasirsa:
-    tasinan = _SahteKutu(0, 0.90, (180, 100, 280, 180), 7)
-    sahte.kutular = [tasinan]
-    # ASAMA 2'de kilit BIRAKILMAZ (23.09): orada tum hedefler dusmandir, rengi
-    # okuyamamak (isik/boya/uzaklik) kilidi birakmak icin sebep degil.
-    for _ in range(KIRMIZISIZ_AZAMI + 1):
-        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
-    assert _kilitli_track_id == 7, _kilitli_track_id
-    # ASAMA 3'te renk dost/dusman demektir: kirmizisiz kalan kilit BIRAKILIR.
-    for _ in range(KIRMIZISIZ_AZAMI + 1):
+    assert _kilitli_track_id == 8 and aktif >= 0 and dets[aktif]["id"] == 8, (
+        _kilitli_track_id, dets)
+
+    sahte.kutular = [_SahteKutu(0, 0.90, (108, 100, 208, 180), None)]
+    dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert _kilitli_track_id == 8 and aktif >= 0 and dets[aktif]["id"] is None, (
+        _kilitli_track_id, dets)
+
+    # A3'te ilk kilit kirmizi/Dusman kaniti ister. Kilit kurulduktan sonra renk
+    # okunamaz hale gelse bile gorunen ayni kutu izlenir; gercek cyan celiskisi ise
+    # dost guvenligi icin kilidi keser.
+    takip_sifirla()
+    sahne[:] = (200, 200, 200)
+    sahne[100:180, 100:200] = (0, 0, 255)
+    sahte.kutular = [_SahteKutu(0, 0.95, (100, 100, 200, 180), 11)]
+    for _ in range(5):
         dets, _b, aktif = analiz_et(sahte, sahne, asama=3)
-    assert _kilitli_track_id is None, _kilitli_track_id
+    assert _kilitli_track_id == 11 and aktif >= 0
+    sahne[100:180, 100:200] = (80, 80, 80)                # renk artik okunamiyor
+    for _ in range(DOST_KANITI_AZAMI + 3):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=3)
+        assert _kilitli_track_id == 11 and aktif >= 0, (_kilitli_track_id, dets)
+    sahne[100:180, 100:200] = (255, 163, 0)               # cyan (#00A3E0, BGR)
+    for _ in range(DOST_KANITI_AZAMI):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=3)
+    assert _kilitli_track_id is None and aktif == -1, (_kilitli_track_id, dets)
     takip_sifirla()
 
     # ZOR ORNEK: roi/dusuk etiketli, kayip etiketsiz kaydedilir; hiz siniri uygulanir
@@ -2629,8 +2675,10 @@ if __name__ == "__main__":
     assert _takip_cozunurlugu(640, None, False, 0, ARAMA_YUKSEK_PERIYOT, 1280) == 1280
     assert _ana_taramada_guclu_aday([{"id": 1, "conf": 80}], {"onay_esigi": 0.7})
     assert not _ana_taramada_guclu_aday([{"id": 1, "conf": 50}], {"onay_esigi": 0.7})
-    assert not _ana_taramada_guclu_aday([{"id": 1, "conf": 90, "anlik_kirmizi": False}],
-                                         {"onay_esigi": 0.7}, 2)
+    assert _ana_taramada_guclu_aday([{"id": 1, "conf": 90, "anlik_kirmizi": False}],
+                                    {"onay_esigi": 0.7}, 2)
+    assert not _ana_taramada_guclu_aday(
+        [{"id": 1, "conf": 90, "anlik_kirmizi": False}], {"onay_esigi": 0.7}, 3)
 
     # ARANAN HEDEF TIPI (operator arayuzden secer)
     assert hedef_tipleri() is None and _tip_uygun("fuze") and _tip_uygun("drone")
