@@ -267,6 +267,9 @@ VARSAYILAN_AYAR = {
     # 30 FPS'te 80/80 ms. Uygulama 60 FPS istedigi icin varsayilan 40 ms;
     # kamera FPS'i degisirse yeniden olculmeli.
     "kamera_gecikme": 0.04,
+    # Otonom takip kararlilik denetcisi (bkz. hedef_kestirici.KararlilikDenetcisi):
+    # salinim gorulurse ataklik kendiliginden kisilir. Kapatilirsa eski davranis.
+    "takip_denetci": 1,
     # KILIT PENCERESI: kilitli hedef ana taramada bulunamazsa son yerinin cevresi
     # TAM COZUNURLUKTE kirpilip ikinci kez taranir (kucuk/uzak hedef 2x buyur).
     "roi_tespit": 1,
@@ -340,6 +343,7 @@ AYAR_SINIR = {
     "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
     "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60), "nisan_govde": (0, 1),
     "takip_ppd_pan": (4.0, 60.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
+    "takip_denetci": (0, 1),
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),
     "arama_cozunurluk": (320, 1920), "uzak_tarama": (0, 1), "uzak_tarama_periyot": (1, 30), "uzak_kirmizi": (0, 1), "zor_ornek": (0, 1),
     "uzak_onay_esigi": (0.10, 0.99), "renk_takip": (0, 1),

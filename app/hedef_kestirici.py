@@ -287,6 +287,108 @@ class KalmanTakipKontrolu:
         return hedef
 
 
+class KararlilikDenetcisi:
+    """Salinimi FARK EDER ve kontrolcunun atakligini kendiliginden kiser.
+
+    NEDEN VAR. Bu dongude toplam gecikme (kamera + cikarim + seri + motor) tam
+    bilinemez: kameraya, cozunurluge, islemci yukune gore degisir ve kare kare
+    oynar. Kare aninin YANLIS bilinmesi olcume eksenin KENDI hareketini sizdirir
+    (yanilgi ≈ telafi_hatasi x eksen_hizi); eksen hedefe dogru dondugu icin bu
+    yanilgi hep ayni yondedir, kestirici onu "hedef kaciyor" diye okur, hiz
+    kestirir, motor o hizla surer, hata buyur — sonmeyen salinim.
+
+    BENZETIMDE OLCULDU (16 FPS, gercekci motor, duran hedef): telafi hatasi
+    0.06 sn iken salinim 1.6 derece; 0.16 sn'de 38 DERECE ve ortalama hata 216 px.
+    Yani tek bir "dogru gecikme sayisi"na bel baglamak kirilgan.
+
+    AYIRT EDICI SINYAL. "Eksen cok dondu" tek basina salinim demek degildir —
+    hedef gercekten hareket ediyorsa eksen de cok doner. Salinimin imzasi
+    EFORUN SONUC VERMEMESIDIR: eksen surekli yon degistiriyor AMA hata buyuk
+    kaliyor. Saglikli takipte hata olu bolgenin birkac kati icindedir (benzetim:
+    ort 5-9 px), salinimda 20-35 kati (156-209 px).
+
+    Salinim gorulunce ATAKLIK (hiz ileri beslemesi ve konum adimi) carpan ile
+    kisilir; namlu yavaslayinca gecikmenin urettigi yanilgi da kuculur ve dongu
+    kendini toparlar. Sakinlik surunce ataklik yavasca geri verilir.
+
+    Bu, "Kamera gecikmesi" ayarini DOGRU girmenin yerine gecmez; yanlis
+    girildiginde sistemin savrulmasini onler. Kotu gunde yavas ama KARARLI olmak,
+    hizli ama savruk olmaktan iyidir.
+    """
+
+    # Varsayilanlar benzetimle tarandi (16 FPS, gercekci motor, 3 px tespit gurultusu;
+    # duran ve +-8 derece 0.25 Hz hareketli hedef). Secilen deger (dusus 0.5,
+    # tirmanis 0.005) gecikme DOGRU girildiginde hicbir sey degistirmiyor (ataklik
+    # 1.00'de kaliyor, hata 2 ve 9 px), YANLIS girildiginde felaketi onluyor:
+    #   duran hedef, 0.16 sn telafi hatasi : 215 px -> 3 px
+    #   hareketli,   0.11 sn hata          : 159 px -> 11 px
+    #   hareketli,   0.16 sn hata          : 210 px -> 20 px
+    # Daha agresif ayarlar (dusus 0.4 / hata_esik 3) saglikli durumu da bozuyordu
+    # (9 px -> 46 px): salinim olmayan yerde ataklik kismak takibi geriden birakir.
+    TABAN_ATAK = 0.15          # ataklik bunun altina inmez (tamamen durmasin)
+
+    def __init__(self, yon_esik=1.0, hata_esik=5.0, pencere=1.5, dusus=0.5,
+                 tirmanis=0.005, taban=None):
+        taban = self.TABAN_ATAK if taban is None else taban
+        self.yon_esik = float(yon_esik)      # saniyede kac yon degisimi salinim sayilir
+        self.hata_esik = float(hata_esik)    # hata olu bolgenin kac kati ise "sonuc yok"
+        self.pencere = float(pencere)
+        self.dusus = float(dusus)
+        self.tirmanis = float(tirmanis)
+        self.taban = float(taban)
+        self.sifirla()
+
+    def sifirla(self):
+        self.atak = 1.0
+        self._yon = 0
+        self._degisim = []                   # yon degisim anlari
+        self._son_hedef = None
+        self._hata = []                      # [(t, |hata_px| / olu_px)]
+
+    def olcum_bildir(self, t, hata_px, olu_px):
+        """Her olcumde cagrilir: hatanin olu bolgeye orani penceresi."""
+        if hata_px is None or not olu_px:
+            return
+        t = float(t)
+        self._hata.append((t, abs(float(hata_px)) / max(1e-6, float(olu_px))))
+        while self._hata and self._hata[0][0] < t - self.pencere:
+            self._hata.pop(0)
+
+    @property
+    def hata_orani(self):
+        return sum(o for _, o in self._hata) / len(self._hata) if self._hata else 0.0
+
+    def komut(self, t, hedef):
+        """Uretilen her komutta cagrilir. Doner: ataklik carpani (0..1]."""
+        t = float(t)
+        if self._son_hedef is not None:
+            fark = hedef - self._son_hedef
+            if abs(fark) > 0.05:
+                yon = 1 if fark > 0 else -1
+                if self._yon and yon != self._yon:
+                    self._degisim.append(t)
+                self._yon = yon
+        self._son_hedef = hedef
+        while self._degisim and self._degisim[0] < t - self.pencere:
+            self._degisim.pop(0)
+        salinim = (len(self._degisim) / self.pencere >= self.yon_esik
+                   and self.hata_orani >= self.hata_esik)
+        if salinim:
+            self.atak = max(self.taban, self.atak * self.dusus)
+            self._degisim.clear()            # kisme uygulandi; etkisi olculsun
+        else:
+            self.atak = min(1.0, self.atak + self.tirmanis)
+        return self.atak
+
+
+# OLCUM KAYNAGINA GORE GUVEN. Hepsi ayni kutuyu verir ama ayni sey degildir:
+#   model : o karede modelin gercekten gordugu tespit.
+#   roi   : yuksek cozunurluklu pencere — dogru ama kirpma sinirinda kayabilir.
+#   renk  : model kacirdi, kilit kirmizi lekeyle tasindi. Sahada bir insanin bordo
+#           tisortu de kirmizidir; bu olcumun motoru tam guvenle surmesi istenmez.
+# Guven, olcum gurultusunu (r) boler: 0.4 guven = 2.5 kat gurultulu sayilir.
+KAYNAK_GUVENI = {"model": 1.0, "roi": 0.7, "renk": 0.4}
+
 BOSLUK_OGRENME_TAVANI = 1.0      # derece — calisirken ogrenilen boslugun ust siniri
 
 
@@ -359,6 +461,7 @@ class EksenTakip:
         self.durus_hizi = max(0.0, float(durus_hizi))
         self.kayip_kovalamasi = max(0.0, float(kayip_kovalamasi))
         self.azami_sicrama = max(0.5, float(azami_sicrama))
+        self.denetci = KararlilikDenetcisi()
         self.sifirla()
 
     def sifirla(self):
@@ -388,6 +491,7 @@ class EksenTakip:
         self._yavas_t = None                        # hiz esigin altina ne zaman indi
         self._hiz_gecmisi = []                      # [(t_kare, hiz)] — son ~1 sn
         self._kayip_durdu = False                   # kayipta tek hiz-sifir komutu
+        self.denetci.sifirla()
 
     @property
     def hazir(self):
@@ -458,19 +562,38 @@ class EksenTakip:
             self._hareket_yon = yon
             self._son_aci = aci
 
-    def olcum(self, t_kare, aci_kare, hata_px, ppd):
+    def olcum(self, t_kare, aci_kare, hata_px, ppd, guven=1.0, olu_px=None):
         """Kare `t_kare`de cekildi; eksen o an `aci_kare`deydi; hedef merkezden
-        `hata_px` uzakta. Doner: olcum kabul edildi mi."""
-        if aci_kare is None or hata_px is None or not ppd:
+        `hata_px` uzakta. Doner: olcum kabul edildi mi.
+
+        `guven`: olcumun guvenilirligi (1.0 = model tespiti). Dusuk guvenli olcum
+        (renkle tasinan kutu, ROI penceresi) kestiriciye DAHA ZAYIF girer: gurultusu
+        yuksektir ve yanlis nesneye kaymis olabilir.
+        `olu_px`: o karedeki isabet yaricapi — kararlilik denetcisi "efor cok, sonuc
+        yok" durumunu bu oranla anlar (bkz. KararlilikDenetcisi)."""
+        if hata_px is None or not ppd or aci_kare is None:
             return False
-        z = float(aci_kare) - self._ofset(t_kare) + self.isaret * float(hata_px) / float(ppd)
-        self._son_kare = (float(t_kare), float(hata_px), float(ppd))
-        kabul = self.kestirici.guncelle(t_kare, z)
+        t_kare = t_olcum = float(t_kare)
+        z = float(aci_kare) - self._ofset(t_olcum) + self.isaret * float(hata_px) / float(ppd)
+        self._son_kare = (t_kare, float(hata_px), float(ppd))
+        eski_r, eski_esik = self.kestirici.r, self.kestirici.aykiri_esik
+        guven = max(0.05, min(1.0, float(guven)))
+        if guven < 1.0:
+            # Iki sey birden: olcum daha AZ ceker (r buyur) ve daha KOLAY reddedilir
+            # (aykiri esigi daralir). Yalniz r buyutulseydi aykiri kapisi da genisler,
+            # yani en az guvendigimiz olcum en kolay kabul edilirdi — tam tersi.
+            self.kestirici.r = eski_r / guven
+            self.kestirici.aykiri_esik = max(1.0, eski_esik * guven)
+        try:
+            kabul = self.kestirici.guncelle(t_olcum, z)
+        finally:
+            self.kestirici.r, self.kestirici.aykiri_esik = eski_r, eski_esik
         if kabul:
             self._kayip_durdu = False
-            self._hiz_gecmisi.append((float(t_kare), self.kestirici.hiz))
-            while self._hiz_gecmisi and self._hiz_gecmisi[0][0] < t_kare - 1.0:
+            self._hiz_gecmisi.append((t_olcum, self.kestirici.hiz))
+            while self._hiz_gecmisi and self._hiz_gecmisi[0][0] < t_olcum - 1.0:
                 self._hiz_gecmisi.pop(0)
+            self.denetci.olcum_bildir(t_olcum, hata_px, olu_px)
         return kabul
 
     def _ort_hiz(self, simdi, pencere):
@@ -545,9 +668,11 @@ class EksenTakip:
         # titretir. Ongoru yalniz gercekten hareket eden hedefe uygulanir.
         if abs(hiz) > self.durus_hizi:
             tahmin += hiz * self.ileri
+        atak = self.denetci.komut(simdi, tahmin)
         self.son_tahmin = tahmin
         namlu = aci - self._ofset()
         hedef = max(namlu - self.azami_sicrama, min(namlu + self.azami_sicrama, tahmin))
+        hedef = namlu + atak * (hedef - namlu)
         referans = namlu if self.son_komut is None else self.son_komut
         fark = hedef - referans
         olu = self.olu if olu is None else max(self.olu, float(olu))
@@ -669,6 +794,12 @@ class EksenTakip:
         hedef = self.kestirici.tahmin(simdi)
         namlu = aci - self._ofset()
         hedef = max(namlu - self.azami_sicrama, min(namlu + self.azami_sicrama, hedef))
+        # KARARLILIK DENETCISI: salinim goruluyorsa hem adim hem ileri beslenen hiz
+        # kisilir (bkz. KararlilikDenetcisi). Namlu yavaslayinca gecikmenin urettigi
+        # olcum yanilgisi da kuculur — salinimi besleyen dongu kirilir.
+        atak = self.denetci.komut(simdi, hedef)
+        hedef = namlu + atak * (hedef - namlu)
+        hiz *= atak
         self.son_tahmin = hedef
         # Bosluk tarafi: hedef belirgin hizla hareket ediyorsa hizin yonu; yavasta ancak
         # konum farki boslugu asinca degisir. Histerezissiz her kucuk hiz isaret
@@ -937,5 +1068,81 @@ if __name__ == "__main__":
         p, v = EksenTakip._yorunge_sinirla(konum, hiz, 21.0, 31.0)
         assert 22.5 <= p <= 29.5 and 22.5 <= p + 0.25 * v <= 29.5, (p, v)
 
+    # ---- KARARLILIK DENETCISI: gecikme telafisi yanlisken savrulmayi onler ----
+    # Sahada gorulen (23.09 ekran kaydi): namlu saga sola savruluyor, hedefi
+    # ortalayamiyor. Benzetimde kok sebep: kare aninin yanlis bilinmesi -> olcume
+    # eksenin kendi hareketi siziyor -> kestirici bunu "hedef kaciyor" saniyor.
+    def _dongu(gercek_gecikme, kod_gecikmesi, genlik, denetci_acik, sure=25.0,
+               ppd=18.7, tohum=3, gurultu=3.0):
+        """16 FPS goru + gercekci motor (hiz/ivme sinirli) kapali cevrim benzetimi."""
+        rng = random.Random(tohum)
+        dtk = 1 / 16.0
+        t, eksen, hedef_aci, motor_hiz = 0.0, 0.0, 0.0, 0.0
+        gecmis = [(0.0, 0.0)]
+        tk = EksenTakip(isaret=1.0, bosluk=0.0, telafi=0.0)
+        if not denetci_acik:
+            tk.denetci.taban = 1.0             # eski davranis: ataklik hic kisilmez
+        def aci(tt):
+            return next((a for (s_, a) in reversed(gecmis) if s_ <= tt), 0.0)
+        hatalar = []
+        while t < sure:
+            for _ in range(int(dtk / 0.002)):  # motor: 60 der/sn, 200 der/sn^2
+                istenen = max(-60.0, min(60.0, (hedef_aci - eksen) / 0.05))
+                motor_hiz += max(-0.4, min(0.4, istenen - motor_hiz))
+                eksen += motor_hiz * 0.002
+            gecmis.append((t, eksen))
+            hedef = genlik * math.sin(2 * math.pi * 0.25 * t)
+            hata_px = (hedef - aci(t - gercek_gecikme)) * ppd + rng.gauss(0, gurultu)
+            tk.olcum(t - kod_gecikmesi, aci(t - kod_gecikmesi), hata_px, ppd, olu_px=6.0)
+            r = tk.yorunge_komut(t, eksen, -30.0, 30.0, hata_px=hata_px, olu_px=6.0)
+            if r is not None:
+                hedef_aci = r[0]
+            hatalar.append(abs(hedef - eksen) * ppd)
+            t += dtk
+        yerlesik = hatalar[len(hatalar) // 2:]
+        return sum(yerlesik) / len(yerlesik), tk.denetci.atak
+
+    # 1. Gecikme DOGRU girildiginde denetci hicbir seyi degistirmemeli (bedeli yok).
+    for genlik in (0.0, 8.0):
+        kapali, _ = _dongu(0.04, 0.04, genlik, False)
+        acik, atak = _dongu(0.04, 0.04, genlik, True)
+        assert acik <= kapali * 1.15, (genlik, kapali, acik)
+        assert atak > 0.95, (genlik, atak)
+
+    # 2. Telafi hatasi buyukken (0.16 sn) eski davranis SAVRULUR, denetci toparlar.
+    kapali, _ = _dongu(0.20, 0.04, 0.0, False)
+    acik, atak = _dongu(0.20, 0.04, 0.0, True)
+    assert kapali > 100.0, f"benzetim savrulmayi uretmedi ({kapali:.0f} px)"
+    assert acik < 20.0, f"denetci savrulmayi onlemedi ({acik:.0f} px)"
+    assert atak < 0.6, atak
+
+    # 3. Hareketli hedefte de ayni (hedefin kendi salinimi denetciyi yanıltmamali).
+    kapali, _ = _dongu(0.15, 0.04, 8.0, False)
+    acik, _ = _dongu(0.15, 0.04, 8.0, True)
+    assert kapali > 100.0 and acik < 30.0, (kapali, acik)
+
+    # 4. Dusuk guvenli olcum kestiriciyi daha az ceker (renkle tasinan kutu).
+    k_tam = EksenTakip(isaret=1.0, bosluk=0.0, telafi=0.0)
+    k_zayif = EksenTakip(isaret=1.0, bosluk=0.0, telafi=0.0)
+    for i in range(6):
+        k_tam.olcum(i * 0.06, 0.0, 0.0, 18.7)
+        k_zayif.olcum(i * 0.06, 0.0, 0.0, 18.7)
+    k_tam.olcum(0.36, 0.0, 12.0, 18.7, guven=1.0)
+    k_zayif.olcum(0.36, 0.0, 12.0, 18.7, guven=KAYNAK_GUVENI["renk"])
+    assert abs(k_zayif.kestirici.x[0]) < abs(k_tam.kestirici.x[0]), (
+        k_zayif.kestirici.x[0], k_tam.kestirici.x[0])
+    # ...ve acikca yanlis bir olcum (baska nesneye atlamis renk lekesi) dusuk
+    # guvenle DAHA KOLAY reddedilmeli: aykiri kapisi daralir.
+    k_tam2 = EksenTakip(isaret=1.0, bosluk=0.0, telafi=0.0)
+    k_zayif2 = EksenTakip(isaret=1.0, bosluk=0.0, telafi=0.0)
+    for i in range(8):
+        k_tam2.olcum(i * 0.06, 0.0, 0.0, 18.7)
+        k_zayif2.olcum(i * 0.06, 0.0, 0.0, 18.7)
+    sicrama = 80.0
+    kabul_tam = k_tam2.olcum(0.48, 0.0, sicrama, 18.7, guven=1.0)
+    kabul_zayif = k_zayif2.olcum(0.48, 0.0, sicrama, 18.7, guven=KAYNAK_GUVENI["renk"])
+    assert not kabul_zayif, "dusuk guvenli sicrama kabul edildi"
+
     print("hedef_kestirici testleri OK — hiz kestirimi, kesintide tahmin, gurultu, "
-          "aykiri/geri-zaman korumasi, hiz-sinirli yumusak komut, sentetik takip")
+          "aykiri/geri-zaman korumasi, hiz-sinirli yumusak komut, sentetik takip, "
+          "kaynak guveni, KARARLILIK DENETCISI (gecikme yanlisken savrulma)")

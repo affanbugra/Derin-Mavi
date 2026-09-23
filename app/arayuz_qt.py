@@ -44,6 +44,7 @@ import kontrol as kontrol_mod
 import protokol as P          # hiz duzeyi/durum sabitleri — TEK KAYNAK (bkz. protokol.py)
 import hedef_kestirici as HK
 import tilt_surucu as TS
+import takip_kaydi as TK   # otonom takibin kara kutusu (loglar/takip_*.csv)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 # Model klasoru: repo kokunde "models/". Ekip arkadaslari kendi egittikleri agirligi
@@ -763,6 +764,56 @@ AYAR_TANIM_NISAN = [
      "Model bir gün balon sınıfını öğrenirse gerçek tespit bu kestirimi otomatik ezer."),
 ]
 
+# TAKİP (sürekli takip kontrolcüsü — iki eksen de konumunu bildirirken)
+# ⚠ Bu grup, otonom takibin SAHADA en çok ayar isteyen kısmıdır. Değerler koda
+# gömülü kalsaydı yarışma günü kodun içine girmek gerekirdi.
+AYAR_TANIM_TAKIP = [
+    ("kamera_gecikme", "Kamera gecikmesi", "milis", 0, 300,
+     "Bir kare KAMERADAN ÇIKANA kadar geçen süre (kablo + sürücü + çözme). Sistem, "
+     "hedefin dünya açısını \"kare çekildiği andaki eksen açısı + piksel hatası\" "
+     "diye hesaplar; o AN yanlış bilinirse ölçüme namlunun KENDİ hareketi karışır.\n\n"
+     "⚠ BU AYAR OTONOM TAKİBİN EN KRİTİK SAYISIDIR. Benzetimde ölçüldü: 0.06 sn "
+     "hata sorun çıkarmıyor, 0.11 sn hatada sistem sönmeyen salınıma giriyor "
+     "(ortalama hata 3 px → 160 px).\n\n"
+     "NASIL ÖLÇÜLÜR: `python app/kamera_gecikme_olc.py` — ya da otonom modda birkaç "
+     "dakika çalıştırıp `python app/takip_analiz.py loglar/takip_*.csv` (kara kutu "
+     "kaydından ölçer, önerilen değeri yazar).\n\n"
+     "Tipik: 30–120 ms. Emin değilseniz olduğundan BÜYÜK girmek, küçük girmekten "
+     "daha güvenlidir (büyük değer takibi yavaşlatır, küçük değer savurur)."),
+    ("takip_ppd_pan", "Takip ölçeği (px/derece)", "onda", 40, 600,
+     "Gimbal 1 derece dönünce görüntü kaç piksel kayıyor. Piksel hatasını açıya "
+     "çevirmenin tek yolu budur.\n\n"
+     "NASIL ÖLÇÜLÜR: manuel modda sabit bir noktaya bakıp yatayda tam 10° döndürün; "
+     "görüntüdeki bir ayrıntının kaç piksel kaydığını ölçüp 10'a bölün. Ya da "
+     "`python app/tilt_canli_takip.py --olc_ppd`.\n\n"
+     "↑ FAZLA girilirse: namlu gerekenden az döner, hedefin arkasında kalır.\n"
+     "↓ AZ girilirse: hedefi aşar, salınım başlar.\n\n"
+     "23.09 ekran kaydından ölçüldü: ~20.1 px/derece (o gün ayar 18.7'ydi). "
+     "Kamera veya çözünürlük değişirse bu sayı da değişir."),
+    ("takip_bosluk", "Dişli boşluğu", "onda", 0, 40,
+     "Motor yön değiştirdiğinde namlunun kıpırdamadan geçtiği açı (backlash). "
+     "Kart darbe sayar, namlu ise boşluk kapanana kadar yerinde durur.\n\n"
+     "Sistem bunu çalışırken de öğrenir; buradaki değer başlangıç tahminidir.\n"
+     "Sahada ölçülen: dikey 0.1–0.9°, yatay 0.2–0.7°.\n\n"
+     "↑ FAZLA girilirse: duran hedefte ileri-geri oynama başlar.\n"
+     "↓ AZ girilirse: yön değişiminde küçük bir kalıcı sapma kalır."),
+    ("takip_denetci", "Salınım koruması", "anahtar", 0, 1,
+     "Namlu salınmaya başlarsa (yön değiştirip duruyor ama hata küçülmüyorsa) takip "
+     "atakliğini kendiliğinden kısar, sakinleşince geri verir.\n\n"
+     "NEDEN VAR: gecikme veya ölçek yanlış girildiğinde sistem sönmeyen salınıma "
+     "girer (23.09 sahada görülen davranış). Bu koruma sebebi düzeltmez ama "
+     "savrulmayı önler — benzetimde ortalama hata 215 px → 3 px.\n\n"
+     "Gecikme DOĞRU girildiğinde hiçbir şey değiştirmez (ölçüldü: aynı hata, "
+     "atakllık %100'de kalır). Kapatmak için bir sebep yoksa AÇIK bırakın."),
+    ("renk_takip", "Renkle kilit sürdürme", "anahtar", 0, 1,
+     "Model kilitli hedefi bir karede kaçırırsa, son yerinin yanındaki kırmızı leke "
+     "o karenin ölçümü olur (en fazla 1.5 sn).\n\n"
+     "ARTISI: tespit kesildiğinde kilit düşmez, takip sürer.\n"
+     "EKSİSİ: sahnedeki başka bir kırmızı (bordo tişört, kırmızı çanta) hedef "
+     "sanılabilir. Bu yüzden renkle gelen ölçüme model tespitinden DAHA AZ güvenilir "
+     "ve motoru daha zayıf çeker."),
+]
+
 # Otonom Ateşleme Ayarları
 OTONOM_DWELL_SURE = 0.5  # sn (Hedef bu kadar süre merkezde kalırsa lazer açılır)
 OTONOM_ATES_SURE = 1.0   # sn (Lazer açıldıktan sonra en az bu kadar süre açık kalır)
@@ -817,7 +868,8 @@ class InferenceThread(QThread):
         if fn is None:
             return
         try:
-            aci = fn(kare_t - float(algi.AYAR.get("kamera_gecikme", 0.03)))
+            aci = fn(kare_t - float(algi.AYAR.get("kamera_gecikme",
+                                                  algi.VARSAYILAN_AYAR["kamera_gecikme"])))
         except Exception:
             aci = None
         if aci is None or None in aci:
@@ -825,7 +877,8 @@ class InferenceThread(QThread):
             return
         onceki, self._onceki_kamera_acisi = self._onceki_kamera_acisi, aci
         if onceki is not None:
-            ppd = float(algi.AYAR.get("takip_ppd_pan", 18.7)) * genislik / 1280.0
+            ppd = float(algi.AYAR.get("takip_ppd_pan",
+                                      algi.VARSAYILAN_AYAR["takip_ppd_pan"])) * genislik / 1280.0
             algi.kamera_kaymasi_bildir(-(aci[0] - onceki[0]) * ppd,
                                        (aci[1] - onceki[1]) * ppd)
 
@@ -929,8 +982,17 @@ class InferenceThread(QThread):
                         else:
                             merkezde = True
                         (ex, ey), (olu_x, olu_y) = self.nisanci.son_hata_px, self.nisanci.son_olu_px
+                        # KAYNAK kontrol icin onemlidir: "model" gercek tespit, "renk"
+                        # modelin kacirdigi karede kirmizi lekeyle tasinan kutu, "roi"
+                        # yuksek cozunurluklu pencere. Ucu ayni guvende DEGILDIR;
+                        # kestirici renk olcumune daha az guvenir (bkz. _takip_olcum_geldi).
+                        kaynak = ("renk" if aktif_det.get("renk") else
+                                  "roi" if aktif_det.get("roi") else "model")
                         self.takip_olcum.emit({"var": True, "t": kare_t, "ex": ex, "ey": ey,
-                                               "olu_x": olu_x, "olu_y": olu_y, "w": w})
+                                               "olu_x": olu_x, "olu_y": olu_y, "w": w, "h": h,
+                                               "kaynak": kaynak, "kutu": tuple(kutu),
+                                               "nisan": hedef_xy, "id": aktif_det.get("id"),
+                                               "conf": aktif_det.get("conf")})
                 else:
                     self.nisanci.sifirla()
                 if self.otonom and not self.estop and not gercek_hedef:
@@ -1270,10 +1332,6 @@ class MainWindow(QMainWindow):
         self.hiz_seviye = P.HIZ_VARSAYILAN
         self._nisan_son_t = None   # otonom PD komutlari icin hiz-siniri zamanlayicisi
         self._nisan_mesgul_ta = 0.0   # bu zamana kadar yeni otonom komutu KABUL EDILMEZ
-        self._pan_takip = HK.EksenTakip(isaret=+1.0,
-                                        bosluk=algi.AYAR.get("takip_bosluk", 0.8))
-        self._tilt_takip = HK.EksenTakip(isaret=-1.0,
-                                         bosluk=algi.AYAR.get("takip_bosluk", 0.8))
         self._acilis_yukselisi = False
         self._acilis_yukselisi_bekliyor = False
         self._otonom_ates_aktif = False
@@ -1283,6 +1341,11 @@ class MainWindow(QMainWindow):
         # kaydedilmez: "gecen sefer %100'de birakmisiz" diye baslamak istemeyiz.
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
         self._ayar_yukle()   # kayitli ayarlar varsa algi.AYAR'a yukle (sliderlar bunu okur)
+        # ⚠ Takipciler ayar dosyasi okunduktan SONRA kurulur: eskiden once
+        # kuruluyordu ve kayitli `takip_bosluk` hicbir zaman uygulanmiyordu.
+        bosluk = float(algi.AYAR.get("takip_bosluk", algi.VARSAYILAN_AYAR["takip_bosluk"]))
+        self._pan_takip = HK.EksenTakip(isaret=+1.0, bosluk=bosluk)
+        self._tilt_takip = HK.EksenTakip(isaret=-1.0, bosluk=bosluk)
 
         # Icerik tuvali: yuksekligi sabit 900, GENISLIGI EKRANIN ORANINA gore ayarlanir.
         # Boylece her ekranda (16:9, 16:10, ultrawide...) yan bosluk (letterbox) KALMAZ.
@@ -1689,7 +1752,8 @@ class MainWindow(QMainWindow):
         # Gruplar hangi ayarin neyi etkiledigini bir bakista gosterir.
         for baslik, tanimlar in (("TESPİT", AYAR_TANIM_TESPIT),
                                  ("SAHI (Uzak Nesne)", AYAR_TANIM_SAHI),
-                                 ("NİŞAN (Otonom takip)", AYAR_TANIM_NISAN)):
+                                 ("NİŞAN (Otonom takip)", AYAR_TANIM_NISAN),
+                                 ("TAKİP (kararlılık)", AYAR_TANIM_TAKIP)):
             gb = QLabel(baslik)
             gb.setObjectName("ayargrup")
             iv.addWidget(gb)
@@ -1811,6 +1875,8 @@ class MainWindow(QMainWindow):
             return int(round(float(v) * 100))
         if tip == "onda":
             return int(round(float(v) * 10))
+        if tip == "milis":
+            return int(round(float(v) * 1000))
         return int(v)                                  # "kare", "sayi", "anahtar"
 
     def _ayar_gercek_deger(self, tip, val):
@@ -1823,6 +1889,8 @@ class MainWindow(QMainWindow):
             return val / 100.0
         if tip == "onda":
             return val / 10.0
+        if tip == "milis":
+            return val / 1000.0
         return int(val)                                # "kare", "sayi", "anahtar"
 
     def _ayar_deger_yaz(self, tip, val, lbl, key=None):
@@ -1835,6 +1903,8 @@ class MainWindow(QMainWindow):
         elif tip == "onda":
             birim = "°" if key == "fov" else " sn"
             lbl.setText(f"{val / 10:.1f}{birim}")
+        elif tip == "milis":
+            lbl.setText(f"{val} ms")
         elif tip == "anahtar":
             lbl.setText("Açık" if val else "Kapalı")
         elif tip == "sayi":
@@ -3007,6 +3077,24 @@ class MainWindow(QMainWindow):
             tilt_sure = 2.0 * math.sqrt(abs(d_pitch) / max(1.0, tilt_ivme))
             sure = max(pan_sure, tilt_sure) * NISAN_MESGUL_ORANI
             self._nisan_mesgul_ta = simdi + max(NISAN_MIN_ARALIK, sure)
+    def _takip_ayarlarini_uygula(self):
+        """⚙ panelindeki TAKİP ayarlarini CANLI uygular (yeniden baslatma gerekmez).
+        Sahada bir ayarin etkisini gormek icin uygulamayi kapatmak zorunda kalmak,
+        o ayarin hic olmamasiyla neredeyse ayni seydir."""
+        denetci = bool(int(algi.AYAR.get("takip_denetci",
+                                         algi.VARSAYILAN_AYAR["takip_denetci"])))
+        bosluk = float(algi.AYAR.get("takip_bosluk", algi.VARSAYILAN_AYAR["takip_bosluk"]))
+        for tk in (self._pan_takip, self._tilt_takip):
+            # taban=1.0 -> ataklik hic kisilmez (denetci etkisiz)
+            taban = HK.KararlilikDenetcisi.TABAN_ATAK if denetci else 1.0
+            if tk.denetci.taban != taban:
+                tk.denetci.taban = taban
+                if not denetci:
+                    tk.denetci.atak = 1.0
+            if abs(tk.bosluk - bosluk) > 1e-6:
+                tk.bosluk = bosluk
+                tk.bosluk_kest = bosluk * tk.telafi     # ogrenme yeni tabandan basar
+
     def _kamera_acilari(self, t):
         """(pan, kamera yukselisi) `t` aninda — InferenceThread'den cagrilir (okuma)."""
         k = getattr(self, "kontrol", None)
@@ -3033,18 +3121,46 @@ class MainWindow(QMainWindow):
             return
         k = self.kontrol
         simdi = time.time()
+        self._takip_ayarlarini_uygula()
         var = bool(d.get("var"))
         ex = ey = olu_x = olu_y = None
+        kyt = {"t": simdi, "kaynak": d.get("kaynak", "yok"), "fps": self.veri.fps}
+        ppd = None
         if var:
             olcek = float(d["w"]) / 1280.0              # ppd 1280 px'te olculdu
             ex, ey, olu_x, olu_y = d["ex"], d["ey"], d["olu_x"], d["olu_y"]
-            t_kare = d["t"] - float(algi.AYAR.get("kamera_gecikme", 0.03))
-            self._pan_takip.olcum(t_kare, k.pan_zamaninda(t_kare), ex,
-                                  float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
+            t_kare = d["t"] - float(algi.AYAR.get("kamera_gecikme",
+                                                  algi.VARSAYILAN_AYAR["kamera_gecikme"]))
+            ppd = float(algi.AYAR.get("takip_ppd_pan",
+                                      algi.VARSAYILAN_AYAR["takip_ppd_pan"])) * olcek
+            pan_kare, tilt_kare = k.pan_zamaninda(t_kare), k.tilt_zamaninda(t_kare)
+            # Olcumun KAYNAGI guvenini belirler: renkle tasinan kutu (model o karede
+            # gormedi) motoru model tespiti kadar cekmemeli — bkz. HK.KAYNAK_GUVENI.
+            guven = HK.KAYNAK_GUVENI.get(d.get("kaynak"), 1.0)
+            self._pan_takip.olcum(t_kare, pan_kare, ex, ppd, guven=guven, olu_px=olu_x)
             # Tilt KAMERA ACISINDA izlenir (kol-biyel dogrusal degil, bkz.
             # tilt_surucu.KAMERA_PPD_TABLO); orada ppd pan ile ayni.
-            self._tilt_takip.olcum(t_kare, TS.kamera_acisi(k.tilt_zamaninda(t_kare)), ey,
-                                   float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
+            self._tilt_takip.olcum(t_kare, TS.kamera_acisi(tilt_kare), ey, ppd,
+                                   guven=guven, olu_px=olu_y)
+            kutu = d.get("kutu") or (None,) * 4
+            nis = d.get("nisan") or (None, None)
+            kyt.update(t_kare=t_kare, gecikme_ms=(simdi - d["t"]) * 1000.0,
+                       ex_px=ex, ey_px=ey, olu_x_px=olu_x, olu_y_px=olu_y,
+                       kare_w=d.get("w"), kare_h=d.get("h"), ppd=ppd,
+                       id=d.get("id"), conf=d.get("conf"),
+                       x1=kutu[0], y1=kutu[1], x2=kutu[2], y2=kutu[3],
+                       nisan_x=nis[0], nisan_y=nis[1],
+                       pan_kare=pan_kare, tilt_kare=tilt_kare)
+        kyt.update(pan_simdi=k.pan_olculen, tilt_simdi=k.tilt_olculen,
+                   kest_pan=self._pan_takip.son_tahmin,
+                   kest_pan_hiz=self._pan_takip.kestirici.hiz,
+                   kest_tilt=self._tilt_takip.son_tahmin,
+                   kest_tilt_hiz=self._tilt_takip.kestirici.hiz)
+
+        def kaydet(engel=None, **ek):
+            kyt.update(ek)
+            kyt["engel"] = engel
+            TK.yaz(**kyt)
         # SINIRLAR YALNIZ ARAYUZDEN (kullanici karari 23.09): otonom takip operatorun
         # hareket penceresini kullanir; pencere kapaliysa fiziksel aralik. Gizli tavan,
         # ayri "otonom siniri" ya da pay YOK. Tilt sinirlari KOL (operator) acisindadir,
@@ -3060,7 +3176,9 @@ class MainWindow(QMainWindow):
             tr = self._tilt_takip.yorunge_komut(
                 simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(alt),
                 TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y, pay=0.0)
+            kyt["kip"] = "yorunge"
             if pr is None and tr is None:
+                kaydet("komut yok (iki eksen de)")
                 return
             d_pan = pan_v = d_tilt = tilt_v = None
             if pr is not None:
@@ -3070,8 +3188,12 @@ class MainWindow(QMainWindow):
                 kol = max(alt, min(ust, TS.kol_acisi(tr[0])))
                 egim = (TS.kamera_acisi(kol + 0.05) - TS.kamera_acisi(kol - 0.05)) / 0.1
                 d_tilt, tilt_v = kol - self.tilt_aci, tr[1] / max(1e-3, egim)
-            if self._aci_hareket(d_pan or 0.0, d_tilt or 0.0, hiz=(pan_v, tilt_v)):
+            gitti = self._aci_hareket(d_pan or 0.0, d_tilt or 0.0, hiz=(pan_v, tilt_v))
+            if gitti:
                 self._nisan_mesgul_ta = simdi + 0.15
+            kaydet(None if gitti else "hareket kapisi reddetti",
+                   kom_pan=None if pr is None else pr[0], kom_pan_hiz=pan_v,
+                   kom_tilt=None if tr is None else tr[0], kom_tilt_hiz=tilt_v)
             return
         pan_k = self._pan_takip.komut(simdi, k.pan_olculen, pan_alt, pan_ust,
                                       hata_px=ex, olu_px=olu_x)
@@ -3080,12 +3202,17 @@ class MainWindow(QMainWindow):
             hata_px=ey, olu_px=olu_y))
         if tilt_k is not None:
             tilt_k = max(alt, min(ust, tilt_k))
+        kyt["kip"] = "konum"
         if pan_k is None and tilt_k is None:
+            kaydet("komut yok (iki eksen de)")
             return
         d_pan = 0.0 if pan_k is None else pan_k - self.pan_ham
         d_tilt = 0.0 if tilt_k is None else tilt_k - self.tilt_aci
-        if self._aci_hareket(d_pan, d_tilt):
+        gitti = self._aci_hareket(d_pan, d_tilt)
+        if gitti:
             self._nisan_mesgul_ta = simdi + 0.15      # durum etiketi: "Konumlaniyor..."
+        kaydet(None if gitti else "hareket kapisi reddetti",
+               kom_pan=pan_k, kom_tilt=tilt_k)
 
     def _yasak_kapsulu(self, tur, ad):
         """Baslikta minimal kapsul: ad + anahtar. Doner: (kapsul, etiket, anahtar)."""
@@ -3477,6 +3604,14 @@ class MainWindow(QMainWindow):
         if isinstance(getattr(self, "thread", None), VideoThread):
             self.inference_thread.otonom = (ad == "Otonom")
             self.inference_thread.nisanci.sifirla()
+        # KARA KUTU: otonom takibin her karesi diske yazilir. Sahada "takip kotu"
+        # demek kolay, NEDEN kotu oldugunu (ppd mi, gecikme mi, kilit mi) ancak bu
+        # kayit soyler — takip_analiz.py onu okuyup OLCER. Yazma ayri is
+        # parcaciginda; acilamazsa uygulama normal calisir (sessizce kapali).
+        if ad == "Otonom":
+            TK.baslat()
+        else:
+            TK.kapat()
         if hasattr(self, "sag_mod_stack"):
             # Sag kolondaki QStackedWidget: 0 = Manuel, 1 = Otonom.
             self.sag_mod_stack.setCurrentIndex(0 if ad == "Manuel" else 1)
@@ -4257,8 +4392,17 @@ class MainWindow(QMainWindow):
                     self.oto_nisan_durum.setText("Konumlanıyor...")
                     self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.AKSAN))
                 else:
-                    self.oto_nisan_durum.setText("Takip aktif")
-                    self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.YESIL))
+                    # ATAKLIK: kararlilik denetcisi salinim gorurse takibi kisar
+                    # (bkz. hedef_kestirici.KararlilikDenetcisi). Operator bunu
+                    # GORMELI — yoksa "neden yavas takip ediyor" sorusunun cevabi
+                    # ekranda hicbir yerde yazmaz ve ayar panelinde aranmaz.
+                    atak = min(self._pan_takip.denetci.atak, self._tilt_takip.denetci.atak)
+                    if atak < 0.9:
+                        self.oto_nisan_durum.setText(f"Takip aktif · sakinleştirildi %{atak * 100:.0f}")
+                        self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.SARI))
+                    else:
+                        self.oto_nisan_durum.setText("Takip aktif")
+                        self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.YESIL))
             else:
                 self.oto_nisan_durum.setText("Bekleniyor")
                 self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.L3))
@@ -4295,6 +4439,7 @@ class MainWindow(QMainWindow):
         self._fit()
 
     def closeEvent(self, e):
+        TK.kapat()                 # kara kutu: kuyrukta bekleyen satirlar diske insin
         self.thread.durdur()
         self.thread.wait(2000)
         # Inference ve kamera tarama thread'leri de DURDURULMALI: calisan bir
