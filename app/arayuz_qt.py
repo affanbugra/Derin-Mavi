@@ -765,7 +765,10 @@ AYAR_TANIM_NISAN = [
 # Otonom Ateşleme Ayarları
 OTONOM_DWELL_SURE = 0.5  # sn (Hedef bu kadar süre merkezde kalırsa lazer açılır)
 OTONOM_ATES_SURE = 1.0   # sn (Lazer açıldıktan sonra en az bu kadar süre açık kalır)
-OTONOM_BEKLEME_SURE = 10.0 # sn (Ateş bittikten sonra hedef aramadan beklenecek süre)
+# Atisi tamamlanan hedef bu sure YENIDEN secilmez (maket balonu patlasa da rayda gorunur).
+# ⚠ Yalniz O HEDEF yasaklanir; diger hedeflere hemen kilitlenilir (algi.hedef_vuruldu).
+# Eskiden bu sure boyunca HICBIR hedefe kilitlenilmiyordu — Asama 2'de tur basina 3 hedef.
+OTONOM_BEKLEME_SURE = 10.0
 # =====================================================================
 #  Ortak Veri (Kamera ve Algi threadleri arasi)
 # =====================================================================
@@ -4208,9 +4211,10 @@ class MainWindow(QMainWindow):
                     sebep = "Otomatik ateş süresi doldu" if a else "Hedef kaybedildi"
                     self._ates_kes(sebep)
                 
-                # Eger ates sure doldugu icin bittiyse (basarili imha), juri onayi icin bekle!
+                # Atis suresi dolduysa (imha): bu hedefi birak ve bir sure yeniden secme;
+                # siradaki hedefe HEMEN gec (Asama 2: tur basina 3 hedef ayni anda).
                 if a and simdi >= self._otonom_ates_bitis_t:
-                    algi.hedefi_birak_ve_bekle(OTONOM_BEKLEME_SURE)
+                    algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
 
     def _otonom_panel_guncelle(self, active_hedef, data, estop):
         """Otonom moddaki takip ve nisan durumunu (sag kolon paneli) gunceller."""

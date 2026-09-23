@@ -232,3 +232,46 @@ Salınım gerçek motorda da oluştu; yeni kod gideriyor. Test sonunda kol opera
   kopyasında silinmiş; kasıtlı olup olmadığı kullanıcıya soruldu. Bu commit'e silme
   **dahil edilmedi**, depoda duruyorlar.
 - Arayüz kamerasının OpenCV'ye geçirilmesi (60 FPS + pozlama).
+
+## 23 Eylül 2026 (akşam) — koridor testi: 15 m tespit ve hızlı hedef değişimi
+
+**Sahada görülen iki sorun:** (1) 15 m'deki hedef görülmüyordu; kamera elle kapatılıp açılınca
+görülüyordu. (2) Hedef gidince kutusu/kilidi ekranda kalıyordu — Aşama 2'de bir hedefi vurup
+hemen sonrakine geçmek gerekiyor.
+
+**Üç sebep bulundu:**
+1. **Pozlama.** Kamera içeride ayarlanmış sabit pozlama (−7, 7.8 ms) + yüksek kazançta kalmıştı
+   (OpenCV'nin ayarı kamerada kalıcı; Qt arayüzü devraldı). Aydınlık koridorda görüntü bembeyazdı:
+   parlaklık **233/255**, küçük kırmızı hedef arka plana karışıyordu. Kameranın kendi otomatik
+   pozlaması aynı yerde **129** verdi (60 FPS). `_pozlama_uygula` yalnız "fazla karanlık"ı
+   yakalıyordu, "fazla parlak"ı hiç yakalamıyordu.
+2. **Kilit bırakılmıyordu.** Kilit ByteTrack'in `track_buffer`'ı kadar (kayıtlı ayar `kararlilik`
+   60 kare = 2–3 sn) yaşıyordu; bu sürede hayalet kutu ekranda kalıyor ve **kilit varken yeni hedefe
+   otomatik kilit ve uzak tarama hiç çalışmıyordu.** Kamerayı elle kapatıp açınca görmesinin de
+   büyük ihtimalle sebebi bu: kapatınca eski kilit düşüyor, arama sıfırdan başlıyor.
+3. **Vuruştan sonra 10 sn hiçbir hedefe kilitlenilmiyordu** (`hedefi_birak_ve_bekle(10)`).
+
+**Değişiklikler (`algi.py`, `arayuz_qt.py`):**
+- `kamera_pozlama` varsayılanı **0 (otomatik)**. Elle pozlama seçilirse ve kazanç en alttayken
+  bile görüntü fazla parlaksa (`POZ_PARLAK` 190) otomatiğe dönülür.
+- **Zamanla kilit bırakma** (`KILIT_BIRAKMA_S` = 0.5 sn): kilitli hedef bu süre GERÇEK kutuyla
+  (ByteTrack ya da kilit penceresi) görülmezse kilit ve hayalet düşer.
+- **Vurulan hedef yasağı** (`algi.hedef_vuruldu`): yalnız vurulan hedef 10 sn yeniden seçilmez,
+  diğerlerine hemen kilitlenilir. ByteTrack vurulan maketi yeni ID ile görse de yasak aynı yerdeki
+  yeni ID'ye taşınır (maket balonu patlasa da rayda görünmeye devam eder).
+- Testler: kilidin zamanla düşmesi, yeni hedefe geçiş, vurulan hedef yasağı (ID değişimi dahil),
+  yasak süresi dolunca yeniden seçim. İkisi de bozulma denemesiyle yakalandı.
+
+**Canlı doğrulama (koridor, OBSBOT Meet 2, otomatik pozlama, Aşama 2 kuralları, motor yok):**
+
+| | önce | şimdi |
+|---|---|---|
+| 15 m hedefi yakalama | görmüyordu | **0.86 sn**, drone 22 px, %91 (uzak tarama) |
+| duran hedefte kilit sürekliliği | – | 25 sn boyunca kopma yok |
+| hedef gidince kilidin düşmesi | 2–3 sn (+ atıştan sonra 10 sn) | son görülmeden **0.50–0.53 sn** sonra |
+
+Gözlem: drone elde taşınırken (hareketli, bulanık, 28 px) kilit bir kez düştü ve 0.7 sn'de
+yeniden kuruldu (yeni sentetik ID). Rayda hareketli hedefte sık olursa uzak hedefler için bırakma
+süresi uzatılmalı — ray testi verisiyle ayarlanmalı.
+
+⚠ Arayüz yeni kodu almak için **yeniden başlatılmalı**. Kamera şu an otomatik pozlamada.

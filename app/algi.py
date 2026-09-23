@@ -201,7 +201,11 @@ VARSAYILAN_AYAR = {
     # isik yetiyor ve HAREKET BULANIKLIGI YARIYA iner (pan 60 der/sn'de ~17 px -> ~9 px).
     # Sahada donerken drone guveni bulaniklikla %90'dan %50'lere dusuyordu. -8 kareyi
     # yariya karartiyor. Kare cok karanlik cikarsa (ort < POZ_KARANLIK) otomatige doner.
-    "kamera_pozlama": -7,
+    # ⚠ 23.09 KORIDOR: ayni -7 + icerde ayarlanmis kazanc aydinlik koridorda goruntuyu
+    # BEYAZLATTI (parlaklik 233/255) — 15 m'deki hedef gorulmedi. Kameranin kendi otomatik
+    # pozlamasi ayni yerde 129 verdi (60 FPS). Salon isigi bilinmedigi ve pan donerken
+    # isik degistigi icin varsayilan OTOMATIK; elle pozlama ayardan secilebilir.
+    "kamera_pozlama": 0,
     # --- SAHI (Slicing Aided Hyper Inference) ---
     # Uzak/kucuk nesne tespiti icin goruntuyu ust uste binen dilimlere bolup her dilimde
     # ayri cikarim yapar. Normal YOLO'nun kacirdigi kucuk hedefleri yakalar ama yavas.
@@ -424,6 +428,7 @@ class KameraOkuyucu:
 
 POZ_KARANLIK = 70          # ortalama gri seviye: bunun altinda elle poz iptal
 POZ_HEDEF = (100, 150)     # kazanc ayariyla hedeflenen ortalama gri
+POZ_PARLAK = 190           # bunun ustunde (kazanc en alttayken bile) elle poz iptal
 
 
 def _pozlama_uygula(cap):
@@ -463,6 +468,12 @@ def _pozlama_uygula(cap):
             ort = parlaklik()
         if ort is None or ort < POZ_KARANLIK:
             print(f"[UYARI] Elle pozlama {poz} yeterli isik vermedi (ort {ort}); otomatige donuldu.")
+            cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
+            return 0
+        if ort > POZ_PARLAK:
+            # Kazanc en alttayken bile beyazlik: isik icerde ayarlanandan cok fazla.
+            # Doygun kirmizi pembeye/beyaza doner, uzak kucuk hedef kaybolur.
+            print(f"[UYARI] Elle pozlama {poz} fazla parlak (ort {ort:.0f}); otomatige donuldu.")
             cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)
             return 0
         print(f"Kamera pozlama {poz} (~{1000 / 2 ** -poz:.1f} ms), kazanc "
@@ -711,6 +722,24 @@ _kilit_kayip_kare = 0     # kilitli hedef kac analiz karesidir GERCEK kutuyla go
 _arama_kare = 0            # kilit yokken seyrek yuksek-cozunurluk arama zamanlayicisi
 _budama_sayaci = 0
 
+# KILIT BIRAKMA — ZAMANLA, kare sayisiyla degil. Kilitli hedef bu sure GERCEK kutuyla
+# (ByteTrack ya da kilit penceresi) gorulmezse kilit ve hayalet kutu duser.
+# NEDEN: kilit eskiden ByteTrack'in track_buffer'i ("kararlilik", kayitli ayar 60 kare)
+# kadar yasiyordu: 30 FPS'te 2 sn, yavas islemede 3 sn. O surede hayalet ekranda
+# kaliyor ve KILIT VARKEN yeni hedefe otomatik kilit ve uzak tarama HIC calismiyordu
+# (23.09 koridor: hedef gidince kutu kaldi; 15 m'deki yeni hedef ancak kamera elle
+# kapatilip kilit dusunce goruldu). Asama 2'de 3 hedef ayni anda gelir — birini
+# birakip digerine hemen gecmek gerekir. Kisa kopmalari (bulaniklik, tek kare
+# kacirma) 0.5 sn rahatca kapsar; motor tarafi da 0.45 sn kestirimle kovalar.
+KILIT_BIRAKMA_S = 0.5
+_kilit_son_gercek = [None, 0.0]   # [kilitli id, o id'nin son GERCEK goruldugu an]
+
+# VURULAN HEDEFLER: otonom atis tamamlanan hedef bir sure YENIDEN secilmez; DIGER
+# hedeflere hemen kilitlenilir. Maket balonu patlasa da rayda gorunmeye devam eder;
+# yasak olmazsa ayni hedefe tekrar tekrar ates edilirdi. Eskiden atistan sonra
+# 10 sn HICBIR hedefe kilitlenilmiyordu (Asama 2: tur basina 3 hedef — kacirilan tur).
+_vurulanlar = {}                  # takip id -> {"box": son kutu, "bitis": zaman}
+
 RENK_ESIK = 0.02      # bu oranin altinda renk "okunamadi" sayilir
 RENK_FARK_ESIK = 0.01 # kirmizi/cyan birbirine cok yakinsa taraf karari verme
 BUDAMA_PERIYOT = 300  # kac karede bir olu ID'ler temizlenir
@@ -727,6 +756,55 @@ def takip_sifirla():
     _kilit_kayip_kare = 0
     _arama_kare = 0
     _uzak.update(aday=None, iyi=0, kotu=0, sayac=0)
+    _vurulanlar.clear()
+    _kilit_son_gercek[:] = [None, 0.0]
+
+
+def hedef_vuruldu(saniye, simdi=None):
+    """Kilitli hedefi VURULDU isaretler: kilit birakilir, bu hedef `saniye` boyunca
+    yeniden secilmez; diger hedeflere HEMEN kilitlenilebilir. Doner: isaretlenen id."""
+    global _kilitli_track_id, _kilit_kayip_kare, _arama_kare
+    simdi = time.time() if simdi is None else simdi
+    tid = _kilitli_track_id
+    son = (_takip_durumlari.get(tid) or {}).get("son_det") if tid is not None else None
+    if tid is not None and son is not None:
+        _vurulanlar[tid] = {"box": tuple(son["box"]), "bitis": simdi + float(saniye)}
+    _kilitli_track_id = None
+    _kilit_kayip_kare = 0
+    _arama_kare = 0
+    return tid
+
+
+def vurulan_mi(d):
+    """Tespit, yasak suresi dolmamis bir vurulan hedef mi (ya da onun devami)?"""
+    if d.get("id") is not None and d["id"] in _vurulanlar:
+        return True
+    return False
+
+
+def _vurulanlari_guncelle(dets, simdi):
+    """Vurulanlarin konumunu izler; ID degisirse yasagi AYNI YERDEKI yeni ID'ye tasir.
+
+    ByteTrack hedefi kisa sure kaybedip yeni ID verebilir; yasak yalniz eski ID'de
+    kalsaydi vurulmus maket "yeni hedef" sanilip tekrar ates edilirdi."""
+    for tid in [t for t, v in _vurulanlar.items() if v["bitis"] <= simdi]:
+        del _vurulanlar[tid]
+    if not _vurulanlar:
+        return
+    gorulen = {d["id"]: d for d in dets if d.get("id") is not None and not d.get("hayalet")}
+    for tid, v in list(_vurulanlar.items()):
+        if tid in gorulen:
+            v["box"] = tuple(gorulen[tid]["box"])
+            continue
+        for yid, d in gorulen.items():
+            if yid not in _vurulanlar and _ayni_nesne_olabilir(d["box"], v["box"]):
+                _vurulanlar[yid] = {"box": tuple(d["box"]), "bitis": v["bitis"]}
+                break
+
+
+def _vurulan_bolgede(kutu):
+    """Uzak taramanin buldugu (ID'siz) aday vurulan bir hedefin yerinde mi?"""
+    return any(_ayni_nesne_olabilir(kutu, v["box"]) for v in _vurulanlar.values())
 
 
 def hedef_sec(track_id):
@@ -1250,6 +1328,8 @@ def _uzak_tara(m, frame, dets, esik, a=None):
             kutu = (bx1 + ox, by1 + oy, bx2 + ox, by2 + oy)
             if not _tip_uygun(cls):
                 continue                 # operator baska tip ariyor
+            if _vurulan_bolgede(kutu):
+                continue                 # vurulmus maket (balonu patladi, rayda duruyor)
             if any(_ortusme(kutu, d["box"]) > 0.3 for d in dets):
                 continue
             if en_iyi is None or float(b.conf) > en_iyi["conf"]:
@@ -1370,7 +1450,7 @@ def _ana_taramada_guclu_aday(dets, a, asama=None):
     DURDURMAMALI — yoksa operator tip sectigi anda uzak hedef edinimi korlesir."""
     return any(d.get("id") is not None and d.get("conf", 0) >=
                100 * float(a["onay_esigi"]) and not d.get("hayalet")
-               and _tip_uygun(d.get("cls"))
+               and _tip_uygun(d.get("cls")) and not vurulan_mi(d)
                and (asama not in (2, 3) or d.get("anlik_kirmizi", False)) for d in dets)
 
 
@@ -1709,6 +1789,7 @@ def analiz_et(model, frame, estop=False, asama=None):
 
     _hafiza_buda(canli_idler)
     _kayiplari_temizle(canli_idler, int(a["kararlilik"]))
+    _vurulanlari_guncelle(dets, time.time())
 
     # Kilit: A3'te yalniz Düşman (dosta ates yok), A1/A2'de her tespit hedeftir.
     if estop:
@@ -1734,7 +1815,8 @@ def analiz_et(model, frame, estop=False, asama=None):
                     else:
                         aday = list(range(len(dets)))
                     # Operator hangi TIPI aradigini sectiyse yalniz onlara kilitlen.
-                    aday = [i for i in aday if _tip_uygun(dets[i]["cls"])]
+                    aday = [i for i in aday if _tip_uygun(dets[i]["cls"])
+                            and not vurulan_mi(dets[i])]
 
                     if aday:
                         en_iyi = max(aday, key=lambda i: dets[i]["conf"])
@@ -1755,6 +1837,7 @@ def analiz_et(model, frame, estop=False, asama=None):
                     # yoksa drone'u tutan kisinin yanlis "maket" kutusu kilidi calar.
                     ayni_yerdekiler = [i for i, d in enumerate(dets)
                                        if _yeniden_kilit_uyumlu(d, son_det)
+                                       and not vurulan_mi(d)
                                        and (asama not in (2, 3) or d.get("anlik_kirmizi"))]
                     if ayni_yerdekiler:
                         # Ayni nesne yeni ID almis! Kilidi buna devret (guven onemli degil)
@@ -1824,6 +1907,19 @@ def analiz_et(model, frame, estop=False, asama=None):
                 active_idx = -1
     else:
         _kirmizisiz[0] = 0
+
+    # ZAMANLA KILIT BIRAKMA (bkz. KILIT_BIRAKMA_S): buraya kadar GERCEK bir kutu
+    # (kendi ID'si, yeni ID devri ya da kilit penceresi) bulunamadiysa ve son gercek
+    # gorulmeden beri KILIT_BIRAKMA_S gectiyse kilit duser — hayalet de cizilmez,
+    # otomatik kilit ve uzak tarama bir sonraki karede yeni hedefi arayabilir.
+    if _kilitli_track_id is not None:
+        simdi_k = time.time()
+        if _kilit_son_gercek[0] != _kilitli_track_id or active_idx != -1:
+            _kilit_son_gercek[:] = [_kilitli_track_id, simdi_k]
+        elif simdi_k - _kilit_son_gercek[1] > KILIT_BIRAKMA_S:
+            _kilitli_track_id = None
+            _kilit_kayip_kare = 0
+            _kilit_son_gercek[:] = [None, 0.0]
 
     # HAYALET HEDEF: kilitli nesne bu karede ne kendi ID'siyle ne de yakinindaki yeni
     # bir ID'yle bulunabildiyse son kutusu listeye eklenir (kutu istikrari).
@@ -2203,6 +2299,54 @@ if __name__ == "__main__":
     assert dets[aktif].get("hayalet") and not dets[aktif].get("roi"), "uzak kutuya atladi"
     roi_modeli_ayarla(None)
     takip_sifirla()
+
+    # ---- ZAMANLA KILIT BIRAKMA: giden hedefin kilidi/hayaleti yeni hedefi ENGELLEMEZ ----
+    # 23.09 koridor: hedef gidince kutu kaldi; yeni hedef ancak kamera elle kapatilip
+    # kilit dusunce goruldu. Kilit artik KILIT_BIRAKMA_S icinde gercek kutu gelmezse duser.
+    sahte.kutular = [_SahteKutu(0, 0.95, (100, 100, 200, 180), 1)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id == 1
+    sahte.kutular = []
+    dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id == 1 and dets[aktif].get("hayalet"), "kisa kopmada kilit korunmali"
+    _kilit_son_gercek[1] -= KILIT_BIRAKMA_S + 0.1        # sure doldu (gercek kutu yok)
+    dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id is None, "giden hedefin kilidi dusmedi"
+    assert aktif == -1 and not any(d.get("hayalet") for d in dets), "kilit dustu ama hayalet cizildi"
+    sahte.kutular = [_SahteKutu(0, 0.95, (400, 250, 480, 310), 5)]   # YENI hedef baska yerde
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id == 5, "eski kilit dustukten sonra yeni hedefe kilitlenilmedi"
+    takip_sifirla()
+
+    # ---- VURULAN HEDEF: yalniz O hedef yasaklanir, digerine HEMEN gecilir ----
+    iki = [_SahteKutu(0, 0.95, (100, 100, 200, 180), 1), _SahteKutu(0, 0.85, (400, 250, 480, 310), 3)]
+    sahte.kutular = list(iki)
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id == 1, "kurulum: en guvenli hedefe kilit"
+    assert hedef_vuruldu(10.0) == 1 and _kilitli_track_id is None
+    dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id == 3, f"vuruldu sonrasi siradaki hedefe gecilmedi: {_kilitli_track_id}"
+    # Vurulan maket ByteTrack'te YENI ID alsa da yasak onu izler; siradaki gidince
+    # kilit ona geri DONMEZ.
+    sahte.kutular = [_SahteKutu(0, 0.95, (104, 100, 204, 180), 9)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert 9 in _vurulanlar, "yasak yeni ID'ye tasinmadi"
+    _kilit_son_gercek[1] -= KILIT_BIRAKMA_S + 0.1
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id != 9, "vurulan maket (yeni ID) yeniden kilitlendi"
+    # Yasak suresi dolunca yeniden secilebilir.
+    for v in _vurulanlar.values():
+        v["bitis"] = 0.0
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, kare, asama=1)
+    assert _kilitli_track_id == 9, "yasak suresi dolunca hedef yeniden secilmeli"
+    takip_sifirla()
+    assert not _vurulanlar
 
     # UZAK HEDEF EDINIMI: ana tarama (640/1280) kucuk hedefi hic gormuyor; karo taramasi
     # adayi bulur, kilit penceresi 3 karede dogrular, kilit kurulur ve hedef yalniz
