@@ -371,6 +371,76 @@ def test_operator_acisi_karta_kol_acisi_gider(w):
     assert abs(w.kontrol.tilt_olculen - 10.0) < 0.2, w.kontrol.tilt_olculen
 
 
+def _pan_komutlari(k, n0):
+    """Tilt kartina giden MUTLAK pan konum komutlari (P<derece>), n0'dan sonra."""
+    return [float(c[1:]) for c in k.tilt.mock.kayit[n0:]
+            if c.startswith("P") and c[:2] not in ("PZ", "PR", "PE", "PY")]
+
+
+def _kart_bekle(w, sn):
+    saat = w._test_saat
+    for _ in range(int(sn / 0.05)):
+        saat[0] += 0.05
+        w.kontrol.oku()
+
+
+def test_estop_pan_acisini_kaybetmez(w):
+    """23.09 saha: pan tilt kartindayken E-Stop ekrani ESKI kartin "Konum P0.00"
+    satirina cekiyordu (orada pan motoru yok, hep 0). Pan 28.4 derecedeydi; DEVAM
+    sonrasi ilk manuel tus namluyu 28 -> 1 dereceye savurdu."""
+    k = w.kontrol
+    assert k.pan_ayri, "kurulum: pan tilt kartinda degil"
+    assert w._aci_hareket(20.0 - w.pan_ham, 0.0)
+    _kart_bekle(w, 3.0)
+    assert abs(k.pan_olculen - 20.0) < 0.3, k.pan_olculen
+    _estop(w, True)
+    assert abs(w.pan_ham - 20.0) < 0.3, f"E-Stop ekrani pan'i {w.pan_ham} yapti (gercek 20)"
+    _estop(w, False)
+    n0 = len(k.tilt.mock.kayit)
+    assert w._aci_hareket(1.0, 0.0)
+    p = _pan_komutlari(k, n0)
+    assert p and abs(p[-1] - 21.0) < 0.3, f"DEVAM sonrasi +1 derece -> {p} (21 beklenirdi)"
+
+
+def test_otonomdan_manuele_gecis_olculen_konumdan_devam_eder(w):
+    """Otonomun son KOMUT hedefi gercek konumdan ayrisabilir (motor yolda). Manuele
+    gecince ilk tus olculen konumdan hesaplanmali; yoksa namlu farki bir anda kapatir."""
+    k = w.kontrol
+    assert w._aci_hareket(15.0 - w.pan_ham, 0.0)
+    _kart_bekle(w, 3.0)
+    w._mod_sec("Otonom")
+    w.pan_ham = w.pan_aci = 27.0          # otonomun son komutu; kart 15'te (yetismedi)
+    k.pan_hedef = 27.0
+    w._mod_sec("Manuel")
+    assert abs(w.pan_ham - 15.0) < 0.3, f"manuele geciste ekran {w.pan_ham} (gercek 15)"
+    n0 = len(k.tilt.mock.kayit)
+    assert w._aci_hareket(1.0, 0.0)
+    p = _pan_komutlari(k, n0)
+    assert p and abs(p[-1] - 16.0) < 0.3, f"ilk manuel tus -> {p} (16 beklenirdi)"
+
+
+def test_kilit_baska_nesneye_gecince_takip_sifirlanir(w):
+    """Kilitli hedefin kimligi degisirse iki eksenin hedef kestirimi sifirdan kurulur;
+    ayni kimlikte (normal takip) sifirlanmaz. 23.09 kaydi: kimliksiz bir kutu 213 px
+    otede kilide girdi, eski hedefin gecmisiyle birlesti, pan'a 62 der/sn komut gitti."""
+    w._mod_sec("Otonom")
+    sayac = {"pan": 0, "tilt": 0}
+    w._pan_takip.hedef_degisti = lambda: sayac.__setitem__("pan", sayac["pan"] + 1)
+    w._tilt_takip.hedef_degisti = lambda: sayac.__setitem__("tilt", sayac["tilt"] + 1)
+    saat = w._test_saat
+
+    def olc(hid, ex):
+        saat[0] += 1 / 30.0
+        w.kontrol.oku()
+        w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": ex, "ey": 0.0, "olu_x": 7.0,
+                              "olu_y": 7.0, "w": 1280, "id": hid})
+    for _ in range(5):
+        olc(1, 10.0)
+    assert sayac == {"pan": 0, "tilt": 0}, f"ayni hedefte takip sifirlandi: {sayac}"
+    olc(None, 213.0)
+    assert sayac == {"pan": 1, "tilt": 1}, f"kilit baska nesneye gecti, sifirlanmadi: {sayac}"
+
+
 # ---- SUREKLI TAKIP: sahte saatle, gercek Kontrol + sahte pan/tilt karti ----
 class _SahteZaman:
     """arayuz_qt'nin `time` modulunun yerine: takip dongusu sahte saati gorur."""
@@ -538,6 +608,9 @@ GERCEK_KART_TESTLERI = [
     test_otonom_ates_gorunen_hedefe,
     test_otonom_ates_estopta_ve_asama1de_yok,
     test_operator_acisi_karta_kol_acisi_gider,
+    test_estop_pan_acisini_kaybetmez,
+    test_otonomdan_manuele_gecis_olculen_konumdan_devam_eder,
+    test_kilit_baska_nesneye_gecince_takip_sifirlanir,
 ]
 TAKIP_TESTLERI = [
     test_surekli_takip_konum_kipi,

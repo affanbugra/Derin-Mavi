@@ -326,8 +326,9 @@ class EksenTakip:
     def __init__(self, isaret=1.0, q=40.0, r=0.6, ileri=0.05, komut_hz=25.0,
                  olu=0.5, bosluk=1.5, telafi=0.5, durus_hizi=3.0, kayip_kovalamasi=0.45,
                  azami_sicrama=25.0, hedef_hiz_siniri=120.0, yor_q=800.0, yor_r=0.3,
-                 yor_q_min=60.0):
+                 yor_q_min=60.0, yor_hiz_tavan=45.0):
         self.isaret = 1.0 if isaret >= 0 else -1.0
+        self.yor_hiz_tavan = max(1.0, float(yor_hiz_tavan))
         self.kestirici = HedefKestirici(q=q, r=r, hiz_siniri=hedef_hiz_siniri)
         # Kip basina filtre ayari. Yorunge kipi hizi DOGRUDAN motora ileri besleme
         # olarak verir: hiz kestirimi hedefin hiz degisimine hizli uymali (benzetim:
@@ -388,6 +389,26 @@ class EksenTakip:
         self._yavas_t = None                        # hiz esigin altina ne zaman indi
         self._hiz_gecmisi = []                      # [(t_kare, hiz)] — son ~1 sn
         self._kayip_durdu = False                   # kayipta tek hiz-sifir komutu
+
+    def hedef_degisti(self):
+        """Kilit BASKA bir nesneye gecti: hedef kestirimi sifirdan kurulur.
+
+        Iki farkli nesnenin konum farki "hiz" sanilmamali. 23.09 arayuz kaydi: kilit
+        dustu, 213 px otedeki kutu ayni filtreye girdi, pan'a 62 der/sn komut gitti.
+        Bosluk modeli (namlu/motor gecmisi, ogrenilen bosluk) MEKANIZMAYA aittir,
+        hedefe degil — korunur."""
+        self.kestirici.sifirla()
+        self.son_komut = None
+        self.son_komut_t = None
+        self.son_yon = 0
+        self.son_tahmin = None
+        self._son_kare = None
+        self._tut = None
+        self._yor_yon = 0
+        self._duragan = True
+        self._yavas_t = None
+        self._hiz_gecmisi = []
+        self._kayip_durdu = False
 
     @property
     def hazir(self):
@@ -678,6 +699,10 @@ class EksenTakip:
         elif abs(hedef - namlu) > max(0.2, self.bosluk_kest) or not self._yor_yon:
             self._yor_yon = 1 if hedef > namlu else -1
         motor = hedef + self._yor_yon * self.bosluk_kest * 0.5
+        # HIZ TAVANI: karta giden ileri besleme hizi. 5 m'de 1 m/s hedef ~11 der/sn,
+        # sahada elle savrulan drone tepede 30-60. 23.09 kaydinda 62 der/sn komut
+        # gercek bir hedefin degil kilit sicramasinin imzasiydi.
+        hiz = max(-self.yor_hiz_tavan, min(self.yor_hiz_tavan, hiz))
         if motor >= ust:
             motor, hiz = float(ust), min(0.0, hiz)
         elif motor <= alt:
@@ -937,5 +962,31 @@ if __name__ == "__main__":
         p, v = EksenTakip._yorunge_sinirla(konum, hiz, 21.0, 31.0)
         assert 22.5 <= p <= 29.5 and 22.5 <= p + 0.25 * v <= 29.5, (p, v)
 
+    # KILIT BASKA NESNEYE GECINCE: eski nesnenin konumu ile yenisininki arasindaki fark
+    # hiz sanilmamali (23.09: 213 px sicrama -> 62 der/sn). hedef_degisti() sonrasi ilk
+    # yorunge komutunun hizi kucuk; bosluk modeli korunur.
+    e = EksenTakip(isaret=1.0)
+    for i in range(30):
+        e.olcum(i / 30.0, 0.0, 0.0, 18.7)
+        e.yorunge_komut(i / 30.0 + 0.001, 0.0, -90.0, 90.0, hata_px=0.0, olu_px=7.0)
+    bosluk, namlu = e.bosluk_kest, e._namlu
+    assert e.hazir
+    e.hedef_degisti()
+    assert not e.hazir and e.kestirici.hiz == 0.0, "hedef degisimi kestirimi sifirlamadi"
+    assert e.bosluk_kest == bosluk and e._namlu == namlu, "hedef degisimi bosluk modelini sildi"
+
+    # YORUNGE HIZ TAVANI: 60 der/sn kacan hedefte tavansiz komut 80+ der/sn'ye
+    # cikiyordu; karta giden hiz yor_hiz_tavan'i (45) asamaz.
+    e = EksenTakip(isaret=1.0)
+    tepe = 0.0
+    for i in range(60):
+        t = i / 30.0
+        e.olcum(t, 0.0, 60.0 * t * 18.7, 18.7)
+        r = e.yorunge_komut(t + 0.001, 0.0, -180.0, 180.0, hata_px=60.0 * t * 18.7, olu_px=7.0)
+        if r is not None:
+            tepe = max(tepe, abs(r[1]))
+    assert 40.0 <= tepe <= 45.0 + 1e-6, f"yorunge hiz tavani: tepe {tepe:.1f} der/sn"
+
     print("hedef_kestirici testleri OK — hiz kestirimi, kesintide tahmin, gurultu, "
-          "aykiri/geri-zaman korumasi, hiz-sinirli yumusak komut, sentetik takip")
+          "aykiri/geri-zaman korumasi, hiz-sinirli yumusak komut, sentetik takip, "
+          "hedef degisiminde sifirlama, yorunge hiz tavani")

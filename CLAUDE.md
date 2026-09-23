@@ -224,6 +224,17 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **23.09.2026 · final_v7-yunus-yakin-takip** — 5 m arayüz testlerindeki titreme/savrulma.
+  (1) Arayüzün Qt kamerası OpenCV yolundan ~25 ms geç (ölçüldü: 60–70 vs 40 ms); takip
+  motorun kendi dönüşünü hedef hareketi sanıyordu → `kamera.QT_EK_GECIKME`. ⚠ Tolerans
+  ±15 ms: kamera/FPS değişirse yeniden ölçün. (2) Renkle kilit sürdürme yalnız ≤48 px
+  (uzak) hedefte; yakında kırmızı parçalanıp kutu 16–48 px zıplıyordu. (3) Kilit penceresi
+  en tutarlı kutuyu seçer. (4) **E-Stop pan'ı 0 sanıyordu** (pan motoru olmayan eski
+  kartın satırı) → ilk manuel tuş namluyu 28°→1° savurdu; artık ölçülen pan. (5) Otonomdan
+  manuele geçişte açılar ölçülen konuma hizalanır. (6) Kilit kimliği değişince takip
+  sıfırlanır, yörünge hız komutu ≤45 °/s. Otonomda her ölçüm `app/loglar/takip_*.csv`.
+  Not: A2'de hedef 0.5 sn merkezde kalınca "vuruldu" sayılıp 10 sn seçilmez — saf takip
+  testi **Aşama 1**'de yapılır. Pilde algı %40–60 yavaş: testte şarj takılı olsun.
 - **23.09.2026 · final_v7** — `final_v6` + uzak/hareketli hedef takibi (10 m motorlu saha
   testleriyle). Model kilitli hedefi bir karede kaçırırsa yanındaki kırmızı leke o karenin
   ölçümü olur (`renk_takip`; model 1.5 sn doğrulamazsa kilit yine düşer). Küçük + kırmızı
@@ -237,10 +248,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   yok, boşuna FPS harcanmaz) ve bulunan balon artık **nişan noktasıdır** — PD, ekrandaki
   nişangah ve cv2 çizimi aynı listeden beslenir, birden fazla aday varsa asılma noktasına
   **en yakın** olan seçilir. ⚠ Gerçek balon modeliyle/donanımda denenmedi.
-- **23.09.2026 · final_v6** — İki hat birleşti (arayüz/temizlik + tilt/otonom). Kodda
-  politika sınırı kalmadı: aralığı yalnız arayüzdeki pencere belirler, otonom takip de
-  aynı pencereyi kullanır (gizli tavan `tilt_takip_ust` ve yörünge payı kaldırıldı —
-  sahada kol +19.8°'de takılıp 10 m'deki hedefe çıkamıyordu). Ateş ve merkeze alma tek
-  dokunuş; otonom ateşte "kırmızı kanıtı" şartı kalktı (dost koruması Aşama-3 hedef
-  seçiminde). Açılışta "kol en altta mı?" onayı eklendi (kart açıyı ölçmez, darbe sayar).
-  Şartname V1.4'e göre güncellendi; CLAUDE.md 1392 → ~220 satır.

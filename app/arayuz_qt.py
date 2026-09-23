@@ -3079,6 +3079,14 @@ class MainWindow(QMainWindow):
         self._takip_kaydi(simdi, d)
         ex = ey = olu_x = olu_y = None
         if var:
+            # Kilit BASKA bir nesneye gectiyse (kimlik degisti) iki nesnenin konum
+            # farki hiz sanilmasin: hedef kestirimi sifirdan kurulur (bosluk korunur).
+            # 23.09 kaydi: kimliksiz bir kutu 213 px otede kilide girdi, pan'a 62 der/sn.
+            hid = d.get("id")
+            if hid != getattr(self, "_takip_hedef_id", hid):
+                self._pan_takip.hedef_degisti()
+                self._tilt_takip.hedef_degisti()
+            self._takip_hedef_id = hid
             olcek = float(d["w"]) / 1280.0              # ppd 1280 px'te olculdu
             ex, ey, olu_x, olu_y = d["ex"], d["ey"], d["olu_x"], d["olu_y"]
             t_kare = d["t"] - float(algi.AYAR.get("kamera_gecikme", 0.03))
@@ -3495,7 +3503,21 @@ class MainWindow(QMainWindow):
     ASAMA_IDX = {None: 0, "Aşama 1": 1, "Aşama 2": 2, "Aşama 3": 3}
 
     def _mod_sec(self, ad):
+        onceki_mod = getattr(self, "mod", None)
         self.mod = ad
+        # OTONOMDAN CIKIS: hareket kesilir ve ekran/kart hedefi kartin OLCTUGU konuma
+        # cekilir. Otonom karta (konum, hiz) akitir; son komut hedefi gercek konumdan
+        # derecelerce ayrisabilir. Ilk manuel tus o eski hedeften hesaplanirsa namlu
+        # farki bir anda kapatir (23.09 saha: "manuel hareket bile patladi").
+        if onceki_mod == "Otonom" and ad != "Otonom":
+            k = getattr(self, "kontrol", None)
+            hz = k.olculene_hizala() if k is not None and hasattr(k, "olculene_hizala") else None
+            if hz is not None:
+                self.pan_ham, self.tilt_aci = hz
+                self.pan_aci = self.pan_ham % 360.0
+                if hasattr(self, "pan_val_lbl"):
+                    self._pan_goster()
+                    self._tilt_goster()
         if getattr(self, "_acik_pencere", None):
             self._pencere_kapat()            # manuel panel gizlenirken kutucuk askida kalmasin
         for m, b in self.mod_btns.items():

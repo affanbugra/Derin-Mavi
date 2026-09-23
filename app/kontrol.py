@@ -233,9 +233,14 @@ class Kontrol:
                 # dolayisiyla hep 0 yazar ve kolun gercek acisini SIFIRLAR
                 # (ekranda kol 34 derecedeyken "0" gorunurdu). Yalniz pan alinir.
                 if self.tilt_ayri:
-                    self.pan_hedef = konum[0]
+                    # ⚠ PAN DA AYRI KARTTAYSA (PAN1) eski kartin pan'i da ILGILENDIRMEZ:
+                    # orada pan motoru yok, hep 0 yazar. 23.09 saha: pan 28.4 derecedeyken
+                    # E-Stop ekrani 0'a cekti, ilk manuel tus namluyu 28 -> 1'e savurdu.
+                    pan = (self.tilt.pan_aci if self.pan_ayri and self.tilt.pan_aci is not None
+                           else konum[0])
+                    self.pan_hedef = pan
                     olculen = self.tilt.aci
-                    konum = (konum[0], olculen if olculen is not None else self.tilt_hedef)
+                    konum = (pan, olculen if olculen is not None else self.tilt_hedef)
                 else:
                     self.pan_hedef, self.tilt_hedef = konum
                 self.estop_konum = konum        # arayuz ekrani buna gore duzeltir
@@ -359,6 +364,23 @@ class Kontrol:
             self.tilt_hedef = T.ACI_MIN
         return ok
 
+    def olculene_hizala(self, durdur=True):
+        """Iki eksenin hedefini kartin OLCTUGU konuma ceker. Doner: (pan, tilt) ya da None.
+
+        Otonom takip karta (konum, hiz) akitir; motor son komut hedefinin gerisinde ya
+        da ilerisinde olabilir. Manuele gecince ilk tus SON KOMUTTAN hesaplanirsa namlu
+        o farki bir anda kapatir (23.09 saha: ~3-28 derece savrulma). durdur=True:
+        once hareket kesilir (X), sonra olculen konum okunur."""
+        if not (self.bagli and self.takip_geri_bildirimli):
+            return None
+        if durdur:
+            self.tilt.dur()
+        pan, tilt = self.tilt.pan_aci, self.tilt.aci
+        if pan is None or tilt is None:
+            return None
+        self.pan_hedef, self.tilt_hedef = pan, tilt
+        return pan, tilt
+
     def tilt_dur(self):
         """Dikey ekseni OLDUGU YERDE durdurur ve hedefi gercege geri ceker.
 
@@ -411,6 +433,12 @@ class Kontrol:
                 # degerlendirilmeli (kol yukarida kalir). Karar takimin.
                 self.tilt.dur()
                 self.tilt_hedef = self.tilt.aci if self.tilt.aci is not None else self.tilt_hedef
+                # Kart iki ekseni de OLDUGU YERDE durdurdu; ekran da oraya cekilmeli.
+                # Eski kart yoksa (DERINMAVI_ESP=off) "durduruldu" satiri hic gelmez;
+                # konumu burada vermezsek pan'in tek bilgisi son KOMUT kalirdi.
+                if self.pan_ayri and self.tilt.pan_aci is not None:
+                    self.pan_hedef = self.tilt.pan_aci
+                self.estop_konum = (self.pan_hedef, self.tilt_hedef)
             else:
                 # ⚠ 23.09: ESKI YOLDA DA PARK YOK, olundugu yerde donulur.
                 # Sebep tercih degil TUTARLILIK: mock/kart acil durdurmada iki ekseni
