@@ -1,3 +1,6 @@
+# Şartname düz metni — grep/arama için (PDF'ten üretildi, kaynak: sartname/Şartname.pdf)
+# Sürüm: V1.4 (23.06.2026) · üretim: 23.09.2026
+
 ===== SAYFA 1 =====
 ÇELİKKUBBE HAVA SAVUNMA 
 SİSTEMLERİ YARIŞMASI 
