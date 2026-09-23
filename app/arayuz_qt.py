@@ -765,6 +765,9 @@ AYAR_TANIM_NISAN = [
 # Otonom Ateşleme Ayarları
 OTONOM_DWELL_SURE = 0.5  # sn (Hedef bu kadar süre merkezde kalırsa lazer açılır)
 OTONOM_ATES_SURE = 1.0   # sn (Lazer açıldıktan sonra en az bu kadar süre açık kalır)
+# Atistan sonra balonun tek kare kaybolmasi "imha" sayilmaz. Model titrese bile
+# kilit/cross korunur; ancak bu kadar ardisik arayuz karesinde balon yoksa tamamlanir.
+OTONOM_BALON_KAYIP_ONAY_KARE = 5
 # Atisi tamamlanan hedef bu sure YENIDEN secilmez (maket balonu patlasa da rayda gorunur).
 # ⚠ Yalniz O HEDEF yasaklanir; diger hedeflere hemen kilitlenilir (algi.hedef_vuruldu).
 # Eskiden bu sure boyunca HICBIR hedefe kilitlenilmiyordu — Asama 2'de tur basina 3 hedef.
@@ -1095,7 +1098,9 @@ class VideoThread(QThread):
         if active_idx >= 0 and not self.estop:
             try:
                 d = dets[active_idx]
-                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"]}
+                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"],
+                          "box": d["box"], "id": d.get("id"),
+                          "hayalet": bool(d.get("hayalet"))}
             except IndexError:
                 pass
         if self.estop:
@@ -1243,6 +1248,8 @@ class MainWindow(QMainWindow):
         self._otonom_ates_aktif = False
         self._otonom_hedef_merkezde_t = None
         self._otonom_ates_bitis_t = None
+        self._otonom_balon_dogruluyor = False
+        self._otonom_balon_kayip_kare = 0
         # Lazer gucu (%). Her acilista GUVENLI VARSAYILANA doner — kalici olarak
         # kaydedilmez: "gecen sefer %100'de birakmisiz" diye baslamak istemeyiz.
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
@@ -3569,11 +3576,11 @@ class MainWindow(QMainWindow):
         if not self.kontrol.bagli:
             self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;ATEŞ — kontrol katmanı kapalı (DERINMAVI_ESP)')
             self.fire_btn.setChecked(False)
-            return
+            return False
         if self.thread.estop:            # E-Stop'tayken ates verilmez (Yetenek 4)
             self.fire_btn.setChecked(False)
             self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;ATEŞ reddedildi — E-STOP aktif')
-            return
+            return False
         if self.fire_btn.isChecked() and self.atis_yasak_mi():   # sartname: atisa-yasak alan
             self.fire_btn.setChecked(False)
             self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;'
@@ -3581,7 +3588,7 @@ class MainWindow(QMainWindow):
             if hasattr(self, "bolge_status"):
                 self.bolge_status.setText("🚫 ATIŞA YASAK AÇI BÖLGESİ — ATEŞ ENGELLENDİ")
                 self.bolge_status.setStyleSheet(T.durum_bandi(T.KIRMIZI))
-            return
+            return False
         ac = self.fire_btn.isChecked()
         d = self.kontrol.ates(ac)
         self.fire_btn.setText(ATES_METIN_ACIK if ac else ATES_METIN_KAPALI)
@@ -3591,6 +3598,7 @@ class MainWindow(QMainWindow):
         self.sb_msg.setText(f'<span style="color:{renk}">●</span>&nbsp;'
                             f'{"LAZER AKTİF" if ac else "Ateş kesildi"} ({kaynak})')
         self._esp_goster(d)
+        return ac
 
     def _ates_kes(self, sebep):
         """Devam eden atesi GUVENLIK gerekcesiyle keser (buton + donanim + alt cubuk).
@@ -4029,9 +4037,11 @@ class MainWindow(QMainWindow):
 
     def _otonom_ates_kontrol(self, data, estop):
         """Hedef olu bolgeye girdiginde (merkezde) dwell suresi kadar bekler,
-        sonrasinda otonom olarak atesi baslatir ve ATES_SURESI kadar acik tutar."""
+        sonrasinda atesi baslatir. Hedef ancak balonun kaybi dogrulaninca tamamlanir."""
         if self.mod != "Otonom" or estop or self.asama not in ("Aşama 2", "Aşama 3"):
             self._otonom_hedef_merkezde_t = None
+            self._otonom_balon_dogruluyor = False
+            self._otonom_balon_kayip_kare = 0
             self._ates_kapi_yaz("Otonom ateş kapalı",
                                 "Aşama 2/3 + Otonom mod gerekir", AMB)
             if self._otonom_ates_aktif:
@@ -4051,12 +4061,56 @@ class MainWindow(QMainWindow):
         # HAYALET kutu hala ates actirmaz: gorunmeyen hedefe ates edilmez.
         if a and a.get("hayalet"):
             self._otonom_hedef_merkezde_t = None
+            self._otonom_balon_dogruluyor = False
+            self._otonom_balon_kayip_kare = 0
             self._ates_kapi_yaz("Ateş engelli", "Hedef bu karede görünmüyor", AMB)
             if self._otonom_ates_aktif:
                 self._otonom_ates_aktif = False
                 if self.fire_btn.isChecked():
                     self.fire_btn.setChecked(False)
                     self._ates_kes("Hedef kayboldu")
+            return
+
+        # Otonom imhanin gercek kaniti balondur. Sadece hedef kutusunu gorup sabit
+        # bir sure lazer acmak hedefi "vuruldu" saymaya yetmez: sahada balon patlamasa
+        # da kilit 10 saniye kayboluyor ve bu rastgele cross kesintisi gibi gorunuyordu.
+        balon = (algi.hedef_balonu(a["box"], data.get("balonlar", ()))
+                 if a and a.get("box") else None)
+
+        # Atis bittikten sonra balon kaybini birkac kare dogrula. Tek karelik balon
+        # modeli kacirmasi kilidi dusurmez; balon hala gorunuyorsa ayni hedefte kalip
+        # yeni bir dwell/ates denemesine izin verilir.
+        if self._otonom_balon_dogruluyor:
+            if not a:
+                self._otonom_balon_dogruluyor = False
+                self._otonom_balon_kayip_kare = 0
+                return
+            if balon is not None:
+                self._otonom_balon_dogruluyor = False
+                self._otonom_balon_kayip_kare = 0
+                self._otonom_hedef_merkezde_t = None
+                self._ates_kapi_yaz("Balon hâlâ görünüyor", "kilit korunuyor, yeniden nişan", AMB)
+                return
+            self._otonom_balon_kayip_kare += 1
+            if self._otonom_balon_kayip_kare >= OTONOM_BALON_KAYIP_ONAY_KARE:
+                self._otonom_balon_dogruluyor = False
+                self._otonom_balon_kayip_kare = 0
+                self._otonom_hedef_merkezde_t = None
+                algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
+                self._ates_kapi_yaz("Hedef tamamlandı", "balon kaybı doğrulandı", GRN)
+            else:
+                self._ates_kapi_yaz(
+                    "İmha doğrulanıyor",
+                    f"balon kayıp {self._otonom_balon_kayip_kare}/{OTONOM_BALON_KAYIP_ONAY_KARE}",
+                    BLUE)
+            return
+
+        # Hedefin altinda GERCEK balon kutusu yoksa geometrik tahmine hareket devam
+        # edebilir ama otonom ates baslamaz. Boylece tespit titresimi hedefi yanlislikla
+        # tamamlayip cross'u silemez.
+        if a and balon is None and not self._otonom_ates_aktif:
+            self._otonom_hedef_merkezde_t = None
+            self._ates_kapi_yaz("Balon bekleniyor", "hedef kilidi korunuyor", AMB)
             return
         
         # Hedef merkezde ise zamani tut (Dwell Time tetikleyicisi)
@@ -4066,11 +4120,19 @@ class MainWindow(QMainWindow):
             gecen = simdi - self._otonom_hedef_merkezde_t
             if gecen >= OTONOM_DWELL_SURE and not self._otonom_ates_aktif:
                 # Dwell suresi doldu -> ATESI BASLAT
-                self._otonom_ates_aktif = True
-                self._otonom_ates_bitis_t = simdi + OTONOM_ATES_SURE
                 if not self.fire_btn.isChecked():
                     self.fire_btn.setChecked(True)
-                    self._ates_bas()
+                if self._ates_bas():
+                    self._otonom_ates_aktif = True
+                    self._otonom_ates_bitis_t = simdi + OTONOM_ATES_SURE
+                else:
+                    # Kontrol katmani kapali, E-Stop veya atisa-yasak alan: gercekte
+                    # ates edilmediyse hedef de vurulmus SAYILMAZ, kilit/cross korunur.
+                    self._otonom_ates_aktif = False
+                    self._otonom_ates_bitis_t = None
+                    self._otonom_hedef_merkezde_t = None
+                    self._ates_kapi_yaz("Ateş reddedildi", "hedef kilidi korunuyor", RED)
+                    return
             elif not self._otonom_ates_aktif:
                 self._ates_kapi_yaz("Nişanda — bekleniyor",
                                     f"dwell {gecen:.1f} / {OTONOM_DWELL_SURE:.1f} sn", BLUE)
@@ -4091,10 +4153,12 @@ class MainWindow(QMainWindow):
                     sebep = "Otomatik ateş süresi doldu" if a else "Hedef kaybedildi"
                     self._ates_kes(sebep)
                 
-                # Atis suresi dolduysa (imha): bu hedefi birak ve bir sure yeniden secme;
-                # siradaki hedefe HEMEN gec (Asama 2: tur basina 3 hedef ayni anda).
+                # Sure dolmasi tek basina imha degildir. Balonun gercekten kayboldugu
+                # yukaridaki cok-kare dogrulamasiyla kanitlanir; o zamana dek cross kalir.
                 if a and simdi >= self._otonom_ates_bitis_t:
-                    algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
+                    self._otonom_balon_dogruluyor = True
+                    self._otonom_balon_kayip_kare = 0
+                    self._otonom_hedef_merkezde_t = None
 
     def _otonom_panel_guncelle(self, active_hedef, data, estop):
         """Otonom moddaki takip ve nisan durumunu (sag kolon paneli) gunceller."""

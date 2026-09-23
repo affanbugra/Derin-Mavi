@@ -336,10 +336,12 @@ def test_kart_disaridan_durunca_ates_ve_hareket_kesilir(w):
     assert w._aci_hareket(3.0, 0.0) is False, "kart durdu, hareket gecti"
 
 
-def _otonom_veri(gorunuyor=True):
+def _otonom_veri(gorunuyor=True, balon=True):
     """gorunuyor=False: hedef O KAREDE tespit edilemedi (hayalet kutu)."""
-    return {"active": {"tip": "Hedef", "hayalet": not gorunuyor}, "merkezde": True,
-            "kirmizi_kaniti": True}
+    return {"active": {"tip": "Hedef", "hayalet": not gorunuyor,
+                       "box": (100, 100, 200, 180)},
+            "balonlar": [(135, 190, 165, 220)] if balon else [],
+            "merkezde": True, "kirmizi_kaniti": True}
 
 
 def _dwell_doldu(w):
@@ -382,6 +384,39 @@ def test_otonom_ates_estopta_ve_asama1de_yok(w):
     # (yalniz karta guvenilmez — eski/farkli firmware'de o katman olmayabilir).
     assert not w._otonom_ates_aktif, "E-Stop'ta otonom ates KURULDU"
     assert w.kontrol.mock.lazer is False, "E-Stop'ta otonom ates"
+
+
+def test_otonom_ates_balon_dogrulamasi(w):
+    """Balon yokken ates baslamaz; sure dolmasi kilidi dusurmez; ancak balonun
+    cok kare kaybi hedefi tamamlar. Bu, gorunen kutudaki cross'un rastgele
+    kaybolmasini engelleyen kapidir."""
+    w.mod, w.asama = "Otonom", "Aşama 2"
+    w._otonom_ates_aktif = False
+    _dwell_doldu(w)
+    w._otonom_ates_kontrol(_otonom_veri(balon=False), False)
+    assert not w._otonom_ates_aktif and not w.kontrol.mock.lazer, "balonsuz otonom ates"
+
+    _dwell_doldu(w)
+    veri = _otonom_veri()
+    w._otonom_ates_kontrol(veri, False)
+    assert w._otonom_ates_aktif and w.kontrol.mock.lazer
+    w._otonom_ates_bitis_t = time.time() - 0.1
+
+    vurulan = []
+    eski = algi.hedef_vuruldu
+    algi.hedef_vuruldu = lambda saniye: vurulan.append(saniye)
+    try:
+        w._otonom_ates_kontrol(veri, False)                 # ates bitti -> dogrulama
+        assert w._otonom_balon_dogruluyor and not vurulan
+        w._otonom_ates_kontrol(veri, False)                 # balon duruyor -> kilit kalir
+        assert not w._otonom_balon_dogruluyor and not vurulan
+
+        w._otonom_balon_dogruluyor = True
+        for _ in range(A.OTONOM_BALON_KAYIP_ONAY_KARE):
+            w._otonom_ates_kontrol(_otonom_veri(balon=False), False)
+        assert vurulan == [A.OTONOM_BEKLEME_SURE], vurulan
+    finally:
+        algi.hedef_vuruldu = eski
 
 
 def test_operator_acisi_karta_kol_acisi_gider(w):
@@ -594,6 +629,7 @@ GERCEK_KART_TESTLERI = [
     test_kart_disaridan_durunca_ates_ve_hareket_kesilir,
     test_otonom_ates_gorunen_hedefe,
     test_otonom_ates_estopta_ve_asama1de_yok,
+    test_otonom_ates_balon_dogrulamasi,
     test_operator_acisi_karta_kol_acisi_gider,
 ]
 TAKIP_TESTLERI = [
@@ -645,5 +681,5 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"Birlesik arayuz kapi testleri OK — {toplam} test: "
           "hareket/ates sinirlari, acilis, tip secimi, E-Stop (hareket+ates), donanim butonu, "
-          "lazer olu adam anahtari, [L] kisayolu, kartin kendi durmasi, otonom ates kirmizi "
-          "kapisi, operator->kol acisi, otonom_v4 PD + mesgul kapisi")
+          "lazer olu adam anahtari, [L] kisayolu, kartin kendi durmasi, otonom ates + balon "
+          "dogrulamasi, operator->kol acisi, otonom_v4 PD + mesgul kapisi")

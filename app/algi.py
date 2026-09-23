@@ -2119,6 +2119,20 @@ def analiz_et(model, frame, estop=False, asama=None):
     return dets, balonlar, active_idx
 
 
+def hedef_balonu(box, balonlar=()):
+    """Hedefin altinda/hizasinda bulunan en yakin gercek balon kutusunu dondurur."""
+    x1, y1, x2, y2 = box
+    hx = (x1 + x2) * 0.5
+    uygun = []
+    for balon in balonlar:
+        bx1, by1, bx2, by2 = balon
+        bcx = (bx1 + bx2) * 0.5
+        bcy = (by1 + by2) * 0.5
+        if x1 <= bcx <= x2 and bcy >= (y1 + y2) * 0.5:
+            uygun.append(((bcx - hx) ** 2 + (bcy - y2) ** 2, balon))
+    return min(uygun, key=lambda u: u[0])[1] if uygun else None
+
+
 def nisan_noktasi(box, balonlar=()):
     """Hedef kutusundan lazerin nisan alacagi pikseli cikarir. (x, y) doner.
 
@@ -2156,16 +2170,11 @@ def nisan_noktasi(box, balonlar=()):
     # noktasindan sarkar, yani kutunun ALT ORTASINA en yakin aday odur. "Listede
     # ilk gelen" secilseydi nisan noktasi model sirasina gore kare kare
     # ziplayabilirdi — PD icin bu, hedefin kendisinin ziplamasiyla ayni sey.
-    uygun = []
-    for bx1, by1, bx2, by2 in balonlar:
+    balon = hedef_balonu(box, balonlar)
+    if balon is not None:
+        bx1, by1, bx2, by2 = balon
         bcx = (bx1 + bx2) * 0.5
         bcy = (by1 + by2) * 0.5
-        # Yatayda bu hedefin altinda mi (baskasinin balonu sayilmasin) ve
-        # dikeyde govde merkezinden asagida mi?
-        if x1 <= bcx <= x2 and bcy >= (y1 + y2) * 0.5:
-            uygun.append(((bcx - hx) ** 2 + (bcy - y2) ** 2, bcx, bcy))
-    if uygun:
-        _, bcx, bcy = min(uygun)
         return (bcx, bcy)
 
     oran = float(AYAR.get("balon_ofset", VARSAYILAN_AYAR["balon_ofset"]))
@@ -2782,6 +2791,7 @@ if __name__ == "__main__":
     # (a) listede ONCE gelen degil, asilma noktasina en yakin olan secilir;
     # (b) nisan balonun kendi merkezine gider, hedef kutusunun orta eksenine DEGIL
     #     (lazer balonun yanina giderse balon patlamaz, imha sayilmaz).
+    assert hedef_balonu(hedef_kutu, [uzak_kare, yakin_kare]) == yakin_kare
     assert nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare]) == (262.0, 265.0), \
         nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare])
     # Balon hic bulunamazsa geometrik kestirime duser (kutunun altina balon_ofset).
