@@ -6,6 +6,7 @@ Kamera + YOLO tespit + RENK ile dost/dusman mantiginin TEK KAYNAGI. Arayuz
 
 Kamera kaynagi: DERINMAVI_CAM env (index / dosya / RTSP-URL); tanimsizsa otomatik tarama.
 """
+import math
 import os
 import time
 import tempfile
@@ -875,8 +876,10 @@ _kilit_son_model = [None, 0.0]    # [kilitli id, modelin onu son gordugu an]
 # Modelin kutu merkezi ile lekenin merkezi arasindaki fark (kilit basina, yumusatilmis).
 # Olcum modelden renge gectiginde nisan noktasi ziplamasin.
 _renk_ofset = [None, 0.0, 0.0]
-# Uzak adayin "kucuk" sayildigi boy (px, buyuk kenar). 10 m drone 32 px, 15 m ~21 px.
-UZAK_KUCUK_PX = 64
+# Uzak adayin "kucuk" sayildigi boy (px, buyuk kenar). 10 m drone 32 px, 15 m ~21 px,
+# 10 m fuze ~43 px. ⚠ 5 m drone ~64 px DISARIDA kalmali: 23.09 sahada 64 px sinirla
+# yakin drone %35-40 guvenli "fuze" oylariyla onaylandi (drone -> roket karismasi).
+UZAK_KUCUK_PX = 48
 
 # VURULAN HEDEFLER: otonom atis tamamlanan hedef bir sure YENIDEN secilmez; DIGER
 # hedeflere hemen kilitlenilir. Maket balonu patlasa da rayda gorunmeye devam eder;
@@ -1265,7 +1268,13 @@ def _roi_bul(m, frame, son_det, esik):
         pencereler.append((ox, oy, s))
     sonuclar = m.predict([frame[oy:oy + s, ox:ox + s] for ox, oy, s in pencereler],
                          conf=esik, imgsz=640, verbose=False)
-    en_iyi = None
+    # SECIM: en GUVENLI degil, son kutuya en TUTARLI kutu (boyut + konum), guven
+    # yalniz esitlik bozar. 23.09 arayuz kaydi (5 m): iki olcek/iki kutu arasinda
+    # "en guvenli" secimi kutu genisligini 61 <-> 100 px oynatti, merkez ardisik
+    # olcumde 10 px (medyan) / 35 px (%90) zipladi.
+    boy = max(1.0, x2 - x1, y2 - y1)
+    son_alan = max(1.0, (x2 - x1) * (y2 - y1))
+    en_iyi, en_iyi_puan = None, None
     for (ox, oy, _), r in zip(pencereler, sonuclar):
         for b in (r.boxes if r.boxes is not None else []):
             if kanonik(r.names[int(b.cls)]) == BALON:
@@ -1273,8 +1282,14 @@ def _roi_bul(m, frame, son_det, esik):
             bx1, by1, bx2, by2 = [int(v) for v in b.xyxy[0].tolist()]
             aday = {"box": (bx1 + ox, by1 + oy, bx2 + ox, by2 + oy), "conf": float(b.conf),
                     "tip": son_det.get("tip"), "renk_tip": son_det.get("renk_tip")}
-            if _yeniden_kilit_uyumlu(aday, son_det) and (en_iyi is None or aday["conf"] > en_iyi["conf"]):
-                en_iyi = aday
+            if not _yeniden_kilit_uyumlu(aday, son_det):
+                continue
+            ax1, ay1, ax2, ay2 = aday["box"]
+            alan = max(1.0, (ax2 - ax1) * (ay2 - ay1))
+            uzak = ((ax1 + ax2) * 0.5 - cx) ** 2 + ((ay1 + ay2) * 0.5 - cy) ** 2
+            puan = abs(math.log(alan / son_alan)) + uzak ** 0.5 / boy - 0.3 * aday["conf"]
+            if en_iyi is None or puan < en_iyi_puan:
+                en_iyi, en_iyi_puan = aday, puan
     return en_iyi
 
 
@@ -2135,7 +2150,14 @@ def analiz_et(model, frame, estop=False, asama=None):
                     _renk_ofset[2] += 0.3 * (fy - _renk_ofset[2])
         elif (active_idx == -1 and son_det is not None
               and _kilit_son_model[0] == _kilitli_track_id
-              and simdi_r - _kilit_son_model[1] <= RENK_SURDURME_S):
+              and simdi_r - _kilit_son_model[1] <= RENK_SURDURME_S
+              # ⚠ YALNIZ KUCUK (UZAK) HEDEF. 23.09 arayuz kaydi, 5 m (~64 px drone):
+              # kirmizi birkac parcaya bolunuyor (govde/kollar), "en yakin leke" her
+              # karede baska parca -> renk olcumu ardisik 16 px (medyan) / 48 px (%90)
+              # zipladi, model->model 0.7 / 8.7 px. Kalman bunu hedef hareketi sanip
+              # +-20 der/sn komut verdi. Yakinda model zaten guvenilir.
+              and max(son_det["box"][2] - son_det["box"][0],
+                      son_det["box"][3] - son_det["box"][1]) <= UZAK_KUCUK_PX):
             leke = _kilit_lekesi(frame, son_det["box"])
             if leke is not None:
                 fx, fy = (_renk_ofset[1], _renk_ofset[2]) \
@@ -2949,6 +2971,40 @@ if __name__ == "__main__":
     sahne[300:420, 560:680] = (0, 0, 245)                   # 120 px kirmizi tisort
     dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
     assert aktif < 0 or dets[aktif].get("hayalet"), ("buyuk kirmizi yuzey olcum oldu", dets)
+    # YAKIN (buyuk) hedefte renk olcum URETMEZ: kirmizisi parcalara bolunur, en yakin
+    # leke her karede baska parca olur (23.09 5 m: ardisik 16/48 px zipladi).
+    takip_sifirla()
+    sahne[:] = 180
+    sahne[340:380, 590:654] = (0, 0, 245)                   # 64x40 px: 5 m drone boyu
+    sahte.kutular = [_SahteKutu(0, 0.95, (590, 340, 654, 380), 15)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert _kilitli_track_id == 15, _kilitli_track_id
+    sahte.kutular = []
+    dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert aktif < 0 or not dets[aktif].get("renk"), ("yakin hedefte renk olcumu", dets[aktif])
+    # KILIT PENCERESI tutarli kutuyu secer: daha guvenli ama 1.8x buyuk kutu yerine
+    # son kutuyla ayni boydaki kutu (5 m: genislik 61 <-> 100 px oynuyordu).
+    class _IkiKutuRoi:
+        def predict(self, girdi, **kw):
+            liste = girdi if isinstance(girdi, list) else [girdi]
+            return [_SahteSonuc([], {0: "drone"}) for _ in liste]
+    son = {"box": (600, 350, 660, 390)}
+    H_, W_ = 720, 1280
+    S_ = int(min(max(ROI_EN_KUCUK, 6 * 60), 640, W_, H_))
+    ox_, oy_ = int(min(max(0, 630 - S_ / 2), W_ - S_)), int(min(max(0, 370 - S_ / 2), H_ - S_))
+    ayni = (600 - ox_, 351 - oy_, 661 - ox_, 391 - oy_)              # ayni boy, guven 0.55
+    buyuk = (590 - ox_, 340 - oy_, 670 - ox_, 400 - oy_)             # 80x60 (2x alan), guven 0.9
+    class _SecimRoi:
+        def predict(self, girdi, **kw):
+            liste = girdi if isinstance(girdi, list) else [girdi]
+            return [_SahteSonuc([_SahteKutu(0, 0.9, buyuk, None), _SahteKutu(0, 0.55, ayni, None)],
+                                {0: "drone"}) for _ in liste[:1]] + \
+                   [_SahteSonuc([], {0: "drone"}) for _ in liste[1:]]
+    secilen = _roi_bul(_SecimRoi(), _np.zeros((H_, W_, 3), _np.uint8), son, 0.3)
+    assert secilen is not None and secilen["box"] == (600, 351, 661, 391), \
+        ("kilit penceresi tutarsiz (buyuk) kutuyu secti", secilen)
+
     # Ayar kapaliyken eski davranis (hayalet)
     takip_sifirla()
     ayar_guncelle(renk_takip=0)

@@ -48,6 +48,15 @@ DOSYA_KAYNAGI = os.environ.get("DERINMAVI_CAM", "").strip()
 # devam eder. Varsayilan yine YALNIZ HARICI (telefonlara istek gitmesin).
 TUM_KAMERALAR = False
 
+# Qt/Media Foundation yolunun OpenCV (DSHOW, 60 FPS) yoluna gore FAZLA gecikmesi (sn).
+# Takip, kare anindaki motor acisini `kare_t - algi.AYAR["kamera_gecikme"]` (0.04, OpenCV
+# yolunda olculdu) ile bulur. 23.09 olcum (pan 3 derece basamak, OBSBOT Meet 2):
+# OpenCV 60 FPS 30-40 ms, bu yol 30 FPS 60-70 ms (arayuz mesgulken de ayni).
+# Duzeltilmezse kontrolcu gimbalin KENDI hareketini hedef hareketi sanar: benzetimde
+# sabit hedefte 5 sn'de 77 yon degisimi, sahada 5 m'de "deli gibi sag-sol" titreme.
+# Tolerans dar (~±15 ms): kamera/cozunurluk/FPS degisirse yeniden olcun.
+QT_EK_GECIKME = 0.025
+
 
 def tum_kameralar_ayarla(acik):
     global TUM_KAMERALAR
@@ -205,7 +214,7 @@ class Kamera(QObject):
         # kareyi daha sonra aldigi zamani kullanmak yuk altinda faz hatasi ve salinim
         # uretir. QVideoFrame.startTime akisa goreli oldugu icin duvar saatiyle
         # motor gecmisine dogrudan karistirilamaz; callback zamani ortak saat alanidir.
-        kare_t = time.time()
+        kare_t = time.time() - QT_EK_GECIKME      # bkz. QT_EK_GECIKME
         img = kare.toImage()
         if img.isNull():
             return
@@ -312,4 +321,17 @@ if __name__ == "__main__":
     k._kare_koy(np.zeros((1, 1, 3), dtype=np.uint8), 123.5)
     _im, _sira, _t = k.oku_zamanli()
     assert _sira == 1 and _t == 123.5
-    print("kamera testleri OK — cihaz eleme, format secimi, atomik kare zamani")
+
+    # Qt yolunun kare zamani, bu yolun FAZLA gecikmesi kadar geriye alinmalidir;
+    # yoksa takip 5 m'de sag-sol titrer (23.09 saha, bkz. QT_EK_GECIKME).
+    class _QtKare:
+        def toImage(self):
+            im = QImage(4, 4, QImage.Format_RGB888)
+            im.fill(0)
+            return im
+    once = time.time()
+    k._kare_geldi(_QtKare())
+    fark = once - k._kare_t
+    assert abs(fark - QT_EK_GECIKME) < 0.01, f"Qt kare zamani duzeltilmedi: {fark:.3f} sn"
+    print("kamera testleri OK — cihaz eleme, format secimi, atomik kare zamani, "
+          "Qt yolu gecikme duzeltmesi")

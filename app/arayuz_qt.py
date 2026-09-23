@@ -930,7 +930,13 @@ class InferenceThread(QThread):
                             merkezde = True
                         (ex, ey), (olu_x, olu_y) = self.nisanci.son_hata_px, self.nisanci.son_olu_px
                         self.takip_olcum.emit({"var": True, "t": kare_t, "ex": ex, "ey": ey,
-                                               "olu_x": olu_x, "olu_y": olu_y, "w": w})
+                                               "olu_x": olu_x, "olu_y": olu_y, "w": w,
+                                               # teshis (takip kara kutusu): olcum kaynagi
+                                               "kaynak": ("renk" if aktif_det.get("renk") else
+                                                          "roi" if aktif_det.get("roi") else "model"),
+                                               "id": aktif_det.get("id"), "cls": aktif_det.get("cls"),
+                                               "conf": aktif_det.get("conf"), "box": kutu,
+                                               "n_det": len(dets)})
                 else:
                     self.nisanci.sifirla()
                 if self.otonom and not self.estop and not gercek_hedef:
@@ -987,6 +993,10 @@ HEDEF_ONCELIK = {"fuze": 0, "helikopter": 1, "f16": 2, "drone": 3}
 # zaten ~0.067 sn'de bir kare geliyor, bu tabanin pratikte etkisi kalmadi).
 NISAN_MESGUL_ORANI = 0.4
 NISAN_MIN_ARALIK = 0.04
+
+# Otonom takipte her olcumu app/loglar/takip_*.csv'ye yaz (bkz. _takip_kaydi).
+# Testler kapatir: sahte saatli kosular kayit klasorunu doldurmasin.
+TAKIP_KAYDI = True
 
 
 class VideoThread(QThread):
@@ -3018,6 +3028,38 @@ class MainWindow(QMainWindow):
         k = getattr(self, "kontrol", None)
         return bool(k and k.bagli and k.takip_geri_bildirimli)
 
+    def _takip_kaydi(self, simdi, d):
+        """TAKIP KARA KUTUSU: otonomda her olcum bir satir (app/loglar/takip_*.csv,
+        repoya girmez). Sahadaki "titriyor / surekli yeniden tespit ediyor" sikayetinin
+        cevabi burada: kutu mu zipliyor, kaynak mi degisiyor (model/roi/renk), kilit mi
+        dusup kalkiyor, komut hizi mi sertlesiyor. Kayit hatasi takibi ASLA durdurmaz."""
+        if not TAKIP_KAYDI:
+            return
+        try:
+            f = getattr(self, "_takip_dosya", None)
+            if f is None:
+                yol = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loglar",
+                                   f"takip_{time.strftime('%Y%m%d_%H%M%S')}.csv")
+                os.makedirs(os.path.dirname(yol), exist_ok=True)
+                f = self._takip_dosya = open(yol, "w", encoding="utf-8", newline="")
+                f.write("t,t_kare,var,ex,ey,olu_x,olu_y,kaynak,id,cls,conf,x1,y1,x2,y2,n_det,"
+                        "pan,tilt,pan_kom,pan_v,tilt_kom,tilt_v\n")
+                self._takip_satir = 0
+            k = self.kontrol
+            pr, tr = getattr(self, "_takip_son_komut", (None, None))
+            box = d.get("box") or (None,) * 4
+            alan = [simdi, d.get("t"), int(bool(d.get("var"))), d.get("ex"), d.get("ey"),
+                    d.get("olu_x"), d.get("olu_y"), d.get("kaynak"), d.get("id"), d.get("cls"),
+                    d.get("conf"), *box, d.get("n_det"), k.pan_olculen, k.tilt_olculen,
+                    *(pr or (None, None)), *(tr or (None, None))]
+            f.write(",".join("" if v is None else (f"{v:.4f}" if isinstance(v, float) else str(v))
+                             for v in alan) + "\n")
+            self._takip_satir += 1
+            if self._takip_satir % 50 == 0:
+                f.flush()
+        except Exception:
+            pass
+
     def _takip_olcum_geldi(self, d):
         """SUREKLI TAKIP — iki eksen de konumunu bildiriyorsa otonom yolun sahibi.
 
@@ -3034,6 +3076,7 @@ class MainWindow(QMainWindow):
         k = self.kontrol
         simdi = time.time()
         var = bool(d.get("var"))
+        self._takip_kaydi(simdi, d)
         ex = ey = olu_x = olu_y = None
         if var:
             olcek = float(d["w"]) / 1280.0              # ppd 1280 px'te olculdu
@@ -3060,6 +3103,7 @@ class MainWindow(QMainWindow):
             tr = self._tilt_takip.yorunge_komut(
                 simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(alt),
                 TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y, pay=0.0)
+            self._takip_son_komut = (pr, tr)
             if pr is None and tr is None:
                 return
             d_pan = pan_v = d_tilt = tilt_v = None
@@ -4295,6 +4339,11 @@ class MainWindow(QMainWindow):
         self._fit()
 
     def closeEvent(self, e):
+        try:
+            if getattr(self, "_takip_dosya", None) is not None:
+                self._takip_dosya.close()
+        except Exception:
+            pass
         self.thread.durdur()
         self.thread.wait(2000)
         # Inference ve kamera tarama thread'leri de DURDURULMALI: calisan bir

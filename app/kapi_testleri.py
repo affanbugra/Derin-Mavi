@@ -16,6 +16,7 @@ os.environ.setdefault("YOLO_CONFIG_DIR", os.path.join(tempfile.gettempdir(), "de
 
 import algi
 import arayuz_qt as A
+A.TAKIP_KAYDI = False          # sahte saatli takip kosulari kayit klasorunu doldurmasin
 import bolge as B
 import hedef_kestirici as HK
 import kontrol as kontrol_mod
