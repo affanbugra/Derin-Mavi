@@ -34,9 +34,29 @@ TILT_ARALIK = 60.0             # toplam mekanik hareket
 # (şartname §4.2: "sadece hedeflerin yer alacağı tarafa bakmasına izin verilecek").
 # Bu bir operatör tercihi DEĞİL, tilt'teki 60° gibi yapısal bir sınırdır: hareket
 # penceresi kapalı olsa bile uygulanır, pencere yalnız bu aralığı DARALTABİLİR.
+# ⚠ BU UC SAYI YARISMA GUNU ARAYUZDEN DEGISTIRILEBILIR (⚙ → SINIRLAR).
+# Kodun icine gomulu, operatorun goremedigi bir sinir BIRAKILMAZ: sahada
+# "neden bu aciya gitmiyor" sorusunun cevabi ekranda gorunur olmalidir.
+# Degeri `sinirlari_ayarla()` degistirir; asagidaki fonksiyonlar her cagrida
+# GUNCEL degeri okur (varsayilan argumana baglanmaz — oyle olsaydi arayuzden
+# yapilan degisiklik hicbir ise yaramazdi).
 PAN_MAX = 60.0                 # ön = 0°, sağa +60, sola −60
 TILT_CALISMA_MIN = -25.0       # fiziksel mekanik aralık hâlâ −30…+30
 TILT_CALISMA_MAX = 25.0
+
+
+def sinirlari_ayarla(yatay=None, dikey_alt=None, dikey_ust=None):
+    """Calisma sinirlarini degistirir (arayuzdeki SINIRLAR bolumunden gelir)."""
+    global PAN_MAX, TILT_CALISMA_MIN, TILT_CALISMA_MAX
+    if yatay is not None:
+        PAN_MAX = max(1.0, min(180.0, float(yatay)))
+    if dikey_alt is not None:
+        TILT_CALISMA_MIN = float(dikey_alt)
+    if dikey_ust is not None:
+        TILT_CALISMA_MAX = float(dikey_ust)
+    if TILT_CALISMA_MIN > TILT_CALISMA_MAX:            # ters girildi: tek nokta
+        TILT_CALISMA_MAX = TILT_CALISMA_MIN
+    return PAN_MAX, TILT_CALISMA_MIN, TILT_CALISMA_MAX
 
 
 def tilt_fiziksel(operator_acisi):
@@ -102,12 +122,13 @@ def pencere_kirp(cur, hedef, alt, ust):
     return yeni, (SERBEST if yeni == hedef else KIRPILDI)
 
 
-def pan_hareket(pan_ham, d_pan, pencere, pan_max=PAN_MAX):
+def pan_hareket(pan_ham, d_pan, pencere, pan_max=None):
     """Sarmasız azimut (karta giden) + delta -> (yeni_pan_ham, durum).
 
     Önce YAPISAL sınır (±pan_max, sessiz kırpma — tilt'teki 0..60 ile aynı kural),
     sonra varsa operatörün hareket penceresi. Hareket işaretli açıda SÜREKLİ
     hesaplanır (sarmaz): gimbal arkadan dolanarak yasak bölgeye geçemez."""
+    pan_max = PAN_MAX if pan_max is None else pan_max      # GUNCEL sinir (bkz. yukarisi)
     cur = pan_isaretli(pan_ham)
     # Kart açılışta pencere dışı bir açı bildirebilir. İlk küçük komutun hedefi
     # doğrudan ±60'a sıçramamalı; yalnız güvenli tarafa adım adım dönülebilir.
@@ -128,9 +149,10 @@ def pan_hareket(pan_ham, d_pan, pencere, pan_max=PAN_MAX):
     return pan_ham + (yeni - cur), durum
 
 
-def tilt_hareket(tilt_sistem_aci, d_tilt, pencere,
-                 sistem_max=TILT_CALISMA_MAX, sistem_min=TILT_CALISMA_MIN):
+def tilt_hareket(tilt_sistem_aci, d_tilt, pencere, sistem_max=None, sistem_min=None):
     """Operatör tilt açısını mekanik ve izinli pencereye kırpar."""
+    sistem_max = TILT_CALISMA_MAX if sistem_max is None else sistem_max
+    sistem_min = TILT_CALISMA_MIN if sistem_min is None else sistem_min
     # Açılışta kol fiziksel -30'da olabilir. Kullanıcı bu konumdan daha aşağı
     # istemişse kırpma onu ters yönde -25'e yürütmesin; yalnız içeri dönüş serbest.
     if (tilt_sistem_aci < sistem_min and d_tilt <= 0) or (tilt_sistem_aci > sistem_max and d_tilt >= 0):

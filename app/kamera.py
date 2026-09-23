@@ -43,7 +43,21 @@ HARICI_DEGIL = (
 DOSYA_KAYNAGI = os.environ.get("DERINMAVI_CAM", "").strip()
 
 
+# ⚠ Yarisma gunu kacis kapisi: harici kamera bozulursa/ariza yaparsa operator
+# ⚙ → SINIRLAR bolumunden "Tum kameralari goster"i acar ve dahili kamerayla
+# devam eder. Varsayilan yine YALNIZ HARICI (telefonlara istek gitmesin).
+TUM_KAMERALAR = False
+
+
+def tum_kameralar_ayarla(acik):
+    global TUM_KAMERALAR
+    TUM_KAMERALAR = bool(acik)
+    return TUM_KAMERALAR
+
+
 def harici_mi(cihaz):
+    if TUM_KAMERALAR:
+        return True
     if cihaz.position() in (QCameraDevice.FrontFace, QCameraDevice.BackFace):
         return False                    # telefon/tablet/laptop kasası kamerası
     ad = cihaz.description().lower()

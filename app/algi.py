@@ -99,6 +99,12 @@ def eksik_siniflar(model):
 BESLEME_CONF = 0.05
 
 VARSAYILAN_AYAR = {
+    # --- SINIRLAR (yarisma gunu arayuzden degistirilir; kodda gizli sinir kalmasin) ---
+    "yatay_sinir": 60,      # ± derece; namlu on yarinin disina cikamaz (bolge.PAN_MAX)
+    "dikey_alt": -25,       # derece; operator acisi, 0 = yere paralel
+    "dikey_ust": 25,
+    "kirmizi_kaniti": 1,    # OTONOM ates icin o karede kirmizi gorulmeli mi (A2/A3)
+    "tum_kameralar": 0,     # 1: dahili/telefon dahil TUM kameralar listelensin
     "hassasiyet": 0.25,     # ByteTrack new_track_thresh + track_high_thresh
     "gosterim": 0.25,       # bu guvenin altindaki kutu CIZILMEZ
     "kararlilik": 30,       # ByteTrack track_buffer: kayip kutu kac kare yasar
@@ -290,6 +296,26 @@ def ayar_guncelle(**kw):
             if k in ("kararlilik", "hassasiyet") and yeni != AYAR[k]:
                 _tracker_yeniden_kur = True
             AYAR[k] = yeni
+    _sinirlari_uygula()
+
+
+def _sinirlari_uygula():
+    """AYAR'daki sinirlari ilgili modullere yansitir.
+
+    TEK KAPI: ayar hangi yoldan gelirse gelsin (panel, ayarlar.json, Sifirla)
+    buradan gecer — boylece "arayuzde yazan sayi" ile "sistemin uyguladigi sayi"
+    ayrisamaz. Ice aktarim fonksiyon icinde: modul dongusu olusmasin."""
+    try:
+        import bolge as _b
+        _b.sinirlari_ayarla(AYAR.get("yatay_sinir"), AYAR.get("dikey_alt"),
+                            AYAR.get("dikey_ust"))
+    except Exception:
+        pass
+    try:
+        import kamera as _k
+        _k.tum_kameralar_ayarla(AYAR.get("tum_kameralar"))
+    except Exception:
+        pass
 
 # BGR renkler (kutu cizimleri)
 RED = (32, 32, 191)      # dusman (yalniz A3)
@@ -923,6 +949,12 @@ def anlik_kirmizi_kaniti(frame, box):
     karari ates iznine donusmemelidir. Bu yalniz ek bir kapidir; insan
     tespiti veya fiziksel lazer emniyeti yerine gecmez.
     """
+    if not AYAR.get("kirmizi_kaniti", 1):
+        # Operator bu kapiyi ⚙ → SINIRLAR'dan KAPATTI. Sahada renk okunamiyorsa
+        # (isik, boya, uzaklik) sistem hic ates etmez hale gelir; o durumda tek
+        # cikis yolu budur. ⚠ A3'te dost/dusman ayrimi YALNIZ renkle yapilir:
+        # kapaliyken dost vurma riski operatore aittir.
+        return True
     kirmizi, cyan = renk_oranlari(frame, box)
     return kirmizi >= RENK_ESIK and kirmizi - cyan >= RENK_FARK_ESIK
 
