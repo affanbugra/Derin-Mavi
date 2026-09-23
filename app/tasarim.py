@@ -583,6 +583,21 @@ def qss() -> str:
     #engok   {{ {yazi(ALTBASLIK_V, YESIL)} background: transparent; }}
     #engname {{ {yazi(BASLIK3, L1)} background: transparent; }}
     #engsub  {{ {yazi(ALTBASLIK, L2)} background: transparent; }}
+    /* HEDEFLER listesindeki tiklanabilir satir. ⚠ Stili OLMAZSA Qt bu butonu YEREL
+       macOS stiliyle cizer: koyu arayuzde acik gri kutu belirir (tasarim.py kapi
+       testi bunu yakalar). Metin rengi satir ici olarak veriliyor (aktif hedef
+       kirmizi), burada yalniz zemin/geometri tanimlanir. */
+    #hedefsatir {{
+        background: {DOLGU_BOSTA};
+        border: none;
+        border-radius: {YC_NORMAL}px;
+        padding: 2px 10px;
+        min-height: {BOY_KUCUK}px;
+        text-align: left;
+    }}
+    #hedefsatir:hover {{ background: {DOLGU_USTUNDE}; }}
+    #hedefsatir:pressed {{ background: {DOLGU_BASILI}; }}
+    #hedefsatir:disabled {{ background: {DOLGU_PASIF}; }}
     /* azimut/yükseliş okuması: Apple'ın "group box" yüzeyi (yalnız dolgu) */
     #angtgl {{
         background: {D4};

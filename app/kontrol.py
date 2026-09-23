@@ -412,7 +412,13 @@ class Kontrol:
                 self.tilt.dur()
                 self.tilt_hedef = self.tilt.aci if self.tilt.aci is not None else self.tilt_hedef
             else:
-                self.tilt_hedef = 0.0      # eski kart tilt'i park konumuna indiriyor
+                # ⚠ 23.09: ESKI YOLDA DA PARK YOK, olundugu yerde donulur.
+                # Sebep tercih degil TUTARLILIK: mock/kart acil durdurmada iki ekseni
+                # de KILITLIYOR (mock_esp32: "pan_hedef, tilt_hedef = pan, tilt").
+                # Laptop tarafi tilt'i 0 kabul edince ekrandaki aci kartin gercek
+                # konumundan KOPUYORDU. Sartname Yetenek 3 de "sistem durur" diyor;
+                # park etmek bir HAREKETTIR. Yeni tilt karti da zaten donduruyor.
+                pass
         return self._gonder(P.DUR if aktif else P.DEVAM)
 
     def home(self):

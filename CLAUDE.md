@@ -163,7 +163,8 @@ Bir sayıyı değiştireceksen **iki tarafı birden** (Python + firmware) günce
 ## 6. Doğrulama — push öncesi koş
 
 ```bash
-python app/kapi_testleri.py    # GÜVENLİK KAPILARI (E-Stop, ateş, ölü adam, otonom ateş)
+python app/kapi_testleri.py        # birleşik arayüz (gerçek pencere açar)
+python app/kapi_testleri_arayuz.py # GÜVENLİK KAPILARI, pencere AÇMADAN (31 test)
 python app/bolge.py            # yasak alan matematiği
 python app/protokol.py         # komut üretimi + sabit tutarlılığı
 python app/kontrol.py          # mock cihazla uçtan uca
@@ -179,24 +180,25 @@ Testler pencere açmadan koşabilmelidir (kamera/motor gerektirmez).
 
 ## 7. Açık işler ve riskler
 
-### 7.1 ⚠ Kırmızı balon / dost ayrımı riski — **önce bu ölçülmeli**
+### 7.1 ⚠ Kırmızı balon / dost ayrımı — **kısmen giderildi, ölçüm bekliyor**
 Şartname artık **tüm maketlerin altında kırmızı balon** olacağını söylüyor (§5.4).
-`renk_analizi.renk_oranlari` tespit kutusunun tamamına bakıyor (yalnız %12 kenar payı).
-Dost (mavi) maketin kutusuna kırmızı balon sızarsa taraf **düşman** çıkar → Aşama-3'te
-**dost vurma −10**. Yapılacak: gerçek fotoğrafla kırmızı/cyan oranını ölç; sızma varsa
-rengi **kutunun üst kısmından** hesapla (balon altta) ya da balon bölgesini dışla.
+**Yapıldı (23.09):** renk artık kutunun **üst %70'inden** okunuyor
+(`renk_analizi.GOVDE_ORANI`); balon her zaman gövdenin altındadır. Sentetik testte dost
+maket + kırmızı balon artık "Dost" çıkıyor, eski davranışta "Düşman" çıkıyordu.
+**Kalan iş:** gerçek mavi maket + kırmızı balon fotoğrafında oranı ölçün; balon kutunun
+%30'undan fazlasını kaplıyorsa `GOVDE_ORANI` düşürülmeli.
 
 ### 7.2 Diğerleri
 | Konu | Durum |
 |---|---|
-| E-Stop'ta tilt park mı, olduğu yerde donma mı | **Ekip kararı bekliyor** — şartname "sistem durur" diyor, park da bir harekettir |
+| ~~E-Stop'ta tilt park mı~~ | **Kapandı (23.09):** iki eksen de olduğu yerde donar. Yeni tilt kartı zaten donduruyordu; eski yoldaki park kaldırıldı (kartla laptop farklı şey söylüyordu) |
 | Lazer | Hiç bağlanmadı: PWM frekansı, 3.3 V/5 V mantık seviyesi, GPIO 18'e 10 kΩ pull-down doğrulanmadı |
 | Balon sınıfı modelde yok | Nişan gövdeye düşüyor; şartnamede imha = balon → **modelin 1 numaralı işi** |
 | Aşama-1 zarf sırası | Arayüzde sürükle-sırala var ama **hiçbir yer okumuyor**; ceza mantığı yok |
 | Dwell (lazeri hedefte tutma) | Yok |
 | Mesafe ölçümü | Yok; 10–15 m bandı kontrolü de yok (A3 menzil kuralı buna bağlı) |
 | Homing | Gerçek limit switch yok; `home()` = "0°'a dön" |
-| `tasarim.py` testi | **Kırmızı**: `#hedefsatir` stilsiz (koyu arayüzde açık gri kutu riski) |
+| ~~`tasarim.py` testi kırmızı~~ | **Kapandı (23.09):** `#hedefsatir` stili eklendi |
 | Doküman tutarsızlığı | `FINAL_ENTEGRASYON.md` "pan ±90" diyor, kod ±60 |
 
 ### 7.3 Eski notlardan düzelenler (V1.4 ile değişti)

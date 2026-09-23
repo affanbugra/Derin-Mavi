@@ -46,8 +46,8 @@ class MockESP32:
     def _durdur(self, sebep):
         """Acil durdurma — seri STOP ve donanim butonu AYNI yoldan gecer.
 
-        Kart gibi: lazer kesilir, PAN oldugu yerde kilitlenir, TILT 0° park konumuna
-        iner (bu tek izinli harekettir), komutlar reddedilir.
+        Kart gibi: lazer kesilir, IKI EKSEN de oldugu yerde kilitlenir, komutlar
+        reddedilir (sartname Yetenek 3: "sistem durur" — park etmek de harekettir).
         ⚠ Surucu ENABLE **kesilmez**: kapali cevrim surucude serbest kalan mil kayar ve
           ENABLE geri gelince surucu biriken hatayi kendi maksimum hiziyla kapatir —
           gimbal aniden firlar (sahada gozlendi). Motorlar tuttugu icin konum da
@@ -156,8 +156,13 @@ if __name__ == "__main__":
     assert P.satir_estop_mu(cikti), cikti
     assert m.estop and m.lazer is False                  # E-Stop atesi KESTI
     assert m.surucu_enerjili is True, "ENABLE kesildi — kapali cevrimde firlamaya yol acar"
-    assert m.pan_hedef == pan_once, "pan oldugu yerde kilitlenmedi"
-    assert m.tilt_hedef == 0.0, "tilt park konumuna inmiyor"
+    # ⚠ Karsilastirma STOP'tan SONRAKI konumla yapilir: `islet` once fizik adimini
+    #   isletir, yani komut islenirken motor biraz daha ilerler. Eskiden STOP'tan
+    #   ONCE alinan ornekle karsilastiriliyordu ve bu test SURETLI KIRMIZIYDI —
+    #   kilit dogru calisirken test hatali yerden bakiyordu.
+    assert m.pan >= pan_once, "STOP'tan once hareket surmeliydi"
+    assert m.pan_hedef == m.pan, "pan oldugu yerde kilitlenmedi"
+    assert m.tilt_hedef == m.tilt, "tilt oldugu yerde kilitlenmedi"
     m.islet(P.pan(180)); m.islet(P.lazer(True))          # STOP'ta komutlar yok sayilir
     assert m.pan_hedef != 180.0 and m.lazer is False
 
@@ -168,11 +173,18 @@ if __name__ == "__main__":
     m2p.pan, m2p.tilt = 90.0, 25.0
     cikti = m2p.islet(P.DUR)
     assert P.satir_konum(cikti) == (90.0, 25.0), cikti   # kart durdugu konumu bildirir
-    assert m2p.tilt_hedef == 25.0, "tilt hedefi durulan konuma cekilmedi"
+    # Hedef, DURULAN konuma cekilir. Tam esitlik yerine konumla karsilastirilir:
+    # `islet` once fizik adimini isletir, konum mikro kadar ilerlemis olabilir.
+    assert abs(m2p.tilt_hedef - m2p.tilt) < 1e-9, "tilt hedefi durulan konuma cekilmedi"
+    assert 25.0 <= m2p.tilt < 25.5, m2p.tilt
+    duran_tilt, duran_pan = m2p.tilt, m2p.pan
     for _ in range(20):                                  # zamani ilerlet
         m2p._son_t -= DT_TAVAN
         m2p.islet("")
-    assert m2p.tilt == 25.0, (m2p.tilt, "acil durdurmada tilt hareket etti")
+    # Acil durdurmadan SONRA hicbir eksen ilerlemez: 20 zaman adimi sonunda konum,
+    # durdurma anindaki konumla ayni kalmali (mikro fark yok — `_adim` estop'ta doner).
+    assert m2p.tilt == duran_tilt, (m2p.tilt, "acil durdurmada tilt hareket etti")
+    assert m2p.pan == duran_pan, (m2p.pan, "acil durdurmada pan hareket etti")
     assert m2p.pan == 90.0, (m2p.pan, "acil durdurmada pan hareket etti")
 
     # DEVAM: konum SIFIRLANMAZ (motorlar tuttugu icin referans gecerli kaldi)
