@@ -136,8 +136,8 @@ PAN_HIZ_TABLO = {
 # Kol-biyel mekanizmasinda kamera, kol "derecesi" basina SABIT miktarda donmuyor.
 # OLCULDU (22.09, faz korelasyonu, +-1.5 ve +-4 derece adimlar, iki yon, dokulu oda):
 # yerel piksel/derece (1280 px). 50 derecenin ustu tavana bakiyor, olcum guvenilmez
-# (guven 0.1-0.4) -> 46'daki deger sabit uzatildi ve otonom takip orada kesilir
-# (algi.AYAR tilt_takip_ust).
+# (guven 0.1-0.4) -> 46'daki deger sabit uzatildi. ⚠ 23.09'dan beri otonom takip
+# bu bolgeye de girebilir (gizli tavan kaldirildi); oradaki kazanc TAHMINE dayanir.
 # SAHADAKI SONUC: 12.4 sabit kabul edilince 36-50 derecede kontrolcu kolun kendi
 # hareketini hedef hareketi sandi (kamera kolun 0.3-0.7'si kadar donuyor), kol
 # 35->53 derece firladi ve yuksek acida +-10 derece salindi.

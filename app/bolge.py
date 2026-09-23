@@ -18,7 +18,7 @@ BİRİMLER (operatörün düşündüğü gibi):
   * Yatay (pan): ÖN = 0°, sağa +, sola − (−180..+180). Fiziksel sınır YOK, 360°
     döner; pencere ön taraf etrafında tanımlanır ki arkadan dolanıp yasak
     bölgeye girilemesin.
-  * Dikey (tilt): operatör çalışma açısı, yere paralel = 0°, −25..+25.
+  * Dikey (tilt): operatör çalışma açısı, −30..+30 (kol 0..60; 0 = kol 30).
     Kartın fiziksel 0..60 ham açısına dönüşüm yalnız tilt_surucu.py içinde yapılır.
 
 Bu modül Qt'ye bağlı değildir: `python app/bolge.py` kendi testlerini koşar.
@@ -29,14 +29,19 @@ from dataclasses import dataclass, field
 TILT_FIZIKSEL_ALT = -30.0      # operatör alt sınırı
 TILT_ARALIK = 60.0             # toplam mekanik hareket
 
-# [KESİN — kullanıcı kararı 22.09.2026] YATAY ÇALIŞMA SINIRI.
-# Operatör aracın ARKASINDA durur; namlunun onun eksenine girmesi kabul edilemez
-# (şartname §4.2: "sadece hedeflerin yer alacağı tarafa bakmasına izin verilecek").
-# Bu bir operatör tercihi DEĞİL, tilt'teki 60° gibi yapısal bir sınırdır: hareket
-# penceresi kapalı olsa bile uygulanır, pencere yalnız bu aralığı DARALTABİLİR.
-PAN_MAX = 60.0                 # ön = 0°, sağa +60, sola −60
-TILT_CALISMA_MIN = -25.0       # fiziksel mekanik aralık hâlâ −30…+30
-TILT_CALISMA_MAX = 25.0
+# [KESİN — kullanıcı kararı 23.09.2026] GİZLİ SINIR YOK. Gimbali kısıtlayan her şey
+# ARAYÜZDEKİ hareket/atış pencerelerinden gelir; kodun içinde operatörün görmediği
+# açı yasağı, tavan ya da pay bulunmaz. Kodda kalan tek sınırlar FİZİKSEL olanlardır
+# (dikey: kalibre edilmiş kol 0…60; yatay: işaretli azimutun tanım aralığı ±180).
+# (22.09'daki "yatay ±60 yapısal sınır" pencere kapalıyken bile uygulanıyordu; artık
+# yalnız pencerenin VARSAYILAN değeridir, arayüzde görünür ve değiştirilebilir.)
+PAN_MAX = 180.0                # işaretli azimut aralığı: ön = 0°, sağa +, sola −
+PAN_VARSAYILAN = 60.0          # hareket penceresinin açılış değeri (arayüzde görünür)
+# DİKEY: kalibre edilmiş fiziksel aralığın TAMAMI (kol 0…60 = operatör −30…+30).
+# 23.09 saha: ±25 sınırı + otonomda gizli tavan/pay yüzünden kol 10 m'deki hedefe
+# çıkamadı (tilt tüm test boyunca +19.8'de, tavanda kaldı).
+TILT_CALISMA_MIN = -30.0
+TILT_CALISMA_MAX = 30.0
 
 
 def tilt_fiziksel(operator_acisi):
@@ -69,10 +74,10 @@ class Bolgeler:
     makul değerlerle dolu olur — operatör anahtarı açınca hemen kullanılabilir bir
     aralık bulur, sıfırdan sayı girmesi gerekmez.
 
-    * hareket: yatay ±60 · dikey ±25 (yapısal çalışma sınırları)
+    * hareket: yatay ±60 · dikey ±30 (arayüzde görünür, operatör değiştirebilir)
     * atış   : yatay ±30 · dikey ±15 — ateş alanı hareket alanından DAR başlar;
       güvenli taraf budur (gidilebilen her yere ateş izni vermek değil)."""
-    hareket_pan: Pencere = field(default_factory=lambda: Pencere(True, -PAN_MAX, PAN_MAX))
+    hareket_pan: Pencere = field(default_factory=lambda: Pencere(True, -PAN_VARSAYILAN, PAN_VARSAYILAN))
     hareket_tilt: Pencere = field(default_factory=lambda: Pencere(True, TILT_CALISMA_MIN, TILT_CALISMA_MAX))
     atis_pan: Pencere = field(default_factory=lambda: Pencere(False, -30.0, 30.0))
     atis_tilt: Pencere = field(default_factory=lambda: Pencere(False, -15.0, 15.0))
@@ -183,23 +188,20 @@ if __name__ == "__main__":
     assert tilt_hareket(10.0, 20.0, t) == (20.0, KIRPILDI)
     assert tilt_hareket(-15.0, -10.0, t) == (-20.0, KIRPILDI)
     assert tilt_hareket(0.0, 5.0, t) == (5.0, SERBEST)
-    # çalışma sınırı pencere kapalıyken de geçerli (−25..+25)
-    assert tilt_hareket(20.0, 20.0, Pencere()) == (25.0, SERBEST)
-    assert tilt_hareket(-20.0, -20.0, Pencere()) == (-25.0, SERBEST)
-    assert tilt_hareket(-30.0, -1.0, Pencere()) == (-30.0, ENGELLENDI)
+    # pencere kapalıyken yalnız FİZİKSEL aralık (−30..+30, kol 0..60) geçerli — gizli sınır yok
+    assert tilt_hareket(20.0, 20.0, Pencere()) == (30.0, SERBEST)
+    assert tilt_hareket(-20.0, -20.0, Pencere()) == (-30.0, SERBEST)
+    assert tilt_hareket(-30.0, -1.0, Pencere()) == (-30.0, SERBEST)       # fiziksel uçta durur
     assert tilt_hareket(-30.0, 30.0, Pencere(True, -25.0, 25.0)) == (0.0, SERBEST)
 
-    # yatay YAPISAL sınır: pencere KAPALI olsa da ±60'ın ötesine geçilemez
-    assert pan_hareket(50.0, 20.0, Pencere()) == (60.0, SERBEST)
-    assert pan_hareket(-50.0, -20.0, Pencere()) == (-60.0, SERBEST)
-    assert pan_hareket(60.0, 5.0, Pencere()) == (60.0, SERBEST)      # sınırda dururuz
-    assert pan_hareket(-10.0, -20.0, Pencere()) == (-30.0, SERBEST)  # içeride serbest
-    # arkadan dolanma: −60'tan sola devam edilemez
-    assert pan_hareket(-60.0, -30.0, Pencere()) == (-60.0, SERBEST)
-    assert pan_hareket(120.0, -1.0, Pencere()) == (119.0, SERBEST)
-    assert pan_hareket(120.0, 1.0, Pencere()) == (120.0, ENGELLENDI)
+    # yatay: pencere KAPALIYKEN gizli ±60 yok (23.09 kullanıcı kararı) — yalnız işaretli
+    # azimutun tanım aralığı (±180): arkadan dolanıp tur atılmaz
+    assert pan_hareket(50.0, 20.0, Pencere()) == (70.0, SERBEST)
+    assert pan_hareket(-50.0, -20.0, Pencere()) == (-70.0, SERBEST)
+    assert pan_hareket(170.0, 20.0, Pencere()) == (180.0, SERBEST)
+    assert pan_hareket(-170.0, -30.0, Pencere()) == (-180.0, SERBEST)
 
-    # yatay pencere: yapısal sınırı yalnız DARALTABİLİR
+    # yatay pencere: operatörün arayüzde yazdığı aralık uygulanır
     p = Pencere(True, -45.0, 45.0)
     assert pan_hareket(40.0, 20.0, p) == (45.0, KIRPILDI)
     assert pan_hareket(-40.0, -20.0, p) == (-45.0, KIRPILDI)
@@ -210,7 +212,7 @@ if __name__ == "__main__":
     v = Bolgeler()
     assert v.hareket_pan.aktif and v.hareket_tilt.aktif
     assert not v.atis_pan.aktif and not v.atis_tilt.aktif
-    assert (v.hareket_pan.alt, v.hareket_pan.ust) == (-PAN_MAX, PAN_MAX)
+    assert (v.hareket_pan.alt, v.hareket_pan.ust) == (-PAN_VARSAYILAN, PAN_VARSAYILAN)
     assert (v.hareket_tilt.alt, v.hareket_tilt.ust) == (TILT_CALISMA_MIN, TILT_CALISMA_MAX)
     assert (v.atis_pan.alt, v.atis_pan.ust) == (-30.0, 30.0)
     assert (v.atis_tilt.alt, v.atis_tilt.ust) == (-15.0, 15.0)

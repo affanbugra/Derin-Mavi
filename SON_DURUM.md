@@ -275,3 +275,51 @@ yeniden kuruldu (yeni sentetik ID). Rayda hareketli hedefte sık olursa uzak hed
 süresi uzatılmalı — ray testi verisiyle ayarlanmalı.
 
 ⚠ Arayüz yeni kodu almak için **yeniden başlatılmalı**. Kamera şu an otomatik pozlamada.
+
+## 23 Eylül 2026 (akşam, motorlu test sonrası) — gizli sınırlar kaldırıldı, açılış sıfır onayı
+
+**Motorlu sahada görülen:** 10 m'deki hedef iyi takip edilmedi, takip sert manevra yapıp hedefi
+kaçırdı, açılışta kol 30° yerine ~10° (kamerada) kalktı.
+
+**Kayıttan bulunan kök sebep (`app/loglar/tilt_20260923_153344_COM3.log`):** oturum başında kart
+kolu **10°'de** sanıyordu, kol ise en alttaydı (önceki testte motorlar enerjisizken kart darbe
+saymaya devam etmişti). Kart kolun yerini ölçmez; sayaç 10° kaymıştı. Sonuçları:
+- açılış yükselişi "10 → 30" = 20° kaldırdı (kamerada ~10°),
+- otonom tilt tüm test boyunca yazılım tavanında kaldı (`Y49.806` = kol 49.8 sanılan, gerçekte ~39.8),
+- kamera/kol dönüşüm tablosu yanlış satırdan okununca kontrolcü kameranın döndüğünden az
+  döndüğünü sanıp fazla düzeltti → kayıtta 1 sn içinde 49.7 → 45 → 48 → 45 gibi savrulmalar.
+
+Ayrıca bir kod hatası: otonom tilt tavanındaki 1.5° güvenlik payı KAMERA açısıyla hesaplanıyordu;
+kolun üst bölgesinde kamera kol başına ~0.3° döndüğü için pay ~5 KOL derecesi ediyordu (tavan
++25 yerine fiilen +19.8).
+
+**Kullanıcı kararı (23.09): gizli sınır yok — gimbali kısıtlayan her şey arayüzdeki ayarlardan
+gelir.** Kaldırılanlar: yatay "yapısal ±60" (pencere kapalıyken bile uygulanıyordu), otonom tilt
+tavanı `tilt_takip_ust`, otonom yatay sınır `pan_takip_siniri`, otonom kenar payları.
+
+**Değişiklikler:**
+- `bolge.py`: dikey hareket penceresi fiziksel aralığın tamamı **−30…+30** (kol 0…60). Yatay
+  pencere varsayılanı **±60** (arayüzde görünür), kutular **±180**'e kadar ayarlanabilir. Pencere
+  kapalıyken yalnız fiziksel/tanım aralığı geçerli.
+- `arayuz_qt.py`: otonom takip sınırlarını doğrudan **arayüzdeki hareket penceresinden** alır
+  (kapalıysa fiziksel aralık); kontrolcüye ek pay verilmez (`pay=0`).
+- `hedef_kestirici.py`: `yorunge_komut(..., pay=)` — pay dışarıdan verilebilir (arayüz 0 verir).
+- `algi.py`: `tilt_takip_ust`, `pan_takip_siniri` ayarları kaldırıldı.
+- **Açılış sıfır onayı** (`arayuz_qt._acilis_sifir_onayi`): açılışta "Tilt kolu şu an fiziksel
+  olarak en altta mı?" sorulur. **Evet** → sayaç sıfırlanır (`R`) ve kol tam 30°'ye (operatör 0°)
+  kalkar. **Hayır** → kol hiç hareket ettirilmez.
+- Kodda kalan tek sınırlar fizikseldir: kart/kalibrasyon (kol 0…60), `tilt_surucu.pan_kirp`
+  (firmware ±400). Takip içi parametreler (ör. `azami_sicrama` 25°, hedef hız sınırı 120°/s) açı
+  yasağı değil, aykırı ölçüme karşı adım sınırıdır.
+
+⚠ **Güvenlik notu:** yatay ±60 sınırı 22.09'da "operatör aracın arkasında, namlu ona dönmemeli"
+(şartname §4.2) diye konmuştu. Artık yalnız arayüzdeki pencerenin varsayılanıdır; pencere
+kapatılırsa namlu arkaya dönebilir.
+
+**Testler:** `kapi_testleri.py` 21 test (yeni: pencere kapalıyken gizli ±60 yok, otonom takip
+arayüz penceresinde durur, gizli tavan olmadan +22'deki hedefe çıkar, açılışta "hayır" → kol
+kıpırdamaz, "evet" → `R`). Bütün modül testleri geçiyor.
+
+⏳ **Motorlu canlı doğrulama HENÜZ YAPILMADI.** Önce kol fiziksel olarak en alta indirilip arayüz
+açılışında "Evet" ile sıfırlanmalı; ardından 10 m'de sabit ve yavaş hareketli hedef testi.
+Kol 48°'nin üstünde kamera/kol oranı ölçülmedi (tahmin); tavana yakın takipte kazanç sapabilir.

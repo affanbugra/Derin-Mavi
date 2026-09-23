@@ -132,8 +132,7 @@ def calistir(args):
     kaynak, model, cap, k, kilit, calis = kur(args)
     git_bekle(k, kilit, args.bas, cap)
     tilt_alt = max(TS.ACI_MIN, args.bas - args.tilt_sinir)
-    tilt_ust = min(k.tilt_tavan, float(algi.AYAR["tilt_takip_ust"]),
-                   args.bas + args.tilt_sinir)
+    tilt_ust = min(k.tilt_tavan, args.bas + args.tilt_sinir)   # yalniz --tilt_sinir (gizli tavan yok)
     if tilt_alt >= tilt_ust:
         guvenli_kapat(cap, k, kilit, calis)
         raise ValueError(f"Gecersiz tilt test penceresi: {tilt_alt:.1f}..{tilt_ust:.1f}")

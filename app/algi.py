@@ -143,10 +143,10 @@ VARSAYILAN_AYAR = {
     # Tilt'te sabit ppd YOK: kol acisi once kamera acisina cevrilir
     # (tilt_surucu.KAMERA_PPD_TABLO), kamera acisinda ppd = pan ile ayni.
     "takip_ppd_pan": 18.7,
-    # Otonom takipte cikilabilecek en yuksek OPERATOR acisi (tilt_surucu "IKI ACI
-    # CERCEVESI": 0 = kol 30, aralik -30..+30). Kol 48'in ustu olculemedi (kamera
-    # tavana bakiyor) ve kamera kol derecesi basina cok az donuyor -> 48-30 = 18.
-    "tilt_takip_ust": 25.0,
+    # (Otonom tilt tavani / pan siniri AYARI YOK — 23.09 kullanici karari: otonom takip
+    # arayuzdeki hareket penceresine uyar, gizli sinir tutulmaz. Bkz. bolge.py.)
+    # ⚠ Kol 48'in USTUNDE kamera/kol orani OLCULMEDI (KAMERA_PPD_TABLO orada tahmin);
+    # o bolgede kontrol kazanci modelden sapabilir.
     # Disli boslugu baslangic tahmini (derece). Olculen: tilt 0.1-0.9, pan 0.2-0.7.
     # Kontrolcu calisirken kendisi ogrenir (EksenTakip.bosluk_kest).
     "takip_bosluk": 0.8,
@@ -159,10 +159,6 @@ VARSAYILAN_AYAR = {
     # 30 FPS'te 80/80 ms. Uygulama 60 FPS istedigi icin varsayilan 40 ms;
     # kamera FPS'i degisirse yeniden olculmeli.
     "kamera_gecikme": 0.04,
-    # OTONOM takipte pan'in acilis konumuna gore gidebilecegi en uzak aci (+-derece).
-    # Firmware sarmasiz +-400'e izin verir (manuel tam tur icin); otonom kovalamada
-    # bu, kablolarin bir turdan fazla sarilmasi demekti. Hedef alani onde.
-    "pan_takip_siniri": 60.0,
     # KILIT PENCERESI: kilitli hedef ana taramada bulunamazsa son yerinin cevresi
     # TAM COZUNURLUKTE kirpilip ikinci kez taranir (kucuk/uzak hedef 2x buyur).
     "roi_tespit": 1,
@@ -225,8 +221,7 @@ AYAR_SINIR = {
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
     "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
     "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60), "nisan_govde": (0, 1),
-    "takip_ppd_pan": (4.0, 60.0), "tilt_takip_ust": (-30.0, 30.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
-    "pan_takip_siniri": (5.0, 399.0),
+    "takip_ppd_pan": (4.0, 60.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),
     "arama_cozunurluk": (320, 1920), "uzak_tarama": (0, 1), "uzak_tarama_periyot": (1, 30), "uzak_kirmizi": (0, 1), "zor_ornek": (0, 1),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
