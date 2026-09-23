@@ -90,7 +90,7 @@ class Kontrol:
         else:                       # gercek seri port (or. COM5, /dev/ttyUSB0)
             try:
                 import serial       # pyserial — yalniz gercek portta gerekir
-                self.seri = serial.Serial(self.kaynak.upper(), 115200, timeout=0.05)
+                self.seri = serial.Serial(self.kaynak, 115200, timeout=0.05)
                 # NOT: bircok ESP32 karti port acilinca (DTR/RTS) RESET atar; acilis
                 # banner'i ve ilk komutlarin yanki satirlari karisabilir. Komutlar MUTLAK
                 # oldugu icin bu kalici bir sapma yaratmaz (bkz. protokol.py).

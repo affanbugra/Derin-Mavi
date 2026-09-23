@@ -824,7 +824,7 @@ class TiltSurucu:
                                      write_timeout=0.05)
             baglanti.dtr = False
             baglanti.rts = False
-            baglanti.port = self.kaynak.upper()
+            baglanti.port = self.kaynak
             baglanti.open()
             baglanti.reset_input_buffer()
             self.seri = baglanti
