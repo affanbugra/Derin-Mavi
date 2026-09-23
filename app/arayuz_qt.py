@@ -915,7 +915,10 @@ class InferenceThread(QThread):
                     else:
                         h, w = frame.shape[:2]
                         kutu = aktif_det["box"]
-                        hedef_xy = nisan.nisan_noktasi(kutu, balonlar)
+                        # Ek balon modelinin (hedefin altinda arayan) bulduklari da
+                        # nisana GIRER: yoksa model balonu gorur, ekranda cizilir,
+                        # ama lazer yine govdeden kestirilen noktaya giderdi.
+                        hedef_xy = nisan.nisan_noktasi(kutu, balonlar + ek_balonlar)
                         # Kutu yuksekligi olu bolgeyi olcekler: balon hedefle birlikte
                         # kuculdugu icin isabet olcutu de kutuya oranli olmali (sartname
                         # s.19 "kesit alanina gore belli bir buyuklukte balon").
@@ -1066,7 +1069,9 @@ class VideoThread(QThread):
                 data = self._panel_verisi(dets, active_idx, fps, k_fps)
                 data["dets"] = dets
                 data["balonlar"] = balonlar + ek_balonlar
-                data["nisan_balonlar"] = balonlar
+                # Ekrandaki nisangah, PD'nin kullandigi listeyle AYNI olmali —
+                # ayrilsaydi operator lazerin gittigi yerden baska nokta gorurdu.
+                data["nisan_balonlar"] = balonlar + ek_balonlar
                 data["active_idx"] = active_idx
                 aktif = dets[active_idx] if 0 <= active_idx < len(dets) else None
                 data["kirmizi_kaniti"] = bool(aktif and not aktif.get("hayalet")
@@ -2294,9 +2299,13 @@ class MainWindow(QMainWindow):
         # MEKANIK tavan (politika degil): ayri tilt kartinda kolun fiziksel ucu,
         # eski kartta firmware'in TILT_MAX'i. Daraltmak isteyen hareket penceresini
         # kullanir — kodda gizli bir "calisma sinirlamasi" YOKTUR.
+        # Eski tek-kart yolunda P.TILT_MAX KART CERCEVESINDEDIR (0..180) ve
+        # operator cercevesine (±30) dogrudan yazilamaz: yazilirsa arayuz kolun
+        # fiziksel ucunun cok otesine komut verir. Iki yolda da MEKANIK aralik
+        # tavandir; firmware daha dusuk bir tavan bildirirse o kazanir.
         self.max_tilt_limit = float(TS.ACI_MAX if getattr(self, "kontrol", None) is not None
                                     and getattr(self.kontrol, "tilt_ayri", False)
-                                    else P.TILT_MAX)
+                                    else min(P.TILT_MAX, B.TILT_CALISMA_MAX))
         self.aci_adim = 1.0           # tek dokunus = 1° (sabit; arayuzde secim yok — 22.09)
 
         # Harekete / atisa IZINLI pencereler (disi yasak). Birimler ve kurallar:

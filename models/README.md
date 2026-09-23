@@ -43,6 +43,12 @@ füze tanır; ardından balon modeli yalnızca bulunan maketin gövdesi ve altı
 `best.onnx`, `best.engine` gibi farklı çıktıları dosya adına göre tek aile sayılır ve gereksiz
 yere iki kez belleğe alınmaz.
 
+Balon **yalnız düşman hedefin altında** aranır (Aşama 3'te rengi "Dost" okunan makete ateş
+edilmez; onun balonunu bulmak boşuna işlem demektir — Aşama 1–2'de taraf hiç okunmaz, her
+hedefin altı taranır). Bulunan balon sadece çizilmez, **nişan noktası olur**: lazer balonun
+merkezine kilitlenir, birden fazla aday varsa maketin asılma noktasına en yakın olan seçilir.
+Balon bulunamazsa nişan eskisi gibi gövdeden kestirilir (`balon_ofset` ayarı).
+
 Yalnızca `models/` **kökü** taranır — alt klasördeki model **bulunmaz**.
 
 Hiç model yoksa uygulama yine açılır: kamera + OpenCV çalışır, sadece tespit yapılmaz ve

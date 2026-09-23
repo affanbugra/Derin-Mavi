@@ -113,7 +113,7 @@ Kamera → algi.py (YOLO+takip) → nisan.py / hedef_kestirici.py (PD + kestirim
 |---|---|---|
 | Arayüz | `arayuz_qt.py` (4.3k satır) | Manuel/Otonom, aşama, açı karoları, yasak alanlar, kol göstergesi, E-Stop |
 | Görünüm | `tasarim.py` | Renk/ölçü/QSS **tek kaynak** (Apple macOS dili) |
-| Algı | `algi.py`, `renk_analizi.py` | Tespit (YOLO11 + ByteTrack), kesin tanıma, dost/düşman rengi |
+| Algı | `algi.py`, `renk_analizi.py` | Tespit (YOLO11 + ByteTrack), kesin tanıma, dost/düşman rengi, **düşmanın altındaki balon** (`ek_balonlari_tespit_et`) |
 | Nişan | `nisan.py`, `hedef_kestirici.py` | Piksel hatası → açı (PD), yörünge kestirimi |
 | Güvenlik alanı | `bolge.py` | İzinli pencere modeli (hareket/atış) — **tek sınır kaynağı** |
 | Kontrol | `kontrol.py`, `protokol.py`, `tilt_surucu.py`, `mock_esp32.py` | Karta giden **tek kapı** + donanımsız çalışma |
@@ -206,7 +206,7 @@ maket + kırmızı balon artık "Dost" çıkıyor, eski davranışta "Düşman" 
 |---|---|
 | ~~E-Stop'ta tilt park mı~~ | **Kapandı (23.09):** iki eksen de olduğu yerde donar. Yeni tilt kartı zaten donduruyordu; eski yoldaki park kaldırıldı (kartla laptop farklı şey söylüyordu) |
 | Lazer | Hiç bağlanmadı: PWM frekansı, 3.3 V/5 V mantık seviyesi, GPIO 18'e 10 kΩ pull-down doğrulanmadı |
-| Balon sınıfı modelde yok | Nişan gövdeye düşüyor; şartnamede imha = balon → **modelin 1 numaralı işi** |
+| Balon modeli | **Yol açıldı (23.09):** `models/` içine balon tanıyan ek bir `.pt` konursa otomatik yüklenir, düşman hedefin altında aranır ve nişan **balonun merkezine** gider. Ek model yoksa nişan yine gövdeden kestirilir (`balon_ofset`) — asıl iş hâlâ **ana modele balon sınıfını eklemek** |
 | Aşama-1 zarf sırası | Arayüzde sürükle-sırala var ama **hiçbir yer okumuyor**; ceza mantığı yok |
 | Dwell (lazeri hedefte tutma) | Yok |
 | Mesafe ölçümü | Yok; 10–15 m bandı kontrolü de yok (A3 menzil kuralı buna bağlı) |
@@ -224,6 +224,12 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **23.09.2026 · final_v6 (balon)** — Arkadaşın `balontespit` dalındaki balon işi alındı
+  (başka hiçbir şeyi değiştirmeden): ek balon modeli tam kareyi değil **tanınan hedefin alt
+  penceresini** tarar. Üstüne iki karar: balon **yalnız düşman** için aranır (dosta ateş
+  yok, boşuna FPS harcanmaz) ve bulunan balon artık **nişan noktasıdır** — PD, ekrandaki
+  nişangah ve cv2 çizimi aynı listeden beslenir, birden fazla aday varsa asılma noktasına
+  **en yakın** olan seçilir. ⚠ Gerçek balon modeliyle/donanımda denenmedi.
 - **23.09.2026 · final_v6** — İki hat birleşti (arayüz/temizlik + tilt/otonom). Kodda
   politika sınırı kalmadı: aralığı yalnız arayüzdeki pencere belirler, otonom takip de
   aynı pencereyi kullanır (gizli tavan `tilt_takip_ust` ve yörünge payı kaldırıldı —
@@ -234,5 +240,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 - **22.09.2026** — `final_v3`: arayüz + çoklu hedef/tilt takip birleşti; tilt ayrı
   ESP32-S3 kartına taşındı (operatör açısı −25…+25), pan sınırı ±60, güvenlik testleri
   geri getirildi.
-- **22.09.2026** — Arayüz: yasak alan pencereleri, açı karoları, oyun kolu + ekran
-  göstergesi, 2 sn basılı tutma ile ateş, kademeli merkeze alma.

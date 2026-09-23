@@ -76,14 +76,21 @@ def pencere():
 
 def test_hareket_ve_ates(w):
     # 23.09 kullanici karari: GIZLI SINIR YOK. Tilt fiziksel -30..+30 (kol 0..60);
-    # yatayin tek siniri arayuzdeki pencere (varsayilan +-60, +-180'e kadar ayarlanir).
+    # yatayin tek siniri arayuzdeki pencere. ACILIS degeri +-90 (operator aracin
+    # ARKASINDA durur, namlu on yaridan cikmasin) ama bu bir KOD SINIRI DEGIL:
+    # kutular +-180'e kadar yazilir, pencere kapatilirsa sinir hic kalmaz.
     assert w.max_tilt_limit == 30.0
-    assert (w.bolge.hareket_pan.alt, w.bolge.hareket_pan.ust) == (-60.0, 60.0)
+    assert (w.bolge.hareket_pan.alt, w.bolge.hareket_pan.ust) == (-B.PAN_VARSAYILAN,
+                                                                  B.PAN_VARSAYILAN)
+    assert B.PAN_VARSAYILAN == 90.0
     assert (w.bolge.hareket_tilt.alt, w.bolge.hareket_tilt.ust) == (-30.0, 30.0)
     assert all((spin.minimum(), spin.maximum()) == (-180, 180)
                for spin in w.bolge_spin[("hareket", "pan")])
     assert all((spin.minimum(), spin.maximum()) == (-30, 30)
                for spin in w.bolge_spin[("hareket", "tilt")])
+    # Kirpma testleri pencereyi ACIKCA kurar: acilis degeri degisince (90 -> 60 ...)
+    # testin anlami degismesin, pencerenin KENDISI sinanmis olsun.
+    w.bolge.hareket_pan = B.Pencere(True, -60, 60)
     assert w._aci_hareket(15, -30)
     assert (w.pan_ham, w.tilt_aci) == (15.0, -30.0)
     assert (w.kontrol.pan_hedef, w.kontrol.tilt_hedef) == (15.0, -30.0)
@@ -301,28 +308,34 @@ def test_kart_disaridan_durunca_ates_ve_hareket_kesilir(w):
     assert w._aci_hareket(3.0, 0.0) is False, "kart durdu, hareket gecti"
 
 
-def _otonom_veri(kirmizi):
-    return {"active": {"tip": "Hedef", "hayalet": False}, "merkezde": True,
-            "kirmizi_kaniti": kirmizi}
+def _otonom_veri(gorunuyor=True):
+    """gorunuyor=False: hedef O KAREDE tespit edilemedi (hayalet kutu)."""
+    return {"active": {"tip": "Hedef", "hayalet": not gorunuyor}, "merkezde": True,
+            "kirmizi_kaniti": True}
 
 
 def _dwell_doldu(w):
     w._otonom_hedef_merkezde_t = time.time() - A.OTONOM_DWELL_SURE - 1
 
 
-def test_otonom_ates_kirmizi_kaniti_sart(w):
-    """A2/A3 otonom ates: yalniz BU KAREDE kirmizi gorulen hedefe. Model insani
-    maket sanabiliyor (22.09 sahada) — sinif hafizasi ates izni degildir."""
+def test_otonom_ates_gorunen_hedefe(w):
+    """A2/A3 otonom ates: hedef O KAREDE GERCEKTEN gorunuyorsa acilir.
+
+    23.09 kullanici karari: "kirmizi kaniti" sarti KALDIRILDI — isik/boya yuzunden
+    renk okunamadiginda sistem hedefi takip bile etmiyordu. Dost korumasi hedef
+    SECIMINDE durur (Asama 3'te yalniz "Düşman" secilir), ates kapisinda degil.
+    Kapida kalan tek sart: kutu HAYALET olmamali (hayalet kutu kare
+    koordinatlarinda DONMUSTUR, namlu oraya bakiyor olmayabilir)."""
     w.mod, w.asama = "Otonom", "Aşama 2"
     w._otonom_ates_aktif = False
     _dwell_doldu(w)
-    w._otonom_ates_kontrol(_otonom_veri(False), False)
-    assert w.kontrol.mock.lazer is False, "kirmizi kanitsiz OTONOM ATES"
+    w._otonom_ates_kontrol(_otonom_veri(gorunuyor=False), False)
+    assert w.kontrol.mock.lazer is False, "gorunmeyen (hayalet) hedefe OTONOM ATES"
     _dwell_doldu(w)
-    w._otonom_ates_kontrol(_otonom_veri(True), False)
-    assert w.kontrol.mock.lazer is True, "kirmizi + dwell doldu ama ates yok"
-    w._otonom_ates_kontrol(_otonom_veri(False), False)
-    assert w.kontrol.mock.lazer is False, "kirmizi kaybolunca ates KESILMEDI"
+    w._otonom_ates_kontrol(_otonom_veri(), False)
+    assert w.kontrol.mock.lazer is True, "hedef goruluyor + dwell doldu ama ates yok"
+    w._otonom_ates_kontrol(_otonom_veri(gorunuyor=False), False)
+    assert w.kontrol.mock.lazer is False, "hedef kaybolunca ates KESILMEDI"
 
 
 def test_otonom_ates_estopta_ve_asama1de_yok(w):
@@ -330,13 +343,13 @@ def test_otonom_ates_estopta_ve_asama1de_yok(w):
     w.mod, w.asama = "Otonom", "Aşama 1"
     w._otonom_ates_aktif = False
     _dwell_doldu(w)
-    w._otonom_ates_kontrol(_otonom_veri(True), False)
+    w._otonom_ates_kontrol(_otonom_veri(), False)
     assert w.kontrol.mock.lazer is False, "Asama 1'de otonom ates"
     assert not w._otonom_ates_aktif, "Asama 1'de otonom ates KURULDU"
     w.asama = "Aşama 2"
     _estop(w, True)
     _dwell_doldu(w)
-    w._otonom_ates_kontrol(_otonom_veri(True), True)
+    w._otonom_ates_kontrol(_otonom_veri(), True)
     # Kart E-Stop'ta L1'i zaten reddeder; arayuzun kendi kapisi da KAPALI kalmali
     # (yalniz karta guvenilmez — eski/farkli firmware'de o katman olmayabilir).
     assert not w._otonom_ates_aktif, "E-Stop'ta otonom ates KURULDU"
@@ -521,7 +534,7 @@ GERCEK_KART_TESTLERI = [
     test_lazer_kapaliyken_tazeleme_gitmez,
     test_l_kisayolu_estopu_asamaz,
     test_kart_disaridan_durunca_ates_ve_hareket_kesilir,
-    test_otonom_ates_kirmizi_kaniti_sart,
+    test_otonom_ates_gorunen_hedefe,
     test_otonom_ates_estopta_ve_asama1de_yok,
     test_operator_acisi_karta_kol_acisi_gider,
 ]

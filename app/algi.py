@@ -111,8 +111,13 @@ def ek_balonlari_tespit_et(modeller, frame, hedefler):
     balon modeli her gercek hedefin alt penceresinde calisir. Boylece sahnedeki
     bagimsiz balonlar bu hedefe aitmis gibi gosterilmez.
     """
+    # DOSTUN BALONU ARANMAZ (23.09, takim karari): dost vurmak -10 puan, o hedefe
+    # zaten ates edilmez -> balonunu bulmak hicbir ise yaramaz, ama bedava da
+    # degildir (ek model her hedef icin bir kez daha kosar, FPS dusurur).
+    # Asama 1-2'de taraf HIC okunmaz ve tip "Hedef"tir; oradaki her hedef aranir.
     gercek_hedefler = [d for d in hedefler
-                       if d.get("cls") in HEDEF_SINIFLARI and not d.get("hayalet")]
+                       if d.get("cls") in HEDEF_SINIFLARI and not d.get("hayalet")
+                       and d.get("tip") != "Dost"]
     if not modeller or not gercek_hedefler:
         return []
     a = ayar_al()
@@ -2109,13 +2114,22 @@ def nisan_noktasi(box, balonlar=()):
     if int(AYAR.get("nisan_govde", 0)):
         return (hx, (y1 + y2) * 0.5)
 
+    # Birden fazla balon bu hedefin altina duserse (ek balon modeli ayni sahnede
+    # birkac aday bulabilir) EN YAKIN olan secilir: balon maketin asilma
+    # noktasindan sarkar, yani kutunun ALT ORTASINA en yakin aday odur. "Listede
+    # ilk gelen" secilseydi nisan noktasi model sirasina gore kare kare
+    # ziplayabilirdi — PD icin bu, hedefin kendisinin ziplamasiyla ayni sey.
+    uygun = []
     for bx1, by1, bx2, by2 in balonlar:
         bcx = (bx1 + bx2) * 0.5
         bcy = (by1 + by2) * 0.5
         # Yatayda bu hedefin altinda mi (baskasinin balonu sayilmasin) ve
         # dikeyde govde merkezinden asagida mi?
         if x1 <= bcx <= x2 and bcy >= (y1 + y2) * 0.5:
-            return (hx, bcy)
+            uygun.append(((bcx - hx) ** 2 + (bcy - y2) ** 2, bcx, bcy))
+    if uygun:
+        _, bcx, bcy = min(uygun)
+        return (bcx, bcy)
 
     oran = float(AYAR.get("balon_ofset", VARSAYILAN_AYAR["balon_ofset"]))
     return (hx, y2 + (y2 - y1) * oran)
@@ -2686,7 +2700,54 @@ if __name__ == "__main__":
         ZOR_ORNEK_DIZIN = _eski_dizin
         _zor.update(son_t=0.0, son_bakis=0.0, sayi=0, oturum=None)
 
+    # ---- EK BALON MODELI: DUSMANIN balonu bulunur, DOST'unki ARANMAZ ----
+    # Nisan noktasi BALONDUR (imha kaniti balonun patlamasi). Ek model yalniz
+    # taninmis hedefin ALT PENCERESINDE kosar; dost hedefe hic ates edilmedigi
+    # icin onun penceresi hic taranmaz.
+    class _BalonModel:
+        """Kirpinti basina sabit bir balon kutusu dondurur (kirpinti koordinatinda)."""
+        names = {0: "balloon"}
+        def __init__(self, kutular):
+            self.kutular, self.cagri = kutular, 0
+        def predict(self, girdiler, **kw):
+            self.cagri += 1
+            return [_SahteSonuc([_SahteKutu(0, 0.9, k, None) for k in self.kutular],
+                                self.names) for _ in girdiler]
+
+    kare_b = _np.zeros((480, 640, 3), _np.uint8)
+    hedef_kutu = (200, 150, 300, 230)                 # kw=100, kh=80
+    pencere = _balon_arama_penceresi(hedef_kutu, kare_b.shape)
+    assert pencere == (155, 170, 345, 370), pencere
+    ox, oy = pencere[0], pencere[1]
+    # Kirpinti koordinati -> kare koordinati: yakin balon (262,265), uzak (255,345)
+    yakin_kare, uzak_kare = (247, 250, 277, 280), (240, 330, 270, 360)
+    kirp = lambda k: (k[0] - ox, k[1] - oy, k[2] - ox, k[3] - oy)
+
+    bmodel = _BalonModel([kirp(uzak_kare), kirp(yakin_kare)])
+    dusman = [{"cls": "f16", "box": hedef_kutu, "tip": "Düşman"}]
+    ek = ek_balonlari_tespit_et([bmodel], kare_b, dusman)
+    assert len(ek) == 2 and yakin_kare in ek and uzak_kare in ek, ek
+
+    # Nisan noktasi: EN YAKIN balonun MERKEZI. Iki sey birden korunur —
+    # (a) listede ONCE gelen degil, asilma noktasina en yakin olan secilir;
+    # (b) nisan balonun kendi merkezine gider, hedef kutusunun orta eksenine DEGIL
+    #     (lazer balonun yanina giderse balon patlamaz, imha sayilmaz).
+    assert nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare]) == (262.0, 265.0), \
+        nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare])
+    # Balon hic bulunamazsa geometrik kestirime duser (kutunun altina balon_ofset).
+    assert nisan_noktasi(hedef_kutu, []) != (262.0, 265.0)
+
+    dost = [{"cls": "f16", "box": hedef_kutu, "tip": "Dost"}]
+    bmodel.cagri = 0
+    assert ek_balonlari_tespit_et([bmodel], kare_b, dost) == [], "dostun balonu arandi"
+    assert bmodel.cagri == 0, "dost hedef icin ek balon modeli bosuna kosturuldu"
+
+    # Hayalet hedefin (tespit edilemeyen kare) altinda da aranmaz: kutu donmustur.
+    hayalet_h = [{"cls": "f16", "box": hedef_kutu, "tip": "Düşman", "hayalet": True}]
+    assert ek_balonlari_tespit_et([bmodel], kare_b, hayalet_h) == []
+
     print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, A3 taraf guveni, "
           "kesin tanima (histerezis/coklu hedef/onay bozulma), cakisan kutu temizligi, "
           "hayalet/dost kilidi korumasi + yuksek-cozunurluk yeniden bulma, "
-          "kirmizi oneri (uzak tarama penceresi), kacirilan kare kaydi")
+          "kirmizi oneri (uzak tarama penceresi), kacirilan kare kaydi, "
+          "dusmanin balonu (dost aranmaz, en yakin balon nisan noktasi)")
