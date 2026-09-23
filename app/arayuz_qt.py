@@ -783,6 +783,7 @@ class OrtakVeri:
         self.kare_t = 0.0
         self.dets = []
         self.balonlar = []
+        self.ek_balonlar = []
         self.active_idx = -1
         self.fps = 0.0          # YOLO inference FPS
         self.kamera_fps = 0.0   # Kamera okuma FPS
@@ -803,6 +804,7 @@ class InferenceThread(QThread):
         self.veri = veri
         self._calis = True
         self.model = None
+        self.balon_modelleri = []
         self.asama = 3                      # 1/2/3/0 — SARTNAME davranisi
         self.estop = False
         self.otonom = False                 # Otonom modda mi
@@ -828,15 +830,46 @@ class InferenceThread(QThread):
                                        (aci[1] - onceki[1]) * ppd)
 
     def run(self):
-        # Mevcut modelleri sirasiyla dener, ilk yuklenenle devam eder
+        # Ana hedef modeli: mevcut oncelik sirasinda ilk yuklenen agirlik.
+        ana_model_yolu = None
         for model_yolu in _modelleri_bul():
             try:
                 self.model = YOLO(os.path.abspath(model_yolu))
-                self.model_bilgi.emit(algi.model_sinif_ozeti(self.model), algi.eksik_siniflar(self.model))
-                break # Basariyla yuklendi, denemeyi birak
+                ana_model_yolu = model_yolu
+                break
             except Exception as e:
                 print(f"Model yuklenemedi ({model_yolu}): {e}")
                 self.model = None
+
+        # Ana model balon bilmiyorsa, klasordeki diger agirliklardan balon sinifi
+        # tasiyanlari da yukle. best.engine / best.onnx / best.pt ayni modelin farkli
+        # ciktilari olabilir; ayni dosya ailesini ikinci kez bellekte tutma.
+        if self.model is not None and not algi.modelde_balon_var(self.model):
+            ana_ad = os.path.basename(str(ana_model_yolu)).lower()
+            ana_aile = (ana_ad.replace("_openvino_model", "")
+                        if ana_ad.endswith("_openvino_model")
+                        else os.path.splitext(ana_ad)[0])
+            for model_yolu in _modelleri_bul():
+                if model_yolu == ana_model_yolu:
+                    continue
+                ad = os.path.basename(str(model_yolu)).lower()
+                aile = (ad.replace("_openvino_model", "")
+                        if ad.endswith("_openvino_model")
+                        else os.path.splitext(ad)[0])
+                if aile == ana_aile:
+                    continue
+                try:
+                    ek_model = YOLO(os.path.abspath(model_yolu))
+                    if algi.modelde_balon_var(ek_model):
+                        self.balon_modelleri.append(ek_model)
+                        print(f"Ek balon modeli yuklendi: {model_yolu}")
+                except Exception as e:
+                    print(f"Ek model yuklenemedi ({model_yolu}): {e}")
+
+        if self.model is not None:
+            tum_modeller = [self.model] + self.balon_modelleri
+            self.model_bilgi.emit(algi.model_sinif_ozeti(tum_modeller),
+                                  algi.eksik_siniflar(tum_modeller))
 
         son_islenen_sira = -1
         t_son, fps = time.perf_counter(), 0.0
@@ -857,6 +890,7 @@ class InferenceThread(QThread):
 
                 self._kamera_kaymasi(kare_t, frame.shape[1])
                 dets, balonlar, active_idx = algi.analiz_et(self.model, frame, self.estop, self.asama)
+                ek_balonlar = algi.ek_balonlari_tespit_et(self.balon_modelleri, frame, dets)
 
                 merkezde = False
                 aktif_det = dets[active_idx] if 0 <= active_idx < len(dets) else None
@@ -908,6 +942,7 @@ class InferenceThread(QThread):
                 with self.veri.kilit:
                     self.veri.dets = dets
                     self.veri.balonlar = balonlar
+                    self.veri.ek_balonlar = ek_balonlar
                     self.veri.active_idx = active_idx
                     self.veri.fps = fps
                     self.veri.merkezde = merkezde
@@ -987,6 +1022,7 @@ class VideoThread(QThread):
                             self.veri.kare = None
                             self.veri.dets = []
                             self.veri.balonlar = []
+                            self.veri.ek_balonlar = []
                             self.veri.active_idx = -1
                     self.msleep(50)
                     continue
@@ -1022,13 +1058,15 @@ class VideoThread(QThread):
                     self.veri.kamera_fps = kamera_fps
                     dets = list(self.veri.dets)
                     balonlar = list(self.veri.balonlar)
+                    ek_balonlar = list(self.veri.ek_balonlar)
                     active_idx = self.veri.active_idx
                     fps = self.veri.fps
                     k_fps = self.veri.kamera_fps
 
                 data = self._panel_verisi(dets, active_idx, fps, k_fps)
                 data["dets"] = dets
-                data["balonlar"] = balonlar
+                data["balonlar"] = balonlar + ek_balonlar
+                data["nisan_balonlar"] = balonlar
                 data["active_idx"] = active_idx
                 aktif = dets[active_idx] if 0 <= active_idx < len(dets) else None
                 data["kirmizi_kaniti"] = bool(aktif and not aktif.get("hayalet")
@@ -1365,7 +1403,11 @@ class MainWindow(QMainWindow):
         self.inference_thread.nisan_komut.connect(self._nisan_geldi)
         self.inference_thread.takip_olcum.connect(self._takip_olcum_geldi)
         self.inference_thread.kamera_acisi_fn = self._kamera_acilari
-        self.inference_thread.start()
+        # Torch agirliklarini yuklemek kisa sure GIL/CPU kullanabilir. Thread'i burada
+        # baslatmak MainWindow kurucusu tamamlanmadan ana thread'i yavaslatiyor ve iki
+        # agirlikta pencere hic acilmamis gibi gorunuyordu. 0-ms timer event loop'a
+        # birakir: pencere once cizilir, modeller hemen ardindan arka planda yuklenir.
+        QTimer.singleShot(0, self.inference_thread.start)
         
         # Kamera: YALNIZ harici (USB-C). Ana thread'de yasar (Qt kamera nesneleri
         # burada olmali); VideoThread kareyi ondan okur. Takilinca/cikarilinca kendi
@@ -4000,7 +4042,7 @@ class MainWindow(QMainWindow):
                     # bu cizimi besler — ikisi ayri hesaplansaydi ekran lazerin gittigi
                     # yeri YANLIS gosterirdi ve operator kalibrasyonu (balon_ofset)
                     # neye gore cevirecegini goremezdi.
-                    hx, hy = nisan.nisan_noktasi(d["box"], data.get("balonlar", []))
+                    hx, hy = nisan.nisan_noktasi(d["box"], data.get("nisan_balonlar", []))
                     cx, cy = hx * scale_x, hy * scale_y
                     pen.setColor(color)
                     painter.setPen(pen)

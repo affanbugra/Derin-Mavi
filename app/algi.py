@@ -50,6 +50,7 @@ DISPLAY = {"f16": "F-16", "helikopter": "Helikopter", "drone": "İHA", "fuze": "
 DISPLAY_CV = {"f16": "F-16", "helikopter": "Helikopter", "drone": "IHA", "fuze": "Fuze"}
 
 BALON = "balon"      # nisan noktasi sinifi (CLAUDE.md §7: balon maketin ALTINDA)
+HEDEF_SINIFLARI = {"f16", "helikopter", "drone", "fuze"}
 
 
 def kanonik(ad):
@@ -73,10 +74,107 @@ def goster_ad_cv(kanon, ham):
     return str(ham).encode("ascii", "replace").decode("ascii")
 
 
+def balon_sinifi_mi(ad):
+    """Farkli veri setlerindeki balon adlarini tek sinif olarak tanir.
+
+    Ornekler: ``balon``, ``balloon``, ``green-balloon``, ``red_balloon``.
+    Renk modelin sinif adinda bulunsa da arayuzde hepsi ayni BALON nesnesidir.
+    """
+    k = kanonik(ad)
+    return k == BALON or k.endswith("balon") or k.endswith("balloon")
+
+
+def modelde_hedef_var(model):
+    return any(kanonik(a) in HEDEF_SINIFLARI
+               for a in getattr(model, "names", {}).values())
+
+
+def modelde_balon_var(model):
+    return any(balon_sinifi_mi(a) for a in getattr(model, "names", {}).values())
+
+
+def _balon_arama_penceresi(box, kare_sekli):
+    """Bir hedefin govdesi ve hemen altindaki balon icin kirpilacak bolge."""
+    h, w = kare_sekli[:2]
+    x1, y1, x2, y2 = box
+    kw, kh = max(1, x2 - x1), max(1, y2 - y1)
+    return (max(0, int(x1 - 0.45 * kw)),
+            max(0, int(y1 + 0.25 * kh)),
+            min(w, int(x2 + 0.45 * kw)),
+            min(h, int(y2 + 1.75 * kh)))
+
+
+def ek_balonlari_tespit_et(modeller, frame, hedefler):
+    """Balonu yalniz taninmis hedeflerin govde+alt bolgesinde arar.
+
+    Tam kare taranmaz. Once ana model F16/helikopter/drone/fuze tanir; sonra ek
+    balon modeli her gercek hedefin alt penceresinde calisir. Boylece sahnedeki
+    bagimsiz balonlar bu hedefe aitmis gibi gosterilmez.
+    """
+    gercek_hedefler = [d for d in hedefler
+                       if d.get("cls") in HEDEF_SINIFLARI and not d.get("hayalet")]
+    if not modeller or not gercek_hedefler:
+        return []
+    a = ayar_al()
+    esik = float(a["gosterim"])
+    imgsz = int(a["cozunurluk"])
+    pencereler = [_balon_arama_penceresi(d["box"], frame.shape) for d in gercek_hedefler]
+    kirpintilar = [frame[y1:y2, x1:x2] for x1, y1, x2, y2 in pencereler]
+    gecerli = [(d, p, k) for d, p, k in zip(gercek_hedefler, pencereler, kirpintilar)
+               if k.size]
+    if not gecerli:
+        return []
+    gercek_hedefler, pencereler, kirpintilar = map(list, zip(*gecerli))
+    adaylar = []
+    for model in modeller:
+        try:
+            results = model.predict(kirpintilar, conf=esik, iou=float(a["iou"]),
+                                    max_det=int(a["maks_tespit"]), verbose=False,
+                                    imgsz=imgsz)
+        except Exception as e:
+            print(f"[UYARI] Ek balon modeli calistirilamadi: {e}")
+            continue
+        for hedef, pencere, r in zip(gercek_hedefler, pencereler, results or []):
+            ox, oy, _, _ = pencere
+            hx1, hy1, hx2, hy2 = hedef["box"]
+            hcx = (hx1 + hx2) * 0.5
+            hcy = (hy1 + hy2) * 0.5
+            hw = max(1, hx2 - hx1)
+            for b in (r.boxes if r.boxes is not None else []):
+                ham_ad = r.names[int(b.cls)]
+                if not balon_sinifi_mi(ham_ad):
+                    continue
+                conf = float(b.conf)
+                lx1, ly1, lx2, ly2 = [int(v) for v in b.xyxy[0].tolist()]
+                box = (lx1 + ox, ly1 + oy, lx2 + ox, ly2 + oy)
+                bcx = (box[0] + box[2]) * 0.5
+                bcy = (box[1] + box[3]) * 0.5
+                # Balon, taninan maketin yatay hizasinda ve govde merkezinin altinda.
+                if abs(bcx - hcx) <= 0.95 * hw and bcy >= hcy:
+                    adaylar.append((conf, box))
+
+    # Birden fazla balon modeli ayni nesneyi bulursa en guvenli kutuyu bir kez goster.
+    kalan = []
+    for conf, box in sorted(adaylar, reverse=True):
+        if not any(_ortusme(box, eski) >= 0.70 for eski in kalan):
+            kalan.append(box)
+    return kalan
+
+
+def _model_listesi(model_veya_modeller):
+    if isinstance(model_veya_modeller, (list, tuple)):
+        return list(model_veya_modeller)
+    return [model_veya_modeller]
+
+
 def model_sinif_ozeti(model):
     """Alt cubuk teshisi: '2 sınıf · fuze, helikopter'. Arayuz 4 tip + balon vaat
     ederken model 2 sinifliysa bu gercek gizli kalmasin."""
-    adlar = list(getattr(model, "names", {}).values())
+    adlar = []
+    for m in _model_listesi(model):
+        for ad in getattr(m, "names", {}).values():
+            if ad not in adlar:
+                adlar.append(ad)
     if not adlar:
         return "model sınıfları okunamadı"
     kisa = ", ".join(adlar[:6]) + ("…" if len(adlar) > 6 else "")
@@ -85,8 +183,11 @@ def model_sinif_ozeti(model):
 
 def eksik_siniflar(model):
     """Sartnamenin gerektirdigi ama modelde OLMAYAN siniflar (uyari icin)."""
-    var = {kanonik(a) for a in getattr(model, "names", {}).values()}
-    return [g for g in ("f16", "helikopter", "drone", "fuze", BALON) if g not in var]
+    adlar = [a for m in _model_listesi(model)
+             for a in getattr(m, "names", {}).values()]
+    var = {kanonik(a) for a in adlar}
+    return [g for g in ("f16", "helikopter", "drone", "fuze", BALON)
+            if (g != BALON and g not in var) or (g == BALON and not any(balon_sinifi_mi(a) for a in adlar))]
 
 # ---------------- Canli ayarlar (arayuzdeki "⚙" panelinden) ----------------
 # Varsayilanlar ULTRALYTICS'IN KENDI VARSAYILANLARIDIR: ayarlara dokunmayan biri ham
