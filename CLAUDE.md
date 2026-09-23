@@ -138,8 +138,9 @@ Bir sayıyı değiştireceksen **iki tarafı birden** (Python + firmware) günce
 
 | Büyüklük | Değer | Kaynak |
 |---|---|---|
-| Yatay çalışma sınırı | **±60°** | `bolge.PAN_MAX` |
-| Dikey operatör açısı | **−25…+25** (fiziksel −30…+30) | `bolge.TILT_CALISMA_MIN/MAX` |
+| Yatay sınır | **politika sınırı YOK** — pencere (varsayılan ±60); pencere kapalıysa yalnız işaretli azimutun tanım aralığı ±180 | `bolge.PAN_VARSAYILAN` / `PAN_MAX` |
+| Dikey sınır | **politika sınırı YOK** — pencere (varsayılan ±30 = kalibre kolun tamamı) | `bolge.TILT_CALISMA_MIN/MAX` |
+| Otonom takip sınırı | **ayrı sınır YOK** — aynı hareket penceresini kullanır (gizli tavan/pay kaldırıldı) | `arayuz_qt._nisan_geldi` |
 | Operatör 0° = kol | 30° | `tilt_surucu.KULLANICI_SIFIR` |
 | Sürücü çözünürlüğü | 6400 step/tur | `protokol.STEP_TUR` |
 | Pan redüksiyon | 83/15 ≈ 5.53 (98.37 step/°) | `protokol.PAN_DISLI` |
@@ -223,8 +224,13 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
-- **23.09.2026** — Şartname V1.4 (23.06.2026) okundu, bu dosya ona göre güncellendi;
-  `sartname/sartname_metin.txt` yeni PDF'ten üretildi. CLAUDE.md 1392 → ~300 satıra indi.
+- **23.09.2026 · final_v6** — İki hat birleşti (arayüz/temizlik + tilt/otonom). Kodda
+  politika sınırı kalmadı: aralığı yalnız arayüzdeki pencere belirler, otonom takip de
+  aynı pencereyi kullanır (gizli tavan `tilt_takip_ust` ve yörünge payı kaldırıldı —
+  sahada kol +19.8°'de takılıp 10 m'deki hedefe çıkamıyordu). Ateş ve merkeze alma tek
+  dokunuş; otonom ateşte "kırmızı kanıtı" şartı kalktı (dost koruması Aşama-3 hedef
+  seçiminde). Açılışta "kol en altta mı?" onayı eklendi (kart açıyı ölçmez, darbe sayar).
+  Şartname V1.4'e göre güncellendi; CLAUDE.md 1392 → ~220 satır.
 - **22.09.2026** — `final_v3`: arayüz + çoklu hedef/tilt takip birleşti; tilt ayrı
   ESP32-S3 kartına taşındı (operatör açısı −25…+25), pan sınırı ±60, güvenlik testleri
   geri getirildi.
