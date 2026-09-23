@@ -778,8 +778,10 @@ AYAR_TANIM_TAKIP = [
      "NASIL ÖLÇÜLÜR: `python app/kamera_gecikme_olc.py` — ya da otonom modda birkaç "
      "dakika çalıştırıp `python app/takip_analiz.py loglar/takip_*.csv` (kara kutu "
      "kaydından ölçer, önerilen değeri yazar).\n\n"
-     "Tipik: 30–120 ms. Emin değilseniz olduğundan BÜYÜK girmek, küçük girmekten "
-     "daha güvenlidir (büyük değer takibi yavaşlatır, küçük değer savurur)."),
+     "Tipik: 30–120 ms. ⚠ İKİ YÖN DE ZARARLI, ÖLÇÜN: az girmek 0.1 sn'yi aşınca "
+     "salınıma sokar (3 px → 160 px); fazla girmek hareketli hedefte takibi "
+     "bozar (ölçüldü: doğru değerde 8 px, 60 ms fazlasında 38 px). Salınım "
+     "koruması ikisinde de felaketi önler ama doğru değerin yerini tutmaz."),
     ("takip_ppd_pan", "Takip ölçeği (px/derece)", "onda", 40, 600,
      "Gimbal 1 derece dönünce görüntü kaç piksel kayıyor. Piksel hatasını açıya "
      "çevirmenin tek yolu budur.\n\n"
