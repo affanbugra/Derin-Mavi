@@ -108,7 +108,7 @@ Kamera → algi.py (YOLO+takip) → nisan.py / hedef_kestirici.py (PD + kestirim
 | Görünüm | `tasarim.py` | Renk/ölçü/QSS **tek kaynak** (Apple macOS dili) |
 | Algı | `algi.py`, `renk_analizi.py` | Tespit (YOLO11 + ByteTrack), kesin tanıma, dost/düşman rengi |
 | Nişan | `nisan.py`, `hedef_kestirici.py` | Piksel hatası → açı (PD), yörünge kestirimi |
-| Güvenlik alanı | `bolge.py` | İzinli pencere modeli (hareket/atış), yapısal sınırlar |
+| Güvenlik alanı | `bolge.py` | İzinli pencere modeli (hareket/atış) — **tek sınır kaynağı** |
 | Kontrol | `kontrol.py`, `protokol.py`, `tilt_surucu.py`, `mock_esp32.py` | Karta giden **tek kapı** + donanımsız çalışma |
 | Girdi | `gamepad.py`, `kol_ikon.py` | Kol okuma + ekrandaki kol göstergesi |
 | Kamera | `kamera.py` | **Yalnız harici USB kamera** (dahili/telefon/sanal elenir) |
@@ -144,6 +144,11 @@ Bir sayıyı değiştireceksen **iki tarafı birden** (Python + firmware) günce
 ---
 
 ## 5. Yasak alanlar ve operatör kuralları
+
+**[23.09] Kodda açı sınırı YOKTUR.** Eskiden `bolge` içinde ±60 yatay / ±25 dikey
+"çalışma sınırı" vardı; ekranda görünmediği için sahada "neden bu açıya gitmiyor"un
+cevabı kodun içinde kalıyordu. Artık sınırı yalnız operatör koyar; geriye kalan tek
+sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
 
 - Operatör **yasak** aralığı değil **izinli pencereyi** girer; dışı yasaktır.
   Hareket penceresi: dışına çıkılamaz, sınırda **kırpılır**. Atış penceresi: yalnız
@@ -199,7 +204,7 @@ maket + kırmızı balon artık "Dost" çıkıyor, eski davranışta "Düşman" 
 | Mesafe ölçümü | Yok; 10–15 m bandı kontrolü de yok (A3 menzil kuralı buna bağlı) |
 | Homing | Gerçek limit switch yok; `home()` = "0°'a dön" |
 | ~~`tasarim.py` testi kırmızı~~ | **Kapandı (23.09):** `#hedefsatir` stili eklendi |
-| Doküman tutarsızlığı | `FINAL_ENTEGRASYON.md` "pan ±90" diyor, kod ±60 |
+| Doküman tutarsızlığı | `FINAL_ENTEGRASYON.md` hâlâ "pan ±90 yapısal" diyor; artık kodda sınır yok (23.09) |
 
 ### 7.3 Eski notlardan düzelenler (V1.4 ile değişti)
 Aşama-1 barajı 30 → **20** · Aşama-3 "3 ardışık tur" → **4 ardışık tur** ·

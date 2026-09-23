@@ -135,10 +135,6 @@ class SahtePencere:
     _aci_reset = A.MainWindow._aci_reset               # [R] / MERKEZ — kademeli merkeze al
     _merkez_tik = A.MainWindow._merkez_tik
     _merkez_durdur = A.MainWindow._merkez_durdur
-    _merkez_kurma_baslat = A.MainWindow._merkez_kurma_baslat
-    _merkez_kurma_iptal = A.MainWindow._merkez_kurma_iptal
-    _merkez_kurma_bitti = A.MainWindow._merkez_kurma_bitti
-    MERKEZ_KURMA_MS = A.MainWindow.MERKEZ_KURMA_MS
     TEKRAR_PERIYOT_MS = A.MainWindow.TEKRAR_PERIYOT_MS
     _acilis_hizala = A.MainWindow._acilis_hizala          # birlesik surumde eklendi
     _acilis_yukselisini_dene = A.MainWindow._acilis_yukselisini_dene
@@ -150,10 +146,6 @@ class SahtePencere:
     _ates_kes = A.MainWindow._ates_kes
     _ates_kisayolu = A.MainWindow._ates_kisayolu
     _ates_tusu = A.MainWindow._ates_tusu
-    _ates_kurma_bitti = A.MainWindow._ates_kurma_bitti
-    _ates_kurma_iptal = A.MainWindow._ates_kurma_iptal
-    _ates_kurma_baslat = A.MainWindow._ates_kurma_baslat
-    _ates_kurma_gecerli = A.MainWindow._ates_kurma_gecerli
     _ates_isigi = A.MainWindow._ates_isigi
     _kol_isik = A.MainWindow._kol_isik
     _kol_parla = A.MainWindow._kol_parla
@@ -163,7 +155,6 @@ class SahtePencere:
     _tus_birak = A.MainWindow._tus_birak
     _tus_yonu = A.MainWindow._tus_yonu
     ATES_TUSLARI = A.MainWindow.ATES_TUSLARI
-    ATES_KURMA_MS = A.MainWindow.ATES_KURMA_MS
     atis_yasak_mi = A.MainWindow.atis_yasak_mi
     _gamepad_tik = A.MainWindow._gamepad_tik
     _gamepad_durum_yaz = A.MainWindow._gamepad_durum_yaz
@@ -206,14 +197,10 @@ class SahtePencere:
         self._son_tekrar_t = 0.0
         self._tekrar_gecikme = SahteTimer()
         self._tekrar_timer = SahteTimer()
-        self._ates_tuslari = set()
-        self._ates_kurma = SahteTimer()
-        self._ates_kurma_kaynak = None
         self._gp_ates_basili = False
         self._merkez_calisiyor = False
         self._merkez_son_t = time.time()
         self._merkez_timer = SahteTimer()
-        self._merkez_kurma = SahteTimer()
         self._kol_ui, self._kol_gp = set(), set()
         self.kol_ikon = SahteKol()
         self.aci_adim = 1.0
@@ -236,13 +223,14 @@ def test_ekran_aci_kart_hedefi_ayni():
     w = SahtePencere()
     for _ in range(12):                       # limitin otesine zorla
         w._aci_hareket(0.0, 5.0)
-    assert w.tilt_aci == B.TILT_CALISMA_MAX == 25.0, w.tilt_aci
-    assert w.kontrol.mock.tilt_hedef == B.TILT_CALISMA_MAX, w.kontrol.mock.tilt_hedef
+    # Tavan artik POLITIKA degil: acilistaki hareket penceresi (varsayilan ±25).
+    assert w.tilt_aci == w.bolge.hareket_tilt.ust == 25.0, w.tilt_aci
+    assert w.kontrol.mock.tilt_hedef == w.tilt_aci, w.kontrol.mock.tilt_hedef
 
     # Limitte fazladan komut: gonderilecek yeni bir aci yok, bos komut da atilmamali.
     komut = len(w.kontrol.mock.kayit)
     w._aci_hareket(0.0, 5.0)
-    assert w.tilt_aci == B.TILT_CALISMA_MAX
+    assert w.tilt_aci == w.bolge.hareket_tilt.ust
     assert len(w.kontrol.mock.kayit) == komut, w.kontrol.mock.kayit[-1]
 
     w._aci_hareket(0.0, -5.0)                 # asagi normal calisir
@@ -267,34 +255,35 @@ def test_azimut_sarmasiz_gider():
     assert w.pan_aci == 30.0 and w.kontrol.mock.pan_hedef == 30.0
 
 
-def test_yatay_on_yariyi_gecemez():
-    """[KESİN] Namlu ÖN YARIDAN çıkamaz: ±90°. Operatör aracın arkasında durur,
-    namlu onun eksenine asla giremez (şartname §4.2). Bu bir operatör tercihi
-    DEĞİL yapısal sınırdır — hareket penceresi KAPALI olsa da uygulanır ve
-    pencere onu yalnızca DARALTABİLİR."""
+def test_yatay_sinir_yalniz_pencereden_gelir():
+    """[KESİN 23.09] Yatayda KODDA sınır yoktur: sınırı operatör arayüzdeki hareket
+    penceresinden koyar. Pencere kapalıysa gimbal serbesttir; pencere varsa dışına
+    çıkamaz ve arkadan dolanamaz (pan sarmasız hesaplanır)."""
     w = SahtePencere()
-    # Varsayilan: pencere ACIK ve yapisal sinirla ayni (kullanici daraltabilir)
-    assert w.bolge.hareket_pan.aktif, "hareket penceresi acilista etkin gelmeli"
-    assert (w.bolge.hareket_pan.alt, w.bolge.hareket_pan.ust) == (-B.PAN_MAX, B.PAN_MAX)
+    # Varsayılan: pencere AÇIK (±60) — ama bu bir VARSAYILAN, kod sınırı değil
+    assert w.bolge.hareket_pan.aktif
+    w._aci_hareket(120.0, 0.0)
+    assert w.pan_ham == 60.0, w.pan_ham
 
-    w._aci_hareket(120.0, 0.0)                 # 120° istendi
-    assert w.pan_ham == B.PAN_MAX and w.kontrol.mock.pan_hedef == B.PAN_MAX, w.pan_ham
-    w._aci_hareket(30.0, 0.0)                  # sinirda: daha ileri YOK
-    assert w.pan_ham == B.PAN_MAX
-    w._aci_hareket(-200.0, 0.0)                # diger uca: yine sinirda durur
-    assert w.pan_ham == -B.PAN_MAX and w.kontrol.mock.pan_hedef == -B.PAN_MAX, w.pan_ham
-    assert w.pan_aci == 360.0 - B.PAN_MAX, w.pan_aci     # ekranda 300 (=-60)
+    # Operatör pencereyi GENİŞLETİRSE gimbal oraya gider (eskiden ±60'ta takılırdı)
+    w.bolge.hareket_pan = B.Pencere(True, -150.0, 150.0)
+    w._aci_hareket(60.0, 0.0)
+    assert w.pan_ham == 120.0, w.pan_ham
 
-    # PENCERE KAPALIYKEN DE yapisal sinir gecerli (operator tercihi degil)
+    # Pencere KAPALIYSA kod hiç karışmaz
     w2 = SahtePencere()
-    w2.bolge.hareket_pan = B.Pencere(False, -B.PAN_MAX, B.PAN_MAX)
+    w2.bolge.hareket_pan = B.Pencere(False, -60.0, 60.0)
     w2._aci_hareket(200.0, 0.0)
-    assert w2.pan_ham == B.PAN_MAX, w2.pan_ham
+    assert w2.pan_ham == 200.0, w2.pan_ham      # kod karismaz, tam tur bile serbest
 
-    # Pencere yalniz DARALTIR: ±45 verilince ±45'te durulur
-    w.bolge.hareket_pan = B.Pencere(True, -45.0, 45.0)
-    w._aci_hareket(200.0, 0.0)
-    assert w.pan_ham == 45.0, w.pan_ham
+    # Pencere DARALTILIRSA sınırda kırpılır ve arkadan dolanılamaz
+    w3 = SahtePencere()
+    w3.bolge.hareket_pan = B.Pencere(True, -45.0, 45.0)
+    w3._aci_hareket(200.0, 0.0)
+    assert w3.pan_ham == 45.0, w3.pan_ham
+    for _ in range(20):
+        w3._aci_hareket(-10.0, 0.0)
+    assert w3.pan_ham == -45.0 and w3.pan_aci == 315.0, (w3.pan_ham, w3.pan_aci)
 
 
 def test_ates_sirasinda_yasak_alan():
@@ -544,66 +533,51 @@ class SahteTus:
         return self._tekrar
 
 
-def test_klavye_atesi_space_b_basili_tutma():
-    """Klavyeden ateş: [Space]+[B] birlikte 2 sn basılı → aç; [Esc] → kes.
+def test_klavye_atesi_tek_dokunus():
+    """Klavyeden ateş: [Space] veya [B] → AÇ/KES (bekleme YOK); [Esc] → kes.
 
-    Tek tuş, erken bırakma, E-Stop ve atışa yasak bölge ateşi AÇAMAZ. Klavyenin
-    butondan fazla yetkisi olamaz — yoksa E-Stop klavyeden aşılabilirdi (Yetenek 4)."""
+    Basılı tutma kuralı 23.09'da kaldırıldı (yarışmada saniye = puan). Klavyenin
+    ATEŞ butonundan fazla yetkisi yoktur: E-Stop'ta ve atışa yasak bölgede
+    klavyeyle de ateş açılamaz (şartname Yetenek 4)."""
     Qt = A.Qt
     w = SahtePencere()
     w.thread = A.VideoThread(None, None, None)
 
-    def bas(*tuslar):
-        for t in tuslar:
-            w._tus_bas(SahteTus(t))
+    def bas(tus):
+        w._tus_bas(SahteTus(tus))
 
-    def birak(*tuslar):
-        for t in tuslar:
-            w._tus_birak(SahteTus(t))
-
-    # Tek tus kurma baslatmaz
+    # TEK DOKUNUS acar, ikincisi keser
     bas(Qt.Key_Space)
-    assert not w._ates_kurma.isActive(), "yalniz Space ile kurma basladi"
-    birak(Qt.Key_Space)
+    assert w.fire_btn.isChecked() and w.kontrol.mock.lazer is True, "Space atesi acmadi"
+    bas(Qt.Key_Space)
+    assert not w.fire_btn.isChecked() and w.kontrol.mock.lazer is False, "Space atesi kesmedi"
 
-    # Iki tus: kurma baslar; sure dolmadan birakilirsa ates ACILMAZ
-    bas(Qt.Key_Space, Qt.Key_B)
-    assert w._ates_kurma.isActive()
-    birak(Qt.Key_B)
-    assert not w._ates_kurma.isActive()
-    w._ates_kurma_bitti()                    # gec gelen zamanlayici da acamaz
-    assert w.kontrol.mock.lazer is False, "erken birakilinca ates acildi"
-
-    # Tam basili tutma: sure dolunca ates acilir
-    bas(Qt.Key_Space, Qt.Key_B)
-    w._ates_kurma_bitti()
-    assert w.fire_btn.isChecked() and w.kontrol.mock.lazer is True
-    birak(Qt.Key_Space, Qt.Key_B)
+    # [B] de ayni kapidan gecer
+    bas(Qt.Key_B)
+    assert w.kontrol.mock.lazer is True
+    # Tus BIRAKMAK atesi kesmez (ac/kapa mantigi)
+    w._tus_birak(SahteTus(Qt.Key_B))
     assert w.kontrol.mock.lazer is True, "tus birakinca ates kendiliginden kesildi"
 
-    # ESC keser
+    # ESC her zaman keser
     bas(Qt.Key_Escape)
     assert not w.fire_btn.isChecked() and w.kontrol.mock.lazer is False
 
     # E-Stop: buton kilitli -> klavye de acamaz
     w.thread.estop = True
     w.fire_btn.setEnabled(False)
-    bas(Qt.Key_Space, Qt.Key_B)
-    w._ates_kurma_bitti()
-    assert w.kontrol.mock.lazer is False, "E-Stop'ta Space+B ile ates acildi"
-    birak(Qt.Key_Space, Qt.Key_B)
+    bas(Qt.Key_Space)
+    assert w.kontrol.mock.lazer is False, "E-Stop'ta klavyeden ates acildi"
 
     # Atisa yasak bolge de reddedilir (ates kapisi ortak)
     w.thread.estop = False
     w.fire_btn.setEnabled(True)
     w.bolge.atis_pan = B.Pencere(True, 40.0, 60.0)   # pan 0 -> pencere DISI (yasak)
-    bas(Qt.Key_Space, Qt.Key_B)
-    w._ates_kurma_bitti()
-    assert w.kontrol.mock.lazer is False, "yasak bolgede Space+B ile ates acildi"
+    bas(Qt.Key_Space)
+    assert w.kontrol.mock.lazer is False, "yasak bolgede klavyeden ates acildi"
 
-    # [L] artik ates acmaz (tek tusla ates = 2 sn kuralini delerdi)
+    # [L] ates tusu DEGILDIR (gecmiste oyleydi; kaldirildi)
     w.bolge.atis_pan = B.Pencere(False, -180.0, 180.0)
-    birak(Qt.Key_Space, Qt.Key_B)
     bas(Qt.Key_L)
     assert w.kontrol.mock.lazer is False, "[L] hala ates aciyor"
 
@@ -620,16 +594,17 @@ def test_aci_karosu_yasak_alan_dilimleri():
     assert dilimler(yon, (False, -90, 90), (False, -90, 90)) == []
     # Yatayda eksen YALNIZ on yaridir (±90): arka yari yapisal olarak erisilemez,
     # orayi boyamak "yasak alan" degil "olmayan alan" gosterirdi.
-    assert yon.ARALIK == (-B.PAN_MAX, B.PAN_MAX) == (-60.0, 60.0)
+    assert yon.ARALIK == (-180.0, 180.0)        # yatayda kod sinir koymaz
     assert dilimler(yon, (True, -45, 45), (True, -30, 20)) == [
-        ("hareket", -B.PAN_MAX, -45), ("hareket", 45, B.PAN_MAX),
+        ("hareket", -180.0, -45), ("hareket", 45, 180.0),
         ("atis", -45, -30), ("atis", 20, 45), ("izin", -30, 20)]
     # yalniz atis acik: hareket penceresi tum eksen sayilir
     assert dilimler(yon, (False, 0, 0), (True, -45, 45)) == [
-        ("atis", -B.PAN_MAX, -45), ("atis", 45, B.PAN_MAX), ("izin", -45, 45)]
-    # dikey: yalniz CALISMA araligi (-25..+25) boyanir
+        ("atis", -180.0, -45), ("atis", 45, 180.0), ("izin", -45, 45)]
+    # dikey: yalniz MEKANIK aralik boyanir (kolun gidebildigi yer)
+    alt, ust = A.AracAciGostergesi.ARALIK
     assert dilimler(A.AracAciGostergesi, (True, -20, 20), (False, 0, 0)) == [
-        ("hareket", B.TILT_CALISMA_MIN, -20), ("hareket", 20, B.TILT_CALISMA_MAX)]
+        ("hareket", alt, -20), ("hareket", 20, ust)]
 
 
 def test_kol_gostergesi_gercek_durumu_yansitir():
@@ -648,12 +623,9 @@ def test_kol_gostergesi_gercek_durumu_yansitir():
     assert "up" not in w.kol_ikon.yanan
 
     # 2. Ates kurma (Space+B ya da L2+R2) -> L2/R2 yanar; ates acilinca YANIK KALIR
-    w._ates_kurma_baslat("klavye")
-    assert {"l2", "r2"} <= w.kol_ikon.yanan, "kurma sirasinda tetikler yanmadi"
-    w._gp_ates_basili = False
-    w._ates_tuslari = set(w.ATES_TUSLARI)
-    w._ates_kurma_bitti()
-    assert w.fire_btn.isChecked() and {"l2", "r2"} <= w.kol_ikon.yanan
+    w._ates_kisayolu()                         # ates AC (tek dokunus)
+    assert w.fire_btn.isChecked() and {"l2", "r2"} <= w.kol_ikon.yanan, \
+        "ates acikken koldaki tetikler yanmiyor"
     w._ates_kes("test")
     assert not ({"l2", "r2"} & w.kol_ikon.yanan), "ates kesildi ama tetikler yanik kaldi"
 
@@ -699,34 +671,25 @@ def test_gamepad_ayni_kapilardan_gecer():
     w._gamepad_tik()
     assert w.pan_aci == duran, "E-Stop'ta gamepad ile hareket edildi"
 
-    # --- ATES: L2 + R2 birlikte, 2 sn basili (tek tetik ya da tek dokunus ACMAZ)
+    # --- ATES: L2 + R2 birlikte -> AC/KES (bekleme yok; tek tetik ACMAZ)
     w.thread.estop = False
     w.gamepad = SahteGamepad(basili=("l2",))           # tek tetik
     w._gamepad_tik()
-    assert not w._ates_kurma.isActive(), "tek tetik ateşi kurmaya başladı"
+    assert w.kontrol.mock.lazer is False, "tek tetik ates acti"
 
     w.fire_btn.setEnabled(False)                       # E-Stop benzeri kilit
     w.thread.estop = True
     w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
-    w._ates_kurma_bitti()
     assert w.kontrol.mock.lazer is False, "E-Stop'ta gamepad ile ateş açıldı"
 
     w.thread.estop = False
     w.fire_btn.setEnabled(True)
     w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
-    assert w._ates_kurma.isActive(), "iki tetik ateşi kurmadı"
-    w._gp_ates_basili = False                          # tetikler erken birakildi
-    w._ates_kurma_bitti()
-    assert w.kontrol.mock.lazer is False, "erken bırakılan tetikle ateş açıldı"
-
-    w.gamepad = SahteGamepad(basili=("l2", "r2"))
-    w._gamepad_tik()
-    w._ates_kurma_bitti()                              # 2 sn doldu, tetikler basili
     assert w.kontrol.mock.lazer is True, "gamepad ateş açmadı"
 
-    # Ates ACIKKEN tek dokunus keser (beklemeye zorlanmaz)
+    # Ates ACIKKEN ayni hareket keser
     w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
     assert w.kontrol.mock.lazer is False, "gamepad ateşi kesmedi"
@@ -735,25 +698,17 @@ def test_gamepad_ayni_kapilardan_gecer():
     w.bolge.atis_pan = B.Pencere(True, 100.0, 110.0)  # pan 0 -> pencere DISI
     w.gamepad = SahteGamepad(basili=("l2", "r2"))
     w._gamepad_tik()
-    w._ates_kurma_bitti()
     assert w.kontrol.mock.lazer is False, "yasak bölgede gamepad ile ateş açıldı"
     w.bolge.atis_pan.aktif = False
 
-    # --- MERKEZ: L1/R1 **2 sn basili** (tek dokunus gimbal'i bastan almamali)
+    # --- MERKEZ: L1/R1 -> dogrudan merkeze al (kademeli hareketle)
+    w.bolge.atis_pan.aktif = False
     w._aci_hareket(5.0, 5.0)
     w.gamepad = SahteGamepad(basili=("r1",))
     w._gamepad_tik()
-    assert w._merkez_kurma.isActive(), "R1 merkez sayacını başlatmadı"
-    assert (w.pan_aci, w.tilt_aci) != (0.0, 0.0), "tek dokunuşta merkeze alındı"
-    w.gamepad = SahteGamepad(basili=())            # erken birakildi
-    w._gamepad_tik()
-    assert not w._merkez_kurma.isActive(), "tetik bırakılınca sayaç durmadı"
-
-    w.gamepad = SahteGamepad(basili=("l1",))
-    w._gamepad_tik()
-    w._merkez_kurma_bitti()                        # 2 sn doldu
+    assert w._merkez_timer.isActive(), "R1 merkeze almayı başlatmadı"
     _merkeze_yurut(w)
-    assert abs(w.pan_aci) < 0.1 and abs(w.tilt_aci) < 0.1, "L1 merkeze almadı"
+    assert abs(w.pan_aci) < 0.1 and abs(w.tilt_aci) < 0.1, "R1 merkeze almadı"
 
     # --- Cihaz koparsa arayüz kilitlenmemeli (istisna sızmamalı)
     w.gamepad = SahteGamepad(kopuk=True)
@@ -893,35 +848,6 @@ def test_merkeze_alma_kademeli_ve_kesilebilir():
     assert not w._merkez_timer.isActive(), "E-Stop merkeze almayi durdurmadi"
 
 
-def test_ekrandaki_merkez_kol_yoklamasindan_etkilenmez():
-    """⚠ GERÇEK HATA (22.09, kullanıcı bildirdi): kol takılıyken ekrandaki MERKEZ
-    butonunu basılı tutmak İŞE YARAMIYORDU.
-
-    Sebep: gamepad 50 ms'de bir yoklanıyor ve "L1/R1 basılı değil" diyerek merkez
-    sayacını iptal ediyordu — sayacı KİMİN başlattığına bakılmıyordu. Artık sayacı
-    yalnız başlatan kaynak iptal edebilir."""
-    w = SahtePencere()
-    w.thread = A.VideoThread(None, None, None)
-
-    w._dpad_press("center")                       # ekrandaki MERKEZ basılı tutuluyor
-    assert w._merkez_kurma.isActive()
-    for _ in range(5):                            # kol yoklaması akıp gidiyor
-        w.gamepad = SahteGamepad(basili=())
-        w._gamepad_tik()
-    assert w._merkez_kurma.isActive(), "kol yoklaması ekrandaki merkez sayacını iptal etti"
-    w._merkez_kurma_bitti()
-    assert w._merkez_timer.isActive(), "2 sn dolunca merkeze alma başlamadı"
-
-    # Tersi de doğru: koldan başlatılan sayacı ekrandaki tuşu bırakmak iptal etmez
-    w._merkez_durdur()
-    w._merkez_kurma_iptal()
-    w.gamepad = SahteGamepad(basili=("l1",))
-    w._gamepad_tik()
-    assert w._merkez_kurma.isActive()
-    w._dpad_release("center")
-    assert w._merkez_kurma.isActive(), "ekrandaki bırakma kolun sayacını iptal etti"
-
-
 def test_estopta_r_merkeze_almaz():
     """[R] (ve gamepad Y) E-Stop'ta HICBIR sey yapmamali.
 
@@ -934,17 +860,12 @@ def test_estopta_r_merkeze_almaz():
     w.kontrol.estop(True)
     once = (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef)
     w._dpad_press("center")                              # MERKEZ'e basildi
-    assert not w._merkez_kurma.isActive(), "E-Stop'ta merkez sayaci basladi"
-    w._merkez_kurma_bitti()                              # sayac yine de dolsa
     assert not w._merkez_timer.isActive(), "E-Stop'ta merkeze alma basladi"
     assert (w.pan_ham, w.tilt_aci, w.kontrol.pan_hedef) == once, "E-Stop'ta merkeze alindi"
 
     # E-Stop kalkinca calisir: 2 sn basili tutma + KADEMELI donus
     w.kontrol.estop(False)
     w._dpad_press("center")
-    assert w._merkez_kurma.isActive(), "merkez sayaci baslamadi"
-    assert (w.pan_ham, w.tilt_aci) == (40.0, 20.0), "sayac dolmadan merkeze alindi"
-    w._merkez_kurma_bitti()
     assert w._merkez_timer.isActive(), "kademeli merkeze alma baslamadi"
     _merkeze_yurut(w)
     assert abs(w.pan_ham) < 0.1 and abs(w.tilt_aci) < 0.1, (w.pan_ham, w.tilt_aci)
@@ -1044,7 +965,7 @@ def test_odunc_kapilar_gercek_pencerede_de_metot():
 if __name__ == "__main__":
     test_ekran_aci_kart_hedefi_ayni()
     test_azimut_sarmasiz_gider()
-    test_yatay_on_yariyi_gecemez()
+    test_yatay_sinir_yalniz_pencereden_gelir()
     test_ates_sirasinda_yasak_alan()
     test_harekete_yasak_alan()
     test_estop_hareketi_keser()
@@ -1056,7 +977,7 @@ if __name__ == "__main__":
     test_estopta_iki_eksen_de_oldugu_yerde_donar()
     test_devam_edince_referans_korunur()
     test_basili_tutma_motor_hizini_asmaz()
-    test_klavye_atesi_space_b_basili_tutma()
+    test_klavye_atesi_tek_dokunus()
     test_aci_karosu_yasak_alan_dilimleri()
     test_kol_gostergesi_gercek_durumu_yansitir()
     test_gamepad_ayni_kapilardan_gecer()
@@ -1066,7 +987,6 @@ if __name__ == "__main__":
     test_basili_tutma_estopta_kesilir()
     test_estopta_r_merkeze_almaz()
     test_merkeze_alma_kademeli_ve_kesilebilir()
-    test_ekrandaki_merkez_kol_yoklamasindan_etkilenmez()
     test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar()
     test_dikey_hareket_penceresi_kullanici_ornegi()
     test_yatay_pencere_arkadan_dolanilamaz()
