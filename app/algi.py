@@ -177,6 +177,16 @@ VARSAYILAN_AYAR = {
     # kirmizi oldugu icin esit karo taramasindan hem daha isabetli hem daha ucuz.
     # 0 = eski esit karo taramasi.
     "uzak_kirmizi": 1,
+    # UZAK (KUCUK) KIRMIZI ADAYIN ONAY ESIGI. 23.09 saha, 10 m: drone 32x19 px; model
+    # kilit penceresinde bile %30-75 guven verdi, %70 x 3 kare onayi ilk kilidi 15 sn
+    # geciktirdi, kilit kopunca 25 sn hic geri gelmedi. Aday hem modelce "hedef" hem
+    # BU KAREDE kirmizi ise bu esik yeter (kutu <= UZAK_KUCUK_PX). Yakin hedef ve
+    # kirmizisiz aday eski `onay_esigi`ne tabi.
+    "uzak_onay_esigi": 0.35,
+    # RENKLE KILIT SURDURME: kilitliyken model bir karede hedefi kaciriyorsa (10 m'de
+    # karelerin ~%40'i) son yerinin yanindaki kirmizi leke o karenin OLCUMU olur.
+    # Model en gec RENK_SURDURME_S icinde yeniden dogrulamazsa kilit yine duser.
+    "renk_takip": 1,
     # ZOR ORNEK TOPLAMA: modelin zorlandigi kareler app/veri_toplama/'ya yazilir
     # (sonraki egitim icin). 1 sn'de en fazla 1, oturumda en fazla 300 kare.
     "zor_ornek": 1,
@@ -224,6 +234,7 @@ AYAR_SINIR = {
     "takip_ppd_pan": (4.0, 60.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),
     "arama_cozunurluk": (320, 1920), "uzak_tarama": (0, 1), "uzak_tarama_periyot": (1, 30), "uzak_kirmizi": (0, 1), "zor_ornek": (0, 1),
+    "uzak_onay_esigi": (0.10, 0.99), "renk_takip": (0, 1),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
     "kamera_fps": (5, 120),
     "kamera_pozlama": (-13, 0),
@@ -729,6 +740,22 @@ _budama_sayaci = 0
 KILIT_BIRAKMA_S = 0.5
 _kilit_son_gercek = [None, 0.0]   # [kilitli id, o id'nin son GERCEK goruldugu an]
 
+# RENKLE KILIT SURDURME (bkz. ayar "renk_takip", _kilit_lekesi). Renk yalniz MODELIN
+# kurdugu kilidi tasir: model bu sure icinde hedefi (ByteTrack ya da kilit penceresi)
+# yeniden gormezse renk olcumu durur, KILIT_BIRAKMA_S sonra kilit duser. Boylece
+# kirmizi bir tisort/kutu kilidi kalici olarak devralamaz.
+# 23.09 motorlu canli kayit (elde tasinan drone, 10 m): kilitliyken modelin hedefi hic
+# gormedigi seriler cogunlukla < 0.7 sn, en uzunlari 1.0-1.5 sn (84 serinin 4'u > 1 sn).
+RENK_SURDURME_S = 1.5
+# Uzak aday DOGRULANIRKEN model kacirirsa renk adayi en fazla bu kadar tasir.
+UZAK_ADAY_RENK_S = 2.0
+_kilit_son_model = [None, 0.0]    # [kilitli id, modelin onu son gordugu an]
+# Modelin kutu merkezi ile lekenin merkezi arasindaki fark (kilit basina, yumusatilmis).
+# Olcum modelden renge gectiginde nisan noktasi ziplamasin.
+_renk_ofset = [None, 0.0, 0.0]
+# Uzak adayin "kucuk" sayildigi boy (px, buyuk kenar). 10 m drone 32 px, 15 m ~21 px.
+UZAK_KUCUK_PX = 64
+
 # VURULAN HEDEFLER: otonom atis tamamlanan hedef bir sure YENIDEN secilmez; DIGER
 # hedeflere hemen kilitlenilir. Maket balonu patlasa da rayda gorunmeye devam eder;
 # yasak olmazsa ayni hedefe tekrar tekrar ates edilirdi. Eskiden atistan sonra
@@ -753,6 +780,8 @@ def takip_sifirla():
     _uzak.update(aday=None, iyi=0, kotu=0, sayac=0)
     _vurulanlar.clear()
     _kilit_son_gercek[:] = [None, 0.0]
+    _kilit_son_model[:] = [None, 0.0]
+    _renk_ofset[:] = [None, 0.0, 0.0]
 
 
 def hedef_vuruldu(saniye, simdi=None):
@@ -1065,6 +1094,7 @@ ROI_AZAMI_KAYIP = 90          # kare: bundan uzun kayipta pencere taramasi birak
 KIRMIZISIZ_AZAMI = 15
 _kirmizisiz = [0]
 ROI_EN_KUCUK = 213            # px: 640'lik girdide 3x buyutme
+ROI_IKINCI_OLCEK = 320        # px: ayni merkezli ikinci pencere (2x), bkz. _roi_bul
 _roi_model = None
 _roi_model_denendi = False
 
@@ -1097,18 +1127,32 @@ def _roi_bul(m, frame, son_det, esik):
     # Pencere = kutunun 6 kati, en az 213 px (640'a 3x buyur). Olculdu: 18 px drone'da
     # 213 px pencere %77, 320 px (2x) %58 buluyor; merkez S/4 kaysa da ayni.
     S = int(min(max(ROI_EN_KUCUK, 6 * max(x2 - x1, y2 - y1)), 640, W, H))
-    ox = int(min(max(0, cx - S / 2), W - S))
-    oy = int(min(max(0, cy - S / 2), H - S))
-    r = m.predict(frame[oy:oy + S, ox:ox + S], conf=esik, imgsz=640, verbose=False)[0]
+    # IKI OLCEK, TEK TOPLU CIKARIM. 23.09 saha kaydi (10 m, 32 px drone, 178 kare):
+    # 213 px pencere %70, 320 px %91, ikisi birlikte %92 (14 -> 25 ms). Ayni karede
+    # pencere yalniz 40 px kaysa guven %77'den %0'a dusebiliyor (drone siyah sandalye
+    # onunde) — tek pencere kirilgan. Kucuk (15 m) hedefte 213 daha iyiydi, bu yuzden
+    # buyuk olcek yerine ek olarak taranir.
+    olcekler = [S]
+    S2 = int(min(max(ROI_IKINCI_OLCEK, 1.5 * S), 640, W, H))
+    if S2 >= S + 32:
+        olcekler.append(S2)
+    pencereler = []
+    for s in olcekler:
+        ox = int(min(max(0, cx - s / 2), W - s))
+        oy = int(min(max(0, cy - s / 2), H - s))
+        pencereler.append((ox, oy, s))
+    sonuclar = m.predict([frame[oy:oy + s, ox:ox + s] for ox, oy, s in pencereler],
+                         conf=esik, imgsz=640, verbose=False)
     en_iyi = None
-    for b in (r.boxes if r.boxes is not None else []):
-        if kanonik(r.names[int(b.cls)]) == BALON:
-            continue
-        bx1, by1, bx2, by2 = [int(v) for v in b.xyxy[0].tolist()]
-        aday = {"box": (bx1 + ox, by1 + oy, bx2 + ox, by2 + oy), "conf": float(b.conf),
-                "tip": son_det.get("tip"), "renk_tip": son_det.get("renk_tip")}
-        if _yeniden_kilit_uyumlu(aday, son_det) and (en_iyi is None or aday["conf"] > en_iyi["conf"]):
-            en_iyi = aday
+    for (ox, oy, _), r in zip(pencereler, sonuclar):
+        for b in (r.boxes if r.boxes is not None else []):
+            if kanonik(r.names[int(b.cls)]) == BALON:
+                continue
+            bx1, by1, bx2, by2 = [int(v) for v in b.xyxy[0].tolist()]
+            aday = {"box": (bx1 + ox, by1 + oy, bx2 + ox, by2 + oy), "conf": float(b.conf),
+                    "tip": son_det.get("tip"), "renk_tip": son_det.get("renk_tip")}
+            if _yeniden_kilit_uyumlu(aday, son_det) and (en_iyi is None or aday["conf"] > en_iyi["conf"]):
+                en_iyi = aday
     return en_iyi
 
 
@@ -1166,6 +1210,8 @@ def _zor_ornek(frame, dets, active_idx, sinif_indeksi, a, simdi=None):
         return None if leke is None else _zor_yaz(frame, "kacirma", None, None, simdi)
     if d.get("hayalet"):
         tur, etiket = "kayip", False
+    elif d.get("renk"):
+        tur, etiket = "renk", False   # model kacirdi, renk tasidi: kutu tahmini -> etiketsiz
     elif d.get("roi"):
         tur, etiket = "roi", True
     elif d.get("conf", 100) < 100 * float(a.get("onay_esigi", 0.7)):
@@ -1244,6 +1290,46 @@ KIRMIZI_ONERI_SAYI = 12                      # kare basina en cok pencere
 KIRMIZI_ONERI_PENCERE = 214                  # px; 640'a buyutulunce ~3x
 
 
+def _kirmizi_bilesenler(img):
+    """Hedef renginde bagli bilesenler: [(x, y, w, h, alan), ...] (img koordinati)."""
+    hsv = cv2.cvtColor(cv2.GaussianBlur(img, (3, 3), 0), cv2.COLOR_BGR2HSV)
+    m = (cv2.inRange(hsv, (0, KIRMIZI_ONERI_S, KIRMIZI_ONERI_V), (12, 255, 255)) |
+         cv2.inRange(hsv, (168, KIRMIZI_ONERI_S, KIRMIZI_ONERI_V), (180, 255, 255)))
+    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,
+                         cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+    n, _, ist, _ = cv2.connectedComponentsWithStats(m, 8)
+    return [tuple(int(v) for v in ist[i]) for i in range(1, n)]
+
+
+def _kilit_lekesi(frame, kutu):
+    """Kilitli hedefin son kutusunun YAKININDAKI kirmizi leke. Doner: leke kutusu ya da None.
+
+    Yalniz kutunun cevresine bakilir (tam kare leke aramasi 8.5 ms; bu ~1 ms).
+    Leke hedefle UYUMLU olmali: boyu kutununkine yakin (0.35x..2.5x) ve merkezi en
+    fazla max(1.5 x kutu, 30 px) uzakta. Birden fazla uyan varsa en yakini secilir —
+    kilit kadrajin baska yerindeki kirmiziya ATLAMAZ."""
+    H, W = frame.shape[:2]
+    x1, y1, x2, y2 = kutu
+    boy = max(1, x2 - x1, y2 - y1)
+    cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
+    yaricap = max(1.5 * boy, 30.0)
+    ox1, oy1 = int(max(0, cx - yaricap - boy)), int(max(0, cy - yaricap - boy))
+    ox2, oy2 = int(min(W, cx + yaricap + boy)), int(min(H, cy + yaricap + boy))
+    if ox2 - ox1 < 4 or oy2 - oy1 < 4:
+        return None
+    en_iyi, en_iyi_d = None, None
+    for x, y, w, h, alan in _kirmizi_bilesenler(frame[oy1:oy2, ox1:ox2]):
+        if alan < KIRMIZI_ONERI_EN_AZ or max(w, h) / max(1, min(w, h)) > 6:
+            continue
+        if not 0.35 * boy <= max(w, h) <= 2.5 * boy:
+            continue
+        lx, ly = ox1 + x + w * 0.5, oy1 + y + h * 0.5
+        d = ((lx - cx) ** 2 + (ly - cy) ** 2) ** 0.5
+        if d <= yaricap and (en_iyi_d is None or d < en_iyi_d):
+            en_iyi, en_iyi_d = (ox1 + x, oy1 + y, ox1 + x + w, oy1 + y + h), d
+    return en_iyi
+
+
 def kirmizi_oneri(frame, sayi=KIRMIZI_ONERI_SAYI):
     """Hedef renginde KUCUK ve KOMPAKT lekeler. Doner: kutu listesi, iyiden kotuye.
 
@@ -1254,15 +1340,8 @@ def kirmizi_oneri(frame, sayi=KIRMIZI_ONERI_SAYI):
 
     Skor = dolgunluk x sqrt(alan): kirmizi tisort/kutu gibi BUYUK ve dagilmis
     yuzeyler degil, kucuk kompakt cisimler one cikar."""
-    hsv = cv2.cvtColor(cv2.GaussianBlur(frame, (3, 3), 0), cv2.COLOR_BGR2HSV)
-    m = (cv2.inRange(hsv, (0, KIRMIZI_ONERI_S, KIRMIZI_ONERI_V), (12, 255, 255)) |
-         cv2.inRange(hsv, (168, KIRMIZI_ONERI_S, KIRMIZI_ONERI_V), (180, 255, 255)))
-    m = cv2.morphologyEx(m, cv2.MORPH_CLOSE,
-                         cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
-    n, _, ist, _ = cv2.connectedComponentsWithStats(m, 8)
     adaylar = []
-    for i in range(1, n):
-        x, y, w, h, alan = ist[i]
+    for x, y, w, h, alan in _kirmizi_bilesenler(frame):
         if alan < KIRMIZI_ONERI_EN_AZ or max(w, h) > 240:
             continue
         if max(w, h) / max(1, min(w, h)) > 6:        # cizgi/kenar artigi
@@ -1277,10 +1356,16 @@ def _oneri_penceresi(frame, kutu, kat=6.0, en_az=KIRMIZI_ONERI_PENCERE):
 
     ⚠ Pencereyi kucultup buyutmeyi artirmak TERS TEPIYOR: 96 px pencere (~6.7x)
     21 px hedefte %60, 214 px (~3x) %77 verdi — model 640'ta, sahnenin icinde
-    egitildi; asiri buyutme baglami yok eder."""
+    egitildi; asiri buyutme baglami yok eder.
+
+    ⚠ UST SINIR 320 px (ROI_IKINCI_OLCEK). 23.09 saha: operatorun bordo tisortu ile
+    elindeki drone TEK buyuk kirmizi leke oldu (58x91 px); 6x kural 720 px pencere
+    acti, drone o pencerede kuculup kayboldu ve kilit 15 sn geri gelmedi. Buyuk
+    lekenin yanindaki kucuk hedef 320 px pencereye zaten sigar; yakin (buyuk) hedefi
+    ana tarama bulur."""
     H, W = frame.shape[:2]
     x1, y1, x2, y2 = kutu
-    yan = min(max(en_az, kat * max(x2 - x1, y2 - y1)), min(W, H))
+    yan = min(max(en_az, min(kat * max(x2 - x1, y2 - y1), ROI_IKINCI_OLCEK)), min(W, H))
     ax1 = int(max(0, min(W - yan, (x1 + x2) / 2 - yan / 2)))
     ay1 = int(max(0, min(H - yan, (y1 + y2) / 2 - yan / 2)))
     return ax1, ay1, int(ax1 + yan), int(ay1 + yan)
@@ -1350,22 +1435,46 @@ def _uzak_edinim(model, frame, dets, a, asama, gosterim):
         if bulunan is None:
             return -1
         _uzak.update(aday={"box": bulunan["box"], "cls": bulunan["cls"], "tip": None,
-                           "renk_tip": None, "conf": bulunan["conf"]},
+                           "renk_tip": None, "conf": bulunan["conf"], "t": time.time()},
                      iyi=0, kotu=0, id=_uzak["sonraki_id"])
         _uzak["sonraki_id"] -= 1
         return -1
     # DOGRULAMA: aday bolgesi kilit penceresiyle (3x) taranir.
     roi = _roi_bul(m, frame, aday, float(a.get("roi_esik", 0.30)))
     if roi is None:
+        # Model bu karede kacirdi ama aday hala kirmizi gorunuyor -> aday SILINMEZ,
+        # kutusu lekeyle kayar (hareketli hedef). 23.09 canli kayit: tarama drone'u
+        # %64 guvenle buldu, pencere 5 karede dogrulayamadi, aday silindi; bu iki kez
+        # tekrarlanip kilit ~3 sn gecikti. Sure UZAK_ADAY_RENK_S ile sinirli.
+        leke = (_kilit_lekesi(frame, aday["box"]) if int(a.get("renk_takip", 1))
+                and time.time() - aday.get("t", 0.0) <= UZAK_ADAY_RENK_S else None)
+        if leke is not None:
+            fx, fy = aday.get("ofset", (0.0, 0.0))
+            w_ = int(round(aday["box"][2] - aday["box"][0]))
+            h_ = int(round(aday["box"][3] - aday["box"][1]))
+            x0 = int(round((leke[0] + leke[2]) * 0.5 + fx - w_ / 2))
+            y0 = int(round((leke[1] + leke[3]) * 0.5 + fy - h_ / 2))
+            aday["box"] = (x0, y0, x0 + w_, y0 + h_)
+            return -1
         _uzak["kotu"] += 1
         if _uzak["kotu"] >= UZAK_ADAY_OMUR:
             _uzak["aday"] = None
         return -1
+    leke = _kilit_lekesi(frame, roi["box"])
+    if leke is not None:                  # model merkezi - leke merkezi (renkle tasima icin)
+        aday["ofset"] = ((roi["box"][0] + roi["box"][2] - leke[0] - leke[2]) * 0.5,
+                         (roi["box"][1] + roi["box"][3] - leke[1] - leke[3]) * 0.5)
     sid = _uzak["id"]
-    kesin = _karar_ver(sid, aday["cls"], roi["conf"], float(a["onay_esigi"]),
-                       int(a["onay_tekrari"]))
+    # Kucuk ve BU KAREDE kirmizi aday dusuk guvenle de onaylanir (bkz. "uzak_onay_esigi"):
+    # model uzak hedefte %30-75 arasinda dalgalaniyor; renk + model birlikte "hedef" diyor.
+    kirmizi = anlik_kirmizi_kaniti(frame, roi["box"])
+    bx1, by1, bx2, by2 = roi["box"]
+    onay = float(a["onay_esigi"])
+    if kirmizi and max(bx2 - bx1, by2 - by1) <= UZAK_KUCUK_PX:
+        onay = min(onay, float(a.get("uzak_onay_esigi", 0.35)))
+    kesin = _karar_ver(sid, aday["cls"], roi["conf"], onay, int(a["onay_tekrari"]))
     renk_tip = _taraf_belirle(frame, roi["box"], sid) if asama == 3 else "Hedef"
-    kirmizi_kaniti = anlik_kirmizi_kaniti(frame, roi["box"]) if asama in (2, 3) else True
+    kirmizi_kaniti = kirmizi if asama in (2, 3) else True
     aday.update(box=roi["box"], conf=roi["conf"], renk_tip=renk_tip)
     if kesin is None:
         return -1
@@ -1885,12 +1994,55 @@ def analiz_et(model, frame, estop=False, asama=None):
             # artmaya devam etse kilit `kararlilik` kare sonra (~1 sn) duserdi.
             _kayip_sayaclari[_kilitli_track_id] = 0
 
+    # RENKLE KILIT SURDURME: model (ana tarama + kilit penceresi) bu karede kilitli
+    # hedefi bulamadi ama son yerinin yaninda uyumlu kirmizi leke var -> o karenin
+    # olcumu lekedir (hayalet degil: gimbal donunce leke de kayar, geri besleme kapanir).
+    # Yalniz model hedefi son RENK_SURDURME_S icinde gorduyse.
+    if _kilitli_track_id is not None and not estop and int(a.get("renk_takip", 1)):
+        simdi_r = time.time()
+        son_det = _takip_durumlari.get(_kilitli_track_id, {}).get("son_det")
+        if 0 <= active_idx < len(dets) and not dets[active_idx].get("hayalet"):
+            _kilit_son_model[:] = [_kilitli_track_id, simdi_r]
+            kutu = dets[active_idx]["box"]
+            leke = _kilit_lekesi(frame, kutu)
+            if leke is not None:              # model merkezi - leke merkezi (yumusak)
+                fx = (kutu[0] + kutu[2] - leke[0] - leke[2]) * 0.5
+                fy = (kutu[1] + kutu[3] - leke[1] - leke[3]) * 0.5
+                if _renk_ofset[0] != _kilitli_track_id:
+                    _renk_ofset[:] = [_kilitli_track_id, fx, fy]
+                else:
+                    _renk_ofset[1] += 0.3 * (fx - _renk_ofset[1])
+                    _renk_ofset[2] += 0.3 * (fy - _renk_ofset[2])
+        elif (active_idx == -1 and son_det is not None
+              and _kilit_son_model[0] == _kilitli_track_id
+              and simdi_r - _kilit_son_model[1] <= RENK_SURDURME_S):
+            leke = _kilit_lekesi(frame, son_det["box"])
+            if leke is not None:
+                fx, fy = (_renk_ofset[1], _renk_ofset[2]) \
+                    if _renk_ofset[0] == _kilitli_track_id else (0.0, 0.0)
+                # ⚠ Kamera hareketi telafisi son kutuyu ONDALIKLI kaydirir; kutu tam
+                # sayi olmali (kare dilimleme). 23.09 motorlu testte TypeError verdi.
+                w_ = int(round(son_det["box"][2] - son_det["box"][0]))
+                h_ = int(round(son_det["box"][3] - son_det["box"][1]))
+                x0 = int(round((leke[0] + leke[2]) * 0.5 + fx - w_ / 2))
+                y0 = int(round((leke[1] + leke[3]) * 0.5 + fy - h_ / 2))
+                kutu = (x0, y0, x0 + w_, y0 + h_)
+                det_obj = dict(son_det, box=kutu, id=_kilitli_track_id, renk=True)
+                det_obj.pop("hayalet", None)
+                det_obj.pop("roi", None)
+                dets.append(det_obj)
+                active_idx = len(dets) - 1
+                hafiza = dict(det_obj)
+                hafiza.pop("renk", None)
+                _takip_durumlari[_kilitli_track_id]["son_det"] = hafiza
+                _kayip_sayaclari[_kilitli_track_id] = 0
+
     # KIRMIZI KAYBI (A2/A3): kilitli GERCEK kutu art arda kirmizisiz -> kilit baska bir
     # nesneye (cogunlukla hedefi tutan insana) kaymis; birak ki gercek hedef yeniden
     # edinilsin. Tek tuk kareler (bulaniklik) sayaci doldurmaz.
     if asama in (2, 3) and _kilitli_track_id is not None and 0 <= active_idx < len(dets):
         d_ = dets[active_idx]
-        if not d_.get("hayalet") and not d_.get("roi"):
+        if not d_.get("hayalet") and not d_.get("roi") and not d_.get("renk"):
             kirmizi_ = d_.get("anlik_kirmizi")
             if kirmizi_ is None:
                 kirmizi_ = anlik_kirmizi_kaniti(frame, d_["box"])
@@ -2277,8 +2429,9 @@ if __name__ == "__main__":
             self.kutular, self.son_boyut = kutular, None
 
         def predict(self, kirpik, **kw):
-            self.son_boyut = kirpik.shape[:2]
-            return [_SahteSonuc(self.kutular, {0: "f16"})]
+            liste = kirpik if isinstance(kirpik, list) else [kirpik]
+            self.son_boyut = liste[0].shape[:2]
+            return [_SahteSonuc(self.kutular, {0: "f16"}) for _ in liste]
 
     son_kutu = _takip_durumlari[2]["son_det"]["box"]            # (150,100,250,180)
     ox = int(min(max(0, 200 - 480 / 2), 640 - 480)); oy = int(min(max(0, 140 - 480 / 2), 480 - 480))
@@ -2405,7 +2558,10 @@ if __name__ == "__main__":
     assert _kilitli_track_id == 7, _kilitli_track_id
     sahte.kutular = [ins]                                  # drone kayip, insan yakinda
     dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
-    assert _kilitli_track_id == 7 and (aktif < 0 or dets[aktif].get("hayalet")), (_kilitli_track_id, dets)
+    # Kilit insana GECMEZ: ya hayalet ya da (drone hala kirmizi gorundugu icin) renkle
+    # DRONE'UN yerinde olculur.
+    assert _kilitli_track_id == 7 and (aktif < 0 or dets[aktif].get("hayalet") or (
+        dets[aktif].get("renk") and dets[aktif]["box"] == (100, 100, 200, 180))), (_kilitli_track_id, dets)
     # ByteTrack kilitli ID'yi (7) insanin kutusuna tasirsa: kilit bir sure sonra birakilir
     tasinan = _SahteKutu(0, 0.90, (180, 100, 280, 180), 7)
     sahte.kutular = [tasinan]
@@ -2562,7 +2718,132 @@ if __name__ == "__main__":
         ZOR_ORNEK_DIZIN = _eski_dizin
         _zor.update(son_t=0.0, son_bakis=0.0, sayi=0, oturum=None)
 
+    # ---- RENKLE KILIT SURDURME (23.09 saha, 10 m: model karelerin ~%40'inda kaciriyordu) ----
+    takip_sifirla()
+    roi_modeli_ayarla(None)                                # yalniz renk yolu denensin
+    sahne = _np.full((720, 1280, 3), 180, _np.uint8)
+    sahne[350:370, 600:630] = (0, 0, 245)                  # 30x20 kirmizi drone
+    sahte.kutular = [_SahteKutu(0, 0.95, (600, 350, 630, 370), 11)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert _kilitli_track_id == 11, _kilitli_track_id
+    sahte.kutular = []                                     # model kacirmaya basladi, hedef kayiyor
+    for adim in range(1, 6):
+        sahne[:] = 180
+        sahne[350:370, 600 + 8 * adim:630 + 8 * adim] = (0, 0, 245)
+        kamera_kaymasi_bildir(0.7, -0.6)                   # donen kamera: kutu ONDALIKLI kayar
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+        d = dets[aktif]
+        assert d.get("renk") and not d.get("hayalet"), ("renk olcumu yok", adim, d)
+        assert all(isinstance(v, int) for v in d["box"]), ("kutu tam sayi degil", d["box"])
+        anlik_kirmizi_kaniti(sahne, d["box"])              # kare dilimleme patlamamali
+        assert abs((d["box"][0] + d["box"][2]) / 2 - (615 + 8 * adim)) <= 2, ("leke izlenmedi", d["box"])
+    # Model RENK_SURDURME_S boyunca hic dogrulamazsa renk kilidi TASIMAZ
+    _kilit_son_model[1] -= RENK_SURDURME_S + 0.1
+    dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert aktif < 0 or dets[aktif].get("hayalet"), "model dogrulamadan renk kilidi tasidi"
+    # Kilitten UZAKTAKI kirmiziya atlamaz
+    takip_sifirla()
+    sahne[:] = 180
+    sahne[350:370, 600:630] = (0, 0, 245)
+    sahte.kutular = [_SahteKutu(0, 0.95, (600, 350, 630, 370), 12)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    sahte.kutular = []
+    sahne[:] = 180
+    sahne[350:370, 660:690] = (0, 0, 245)                   # 60 px (> 1.5 x 30) otede
+    dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert aktif < 0 or dets[aktif].get("hayalet"), ("uzak kirmiziya atladi", dets)
+    # Boyu uyumsuz (buyuk kirmizi yuzey) leke olcum sayilmaz
+    takip_sifirla()
+    sahne[:] = 180
+    sahne[350:370, 600:630] = (0, 0, 245)
+    sahte.kutular = [_SahteKutu(0, 0.95, (600, 350, 630, 370), 13)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    sahte.kutular = []
+    sahne[300:420, 560:680] = (0, 0, 245)                   # 120 px kirmizi tisort
+    dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert aktif < 0 or dets[aktif].get("hayalet"), ("buyuk kirmizi yuzey olcum oldu", dets)
+    # Ayar kapaliyken eski davranis (hayalet)
+    takip_sifirla()
+    ayar_guncelle(renk_takip=0)
+    sahne[:] = 180
+    sahne[350:370, 600:630] = (0, 0, 245)
+    sahte.kutular = [_SahteKutu(0, 0.95, (600, 350, 630, 370), 14)]
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    sahte.kutular = []
+    dets, _b, aktif = analiz_et(sahte, sahne, asama=2)
+    assert dets[aktif].get("hayalet"), "renk_takip=0 iken renk olcumu uretildi"
+    ayar_guncelle(renk_takip=1)
+
+    # ---- UZAK KUCUK KIRMIZI ADAY: dusuk guvenle (0.45) kilitlenir; kirmizisiz aday
+    # ayni guvenle KILITLENMEZ (esik onay_esigi kalir). ----
+    class _DusukModel:                                  # parlak/renkli piksel kumesini bulur
+        def __init__(self, conf):
+            self.conf = conf
+        def predict(self, girdi, **kw):
+            tek = not isinstance(girdi, list)
+            out = []
+            for k in ([girdi] if tek else girdi):
+                ys, xs = _np.nonzero((k.max(axis=2) > 200) & (k.min(axis=2) < 150) |
+                                     (k.min(axis=2) > 240))
+                kut = [_SahteKutu(0, self.conf, (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1), None)] if len(xs) else []
+                out.append(_SahteSonuc(kut, {0: "drone"}))
+            return out
+    _eski_gpu, _gpu_durumu = _gpu_durumu, True
+    bos = _SahteModel(); bos.kutular = []
+    roi_modeli_ayarla(_DusukModel(0.45))
+    takip_sifirla()
+    sahne = _np.full((720, 1280, 3), 120, _np.uint8)
+    sahne[350:370, 900:930] = (0, 0, 245)
+    kilit_i = next((i for i in range(40) if analiz_et(bos, sahne, asama=2)[2] >= 0), None)
+    assert kilit_i is not None and kilit_i <= 12, f"kucuk kirmizi aday %45 ile kilitlenmedi ({kilit_i})"
+    takip_sifirla()
+    sahne[:] = 120
+    sahne[350:370, 900:930] = 255                            # beyaz (renksiz) ayni boy
+    assert all(analiz_et(bos, sahne, asama=1)[2] < 0 for _ in range(40)), \
+        "kirmizisiz aday dusuk esikle kilitlendi"
+    # Uzak aday dogrulanirken model kacirirsa aday kirmizi lekeyle TASINIR (silinmez);
+    # UZAK_ADAY_RENK_S dolunca eski davranis (5 kotu kare -> silinir).
+    class _BirKezModel:                                   # yalniz ILK cagrida (tarama) bulur
+        def __init__(self):
+            self.n = 0
+        def predict(self, girdi, **kw):
+            self.n += 1
+            liste = girdi if isinstance(girdi, list) else [girdi]
+            out = []
+            for k in liste:
+                ys, xs = _np.nonzero(k[:, :, 2] > 200)
+                kut = [_SahteKutu(0, 0.8, (xs.min(), ys.min(), xs.max() + 1, ys.max() + 1), None)] \
+                    if len(xs) and self.n == 1 else []
+                out.append(_SahteSonuc(kut, {0: "drone"}))
+            return out
+    roi_modeli_ayarla(_BirKezModel())
+    takip_sifirla()
+    sahne[:] = 120
+    sahne[350:370, 900:930] = (0, 0, 245)
+    for _ in range(4):                                    # tarama periyodu: aday olusur
+        analiz_et(bos, sahne, asama=2)
+    assert _uzak["aday"] is not None, "tarama aday uretmedi"
+    for adim in range(1, 8):                              # model artik hic bulmuyor, hedef kayiyor
+        sahne[:] = 120
+        sahne[350:370, 900 + 5 * adim:930 + 5 * adim] = (0, 0, 245)
+        analiz_et(bos, sahne, asama=2)
+        assert _uzak["aday"] is not None, ("renkli aday silindi", adim)
+        bx = _uzak["aday"]["box"]
+        assert abs((bx[0] + bx[2]) / 2 - (915 + 5 * adim)) <= 2, ("aday lekeyi izlemedi", adim, bx)
+    _uzak["aday"]["t"] -= UZAK_ADAY_RENK_S + 0.1
+    for _ in range(UZAK_ADAY_OMUR):
+        analiz_et(bos, sahne, asama=2)
+    assert _uzak["aday"] is None, "renk suresi dolunca aday silinmedi"
+    roi_modeli_ayarla(None)
+    _gpu_durumu = _eski_gpu
+    takip_sifirla()
+
     print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, A3 taraf guveni, "
           "kesin tanima (histerezis/coklu hedef/onay bozulma), cakisan kutu temizligi, "
           "hayalet/dost kilidi korumasi + yuksek-cozunurluk yeniden bulma, "
-          "kirmizi oneri (uzak tarama penceresi), kacirilan kare kaydi")
+          "kirmizi oneri (uzak tarama penceresi), kacirilan kare kaydi, "
+          "renkle kilit surdurme, uzak kirmizi aday onayi")
