@@ -27,6 +27,13 @@
 Model dosyası dışında ağırlık/veri/`__pycache__`/gizli belge commit edilmez.
 Yeni kütüphane kullandıysan `requirements.txt`'e ekle. Push öncesi testleri koş (§6).
 
+**DAL İSİMLENDİRME (zorunlu, 23.09):** `<taban>-<kişi>-<iş>` — hepsi küçük harf,
+Türkçe karaktersiz, kelimeler tire ile.
+`final_v4-affan-repo-temizligi` · `final_v4-mehmet-tilt-kalibrasyon`
+Neden: dal listesine bakan biri **kimin** neyi yaptığını açar açmaz görsün; iki kişi
+aynı anda aynı isme itmesin. `final_v4` gibi **taban dallar ortak birleşme yeridir** —
+oraya doğrudan geliştirme yapılmaz, kendi dalından PR ile gelinir.
+
 ---
 
 ## 1. ⛔ DOKUNULMAZLAR — bunları bozan değişiklik kabul edilmez
