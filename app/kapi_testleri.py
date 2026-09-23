@@ -63,6 +63,11 @@ class SahteKontrol:
     def kapat(self):
         pass
 
+    def hiz_profilleri(self, seviye=None):
+        kademe = P.HIZ_VARSAYILAN if seviye is None else P.hiz_kirp(seviye)
+        profil = P.HIZ_TABLO[kademe]
+        return profil, profil
+
 
 def pencere():
     A.InferenceThread.start = lambda self: None
@@ -370,7 +375,9 @@ def test_operator_acisi_karta_kol_acisi_gider(w):
     assert abs(w.kontrol.tilt_olculen - 10.0) < 0.2, w.kontrol.tilt_olculen
 
 
-# ---- SUREKLI TAKIP: sahte saatle, gercek Kontrol + sahte pan/tilt karti ----
+# ---- final_v6 surekli takip benzetimleri (tarihsel teshis) ----
+# keremtakip uretimde otonom_v4 PD + mesgul kapisini kullandigi icin bu benzetimler
+# TAKIP_TESTLERI listesinde calistirilmaz; eski davranisi karsilastirmak icin korunur.
 class _SahteZaman:
     """arayuz_qt'nin `time` modulunun yerine: takip dongusu sahte saati gorur."""
     simdi = [10000.0]
@@ -526,6 +533,34 @@ def test_surekli_takip_hareketli_hedef():
     assert abs(r["pan_hata"]) < 1.5 and abs(r["tilt_hata"]) < 0.7, r
 
 
+def test_otonom_v4_pd_mesgul_kapisi():
+    """keremtakip'te geri bildirimli kartta da otonom_v4 PD + mesgul kapisi calisir."""
+    w = pencere()
+    try:
+        w.mod = "Otonom"
+        w._nisan_son_t = None
+        w._nisan_mesgul_ta = 0.0
+        w.pan_ham = w.pan_aci = w.tilt_aci = 0.0
+        w._nisan_geldi(4.0, -2.0)
+        ilk = (w.pan_ham, w.tilt_aci)
+        assert ilk == (4.0, -2.0), ilk
+        assert w._nisan_mesgul_ta > time.time(), "mesgul kapisi kurulmadı"
+
+        # Onceki hareketin goruntusu gelmeden ayni bayat hatadan ikinci komut gecmez.
+        w._nisan_geldi(4.0, -2.0)
+        assert (w.pan_ham, w.tilt_aci) == ilk, "mesgul kapisi bayat komutu gecirdi"
+
+        # Kapi acilinca adim, final_v6 donanim profilindeki eksen hizlariyla kirpilir.
+        w._nisan_mesgul_ta = 0.0
+        w._nisan_son_t = time.time() - 0.05
+        (pan_hiz, _), (tilt_hiz, _) = w.kontrol.hiz_profilleri(w.hiz_seviye)
+        w._nisan_geldi(100.0, 100.0)
+        assert 0.0 < w.pan_ham - ilk[0] <= pan_hiz * 0.06
+        assert 0.0 < w.tilt_aci - ilk[1] <= tilt_hiz * 0.06
+    finally:
+        w.close()
+
+
 GERCEK_KART_TESTLERI = [
     test_estop_hareketi_keser,
     test_estop_atesi_keser,
@@ -539,11 +574,7 @@ GERCEK_KART_TESTLERI = [
     test_operator_acisi_karta_kol_acisi_gider,
 ]
 TAKIP_TESTLERI = [
-    test_surekli_takip_konum_kipi,
-    test_surekli_takip_yorunge_kipi,
-    test_surekli_takip_bosluk_buyuk_sanilirsa,
-    test_surekli_takip_hareketli_hedef,
-    test_otonom_arayuz_penceresine_uyar,
+    test_otonom_v4_pd_mesgul_kapisi,
 ]
 
 
@@ -590,4 +621,4 @@ if __name__ == "__main__":
     print(f"Birlesik arayuz kapi testleri OK — {toplam} test: "
           "hareket/ates sinirlari, acilis, tip secimi, E-Stop (hareket+ates), donanim butonu, "
           "lazer olu adam anahtari, [L] kisayolu, kartin kendi durmasi, otonom ates kirmizi "
-          "kapisi, operator->kol acisi, surekli takip (konum/yorunge/hareketli)")
+          "kapisi, operator->kol acisi, otonom_v4 PD + mesgul kapisi")
