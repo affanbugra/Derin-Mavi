@@ -237,6 +237,14 @@ class PDNisanci:
         # Guvenlik: tek komutta kacak aci gonderme.
         d_yaw = max(-self.maks_adim, min(self.maks_adim, d_yaw))
         d_pitch = max(-self.maks_adim, min(self.maks_adim, d_pitch))
+
+        # Otonom_v4 PD yolu + mevcut iki eksenli donanim icin titresim kapisi:
+        # bir eksen yerlesmisse, diger eksendeki buyuk hata bu eksenin 1-5 px'lik
+        # tespit gurultusunu motora tasimamalidir. 0.0 o eksenin hedefini korur.
+        if abs(px) <= olu_x:
+            d_yaw = 0.0
+        if abs(py) <= olu_y:
+            d_pitch = 0.0
         return d_yaw, d_pitch
 
 
@@ -340,6 +348,14 @@ if __name__ == "__main__":
     dy_uzak, _ = n2.adim(kare_orta, (1920, 1080), simdi=1.0, hedef_yukseklik=70.0)
     assert dy_uzak is not None, "uzak hedefte 15 px hata icin komut URETILMELIYDI"
 
+    # 6f. Bir eksen uzakta olsa bile yerlesmis eksen tespit gurultusunu surmemeli.
+    n3 = PDNisanci()
+    for t_, dy_px in ((1.0, 3.0), (1.07, -4.0), (1.13, 5.0), (1.2, -2.0)):
+        d_y, d_p = n3.adim((1920 * 0.5 + 400, 1080 * 0.5 + dy_px), (1920, 1080),
+                           simdi=t_, hedef_yukseklik=200.0)
+        assert d_y is not None and d_y > 0
+        assert d_p == 0.0, f"yerlesmis dikey eksen titredi: {d_p}"
+
     # --- Kapali cevrim benzetimi: gimbal dondukce hedef kadrajda merkeze kayar ---
     KARE_SURESI = 0.07
 
@@ -365,12 +381,14 @@ if __name__ == "__main__":
     assert min(iz) >= -1280 * OLU_BOLGE_ORAN, f"asma (overshoot): {iz}"
 
     # 8. HAREKETLI hedef (Yetenek 5). Sabit hizda kalici bir gecikme OTURUR:
-    #    kalici_hata ~ (hedef_hizi * kare_suresi) / Kp = (250*0.07)/0.5 = 35 px
+    #    kalici_hata ~ (hedef_hizi * kare_suresi) / Kp. keremtakip'te Kp=0.25:
+    #    (250*0.07)/0.25 = 70 px. Dusuk kazanc titresimi azaltir; bu gecikme bilincli
+    #    bedeldir ve gercek parkur hiziyla yeniden olculmelidir.
     #    D terimi bunu kapatmaz (sabit hizda hatanin turevi sifirdir); azaltmak icin
     #    Kp yukseltilir veya FPS artirilir. Donanim gelince Kp panelden ayarlanmali.
     iz = benzet(80, 640.0, hedef_hizi=250.0)
     kararli_hal = [abs(v) for v in iz[25:]]
-    assert max(kararli_hal) < 60, f"hareketli hedef takibi zayif: {max(kararli_hal):.0f} px"
+    assert max(kararli_hal) < 80, f"hareketli hedef takibi zayif: {max(kararli_hal):.0f} px"
 
     print("nisan testleri OK — balon nisani, isaretler, boresight ofseti, kirpma, "
           "yakinsama, salinimsizlik, hareketli hedef")

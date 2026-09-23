@@ -79,6 +79,29 @@ def pencere():
     return w
 
 
+def test_kamera_bayat_hata_yoksayilir():
+    """Durdurulan QCamera'nin gec hata sinyali yeni akisi karartmamalı."""
+    kamera = A.kamera_mod.Kamera()
+    olaylar = []
+    kamera.durum.connect(lambda mesaj, hata: olaylar.append((mesaj, hata)))
+    aktif, eski = object(), object()
+    kamera._kamera = aktif
+    kamera._kamera_hatasi(eski, "Operation aborted")
+    assert olaylar == [], olaylar
+    kamera._kamera_hatasi(aktif, "Operation aborted")
+    assert len(olaylar) == 1 and olaylar[0][1] is True
+    assert "yeniden seçin" in olaylar[0][0]
+    kamera._kamera = None
+
+
+def test_otonom_v4_takip_ayarlari():
+    """final_v6 ayarlari eski yüksek PD kazancına dönüp titremeyi artırmamalı."""
+    assert algi.AYAR["kp"] == 0.25
+    assert algi.AYAR["kd"] == 0.0
+    assert algi.VARSAYILAN_AYAR["kp"] == 0.25
+    assert algi.VARSAYILAN_AYAR["kd"] == 0.0
+
+
 def test_hareket_ve_ates(w):
     # 23.09 kullanici karari: GIZLI SINIR YOK. Tilt fiziksel -30..+30 (kol 0..60);
     # yatayin tek siniri arayuzdeki pencere. ACILIS degeri +-90 (operator aracin
@@ -588,6 +611,8 @@ if __name__ == "__main__":
         test_acilis_onayi_hayir_ise_kol_kipirdamaz(win)
         test_tip_secimi(win)
         test_kare_arayuze_ulasir(win)
+        test_kamera_bayat_hata_yoksayilir()
+        test_otonom_v4_takip_ayarlari()
     finally:
         win.close()
     # Guvenlik kapilari: her test KENDI penceresi + taze sahte kartla (biri digerinin
@@ -612,7 +637,7 @@ if __name__ == "__main__":
             w.close()
     for test in TAKIP_TESTLERI:
         _kos(test)
-    toplam = 6 + len(GERCEK_KART_TESTLERI) + len(TAKIP_TESTLERI)
+    toplam = 8 + len(GERCEK_KART_TESTLERI) + len(TAKIP_TESTLERI)
     if kalanlar:
         print(f"\nKAPI TESTLERI: {len(kalanlar)}/{toplam} KALDI")
         for ad, neden in kalanlar:

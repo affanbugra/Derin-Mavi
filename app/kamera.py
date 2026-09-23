@@ -20,7 +20,7 @@ import time
 
 import cv2
 import numpy as np
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QTimer
 from PySide6.QtGui import QImage
 from PySide6.QtMultimedia import (QCamera, QCameraDevice, QMediaCaptureSession,
                                   QMediaDevices, QVideoSink)
@@ -102,6 +102,7 @@ class Kamera(QObject):
         self._kilit = threading.Lock()
         self._kare, self._sira, self._kare_t = None, 0, 0.0
         self._kamera = None
+        self._acilis_nesli = 0          # gecikmeli acilis/eski hata sinyallerini gecersizlestirir
         self.secili_id = None
         self.kapali = False              # operatör "Kapalı" seçti
         self.istenen = (1280, 720, 30)   # (genişlik, yükseklik, fps)
@@ -147,24 +148,61 @@ class Kamera(QObject):
             self.durum.emit("Kamera bulunamadı — harici kamera takılı değil", True)
 
     def ac(self, cihaz):
-        self._durdur()
+        """Cihazi ac. Eski kamera varsa Windows surucusune USB kaynagini birakmasi
+        icin kisa sure taninir; ayni anda kapat/ac yapmak Media Foundation'da
+        ERROR_OPERATION_ABORTED ("G/C islemi iptal edildi") uretebiliyor."""
+        self._acilis_nesli += 1
+        nesil = self._acilis_nesli
+        eski_vardi = self._durdur()
         self.kapali = False
+        self.secili_id = bytes(cihaz.id())
+        if eski_vardi:
+            QTimer.singleShot(180, lambda c=cihaz, n=nesil: self._ac_devam(c, n))
+        else:
+            self._ac_devam(cihaz, nesil)
+
+    def _ac_devam(self, cihaz, nesil):
+        """`ac` isleminin, eski kamera gercekten birakildiktan sonraki adimi."""
+        if nesil != self._acilis_nesli or self.kapali:
+            return
+        # Gecikme sirasinda kablo ciktiysa hayalet QCamera olusturma.
+        if bytes(cihaz.id()) not in [bytes(c.id()) for c in harici_kameralar()]:
+            self.durum.emit("Kamera bağlantısı kesildi", True)
+            return
         kamera = QCamera(cihaz, self)
         fmt = en_yakin_format(cihaz, *self.istenen)
         if fmt is not None:
             kamera.setCameraFormat(fmt)
         kamera.errorOccurred.connect(
-            lambda _hata, metin: self.durum.emit(f"Kamera hatası: {metin}", True))
+            lambda _hata, metin, k=kamera: self._kamera_hatasi(k, metin))
+        # start() sirasinda hata gelirse sinyalin hangi acilisa ait oldugu bilinsin.
+        self._kamera = kamera
         self._oturum.setCamera(kamera)
         kamera.start()
-        self._kamera = kamera
-        self.secili_id = bytes(cihaz.id())
+        # Ilk liste sinyali kamera acilmadan once gelir. Secili cihaz/cozunurluk
+        # kutularini gercek acilan formatla bir kez daha esitle.
+        self.liste_degisti.emit(harici_kameralar())
         r = fmt.resolution() if fmt is not None else None
         ek = (f" · {r.width()}×{r.height()} @{fmt.maxFrameRate():.0f} FPS"
               if r is not None else "")
         self.durum.emit(f"Kamera açıldı: {cihaz.description()}{ek}", False)
 
+    def _kamera_hatasi(self, kamera, metin):
+        """Yalniz AKTIF kameranin hatasini goster.
+
+        QCamera.stop() Windows'ta hata sinyalini kuyruga birakabilir. Eski kod bu
+        gec sinyali yeni acilan kameranin hatasi sanip goruntuyu karartiyordu.
+        """
+        if kamera is not self._kamera:
+            return
+        dusuk = (metin or "").lower()
+        if "iptal edildi" in dusuk or "operation aborted" in dusuk:
+            metin = ("Kamera başlatılamadı — başka bir uygulama kamerayı kullanıyor "
+                     "olabilir. Kamerayı yeniden seçin.")
+        self.durum.emit(f"Kamera hatası: {metin}", True)
+
     def kapat(self):
+        self._acilis_nesli += 1
         self.kapali = True
         self._durdur()
         self.durum.emit("Kamera kapatıldı", False)
@@ -183,17 +221,20 @@ class Kamera(QObject):
         return None
 
     def _durdur(self):
-        if self._kamera is not None:
-            self._kamera.stop()
+        kamera = self._kamera
+        self._kamera = None              # stop()tan gelebilecek gec hata artik bayat
+        if kamera is not None:
+            kamera.stop()
             self._oturum.setCamera(None)
-            self._kamera.deleteLater()
-            self._kamera = None
+            kamera.deleteLater()
         with self._kilit:
             self._kare = None
             self._kare_t = 0.0
+        return kamera is not None
 
     def durdur(self):
         """Uygulama kapanırken."""
+        self._acilis_nesli += 1
         self._durdur()
         if self._dosya is not None:
             self._dosya.kapat()

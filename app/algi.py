@@ -219,8 +219,10 @@ VARSAYILAN_AYAR = {
     "maks_tespit": 300,     # kare basina en fazla kutu (max_det)
     # --- nisan.py (Otonom takip geometrisi) ---
     "fov": 60.0,            # kameranin yatay gorus acisi (derece)
-    "kp": 0.50,             # takip gucu: hatanin ne kadari tek adimda kapatilsin
-    "kd": 0.06,             # ongoru suresi (sn) — gecikme telafisi
+    # keremtakip: otonom_v4 sahadaki kararlı ayarları. final_v6'nın 0.60/0.06
+    # çifti kutu gürültüsünü büyütüp motorlarda belirgin titreme üretiyordu.
+    "kp": 0.25,             # takip gucu: hatanin dortte biri tek adimda kapanir
+    "kd": 0.0,              # türev öngörüsü kapalı: tespit gürültüsü motora taşınmaz
     "olu_bolge": 0.02,      # merkeze bu kadar yakinsa komut yok (dwell icin sart)
     # Kamera-lazer boresight/paralaks kalibrasyonu (CLAUDE.md §7): lazer kameranin
     # optik ekseninden fiziksel olarak ayri montajli, ikisi ayni noktayi gostermez.
