@@ -55,6 +55,11 @@ class SahteKontrol:
         self.ates(False)
         return self.durum
 
+    def tilt_sifirla(self):
+        self.sifirlama_sayisi = getattr(self, "sifirlama_sayisi", 0) + 1
+        self.tilt_hedef = -30.0
+        return True
+
     def kapat(self):
         pass
 
@@ -65,27 +70,36 @@ def pencere():
     A.kamera_mod.Kamera.baslat = lambda self: None
     w = A.MainWindow()
     w.kontrol = SahteKontrol()
+    w._acilis_sifir_onayi = lambda: True        # modal diyalog testte acilmaz
     return w
 
 
 def test_hareket_ve_ates(w):
-    assert w.max_tilt_limit == 25.0
+    # 23.09 kullanici karari: GIZLI SINIR YOK. Tilt fiziksel -30..+30 (kol 0..60);
+    # yatayin tek siniri arayuzdeki pencere (varsayilan +-60, +-180'e kadar ayarlanir).
+    assert w.max_tilt_limit == 30.0
     assert (w.bolge.hareket_pan.alt, w.bolge.hareket_pan.ust) == (-60.0, 60.0)
-    assert (w.bolge.hareket_tilt.alt, w.bolge.hareket_tilt.ust) == (-25.0, 25.0)
-    assert all((spin.minimum(), spin.maximum()) == (-60, 60)
+    assert (w.bolge.hareket_tilt.alt, w.bolge.hareket_tilt.ust) == (-30.0, 30.0)
+    assert all((spin.minimum(), spin.maximum()) == (-180, 180)
                for spin in w.bolge_spin[("hareket", "pan")])
-    assert all((spin.minimum(), spin.maximum()) == (-25, 25)
+    assert all((spin.minimum(), spin.maximum()) == (-30, 30)
                for spin in w.bolge_spin[("hareket", "tilt")])
     assert w._aci_hareket(15, -30)
-    assert (w.pan_ham, w.tilt_aci) == (15.0, -25.0)
-    assert (w.kontrol.pan_hedef, w.kontrol.tilt_hedef) == (15.0, -25.0)
+    assert (w.pan_ham, w.tilt_aci) == (15.0, -30.0)
+    assert (w.kontrol.pan_hedef, w.kontrol.tilt_hedef) == (15.0, -30.0)
     assert w._aci_hareket(100, -10)
-    assert (w.pan_ham, w.tilt_aci) == (60.0, -25.0)
+    assert (w.pan_ham, w.tilt_aci) == (60.0, -30.0)            # pan PENCEREDE durur
     assert w._aci_hareket(-60, 60)
-    assert (w.pan_ham, w.tilt_aci) == (0.0, 25.0)
+    assert (w.pan_ham, w.tilt_aci) == (0.0, 30.0)
+    # Pencere kapatilinca yatayda gizli +-60 YOK
+    w.bolge.hareket_pan = B.Pencere(False, -60, 60)
+    assert w._aci_hareket(90, 0)
+    assert w.pan_ham == 90.0, w.pan_ham
+    assert w._aci_hareket(-90, 0)
+    w.bolge.hareket_pan = B.Pencere(True, -60, 60)
 
     w.bolge.hareket_tilt = B.Pencere(True, -10, 10)
-    assert w._aci_hareket(0, -25)
+    assert w._aci_hareket(0, -30)
     assert w.tilt_aci == 0.0
     w.bolge.atis_tilt = B.Pencere(True, -5, 5)
     w.fire_btn.setChecked(True)
@@ -122,6 +136,26 @@ def test_acilis_yukselisi_kart_hazir_olana_kadar_bekler(w):
     w._acilis_yukselisini_dene()
     assert not w._acilis_yukselisi_bekliyor
     assert w.tilt_aci == w.kontrol.tilt_hedef == 0.0
+    assert w.kontrol.sifirlama_sayisi == 1, "acilista tilt sayaci sifirlanmadi (R)"
+
+
+def test_acilis_onayi_hayir_ise_kol_kipirdamaz(w):
+    """23.09 saha: kart kolu 10 derecede saniyordu, kol en alttaydi; yukselis 30 yerine 20
+    derece kaldirdi. Operator "kol en altta" demezse kol HIC hareket ettirilmez ve sayac
+    sifirlanmaz."""
+    w._acilis_yukselisi = False
+    w._acilis_yukselisi_bekliyor = False
+    w._acilis_sifir_soruldu = False
+    w._acilis_sifir_onayi = lambda: False
+    w.kontrol.sifirlama_sayisi = 0
+    w.kontrol.tilt.hazir = True
+    w.kontrol.acilis_hizalama = (0.0, -20.0)
+    w._acilis_hizala()
+    hedef_once = w.kontrol.tilt_hedef
+    w._acilis_yukselisini_dene()
+    assert not w._acilis_yukselisi_bekliyor
+    assert w.kontrol.sifirlama_sayisi == 0 and w.kontrol.tilt_hedef == hedef_once
+    assert w.tilt_aci == -20.0
 
 
 def test_tip_secimi(w):
@@ -344,7 +378,7 @@ class _SahteZaman:
 
 
 def _takip_kos(yorunge, hedef_pan=10.0, hedef_tilt=-5.0, sure=5.0, pan_hiz=0.0, tohum=3,
-               bosluk=None):
+               bosluk=None, tilt_pencere=None):
     """Dunyada duran (ya da pan'da kayan) hedefe otonom takip. Doner: ozet sozluk.
 
     ⚠ Aci secimi keyfi degil: kameranin derece basina donusu kol acisina gore degisir
@@ -374,6 +408,8 @@ def _takip_kos(yorunge, hedef_pan=10.0, hedef_tilt=-5.0, sure=5.0, pan_hiz=0.0, 
             k.oku()
         w._acilis_yukselisi_bekliyor = False
         w._acilis_hizala()
+        if tilt_pencere is not None:
+            w.bolge.hareket_tilt = B.Pencere(True, *tilt_pencere)
         assert w._aci_hareket(0.0, -18.0 - w.tilt_aci)     # baslangic: operator -18
         for _ in range(80):
             saat[0] += 0.05
@@ -458,6 +494,19 @@ def test_surekli_takip_bosluk_buyuk_sanilirsa():
     assert abs(r["pan_hata"]) < 0.7 and abs(r["tilt_hata"]) < 0.7, r
 
 
+def test_otonom_arayuz_penceresine_uyar():
+    """Otonom takibin tek siniri ARAYUZDEKI hareket penceresidir (23.09 kullanici karari).
+
+    (1) Pencere +5'te bitiyorsa +15'teki hedef icin kol +5'te durur.
+    (2) Pencere tam aciksa (-30..+30) hedef +22'de de takip edilir — eskiden gizli otonom
+        tavan (+25, kamera acisiyla hesaplanan pay yuzunden fiilen +19.8) kolu tutuyordu;
+        sahada 10 m'deki hedefe cikilamadi."""
+    r = _takip_kos(yorunge=True, hedef_tilt=15.0, tilt_pencere=(-30.0, 5.0))
+    assert r["tilt_hata"] < -9.0 and abs(r["tilt_hata"] + 10.0) < 0.6, r   # +5'te durdu
+    r = _takip_kos(yorunge=True, hedef_tilt=22.0, sure=6.0)
+    assert abs(r["tilt_hata"]) < 1.5, f"gizli tavan hala var: {r}"
+
+
 def test_surekli_takip_hareketli_hedef():
     """Yorunge kipi, pan'da 3 der/sn kayan hedef: namlu hedefin ustunde kalir."""
     r = _takip_kos(yorunge=True, pan_hiz=3.0, sure=6.0)
@@ -481,6 +530,7 @@ TAKIP_TESTLERI = [
     test_surekli_takip_yorunge_kipi,
     test_surekli_takip_bosluk_buyuk_sanilirsa,
     test_surekli_takip_hareketli_hedef,
+    test_otonom_arayuz_penceresine_uyar,
 ]
 
 
@@ -491,6 +541,7 @@ if __name__ == "__main__":
         test_hareket_ve_ates(win)
         test_kart_kilidi_ve_hizalama(win)
         test_acilis_yukselisi_kart_hazir_olana_kadar_bekler(win)
+        test_acilis_onayi_hayir_ise_kol_kipirdamaz(win)
         test_tip_secimi(win)
         test_kare_arayuze_ulasir(win)
     finally:
@@ -517,7 +568,7 @@ if __name__ == "__main__":
             w.close()
     for test in TAKIP_TESTLERI:
         _kos(test)
-    toplam = 5 + len(GERCEK_KART_TESTLERI) + len(TAKIP_TESTLERI)
+    toplam = 6 + len(GERCEK_KART_TESTLERI) + len(TAKIP_TESTLERI)
     if kalanlar:
         print(f"\nKAPI TESTLERI: {len(kalanlar)}/{toplam} KALDI")
         for ad, neden in kalanlar:

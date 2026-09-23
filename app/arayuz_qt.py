@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
     QSizePolicy, QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QCheckBox, QSpinBox, QScrollArea,
+    QSlider, QCheckBox, QSpinBox, QScrollArea, QMessageBox,
 )
 
 import algi
@@ -462,9 +462,10 @@ class AracYonGostergesi(_AciKarosu):
     # rampasi biraz daha guclu, cunku alan genis ve renk her iki uca soner.
     DILIM_ALFA = {"hareket": 0.19, "atis": 0.19, "izin": 0.09}
 
-    # Yatayda kodda sinir YOK (23.09): tum daire boyanir, hangi diliminin yasak
-    # oldugunu OPERATORUN yazdigi pencere belirler.
-    ARALIK = (-180.0, 180.0)
+    # Yatayda kodda sinir YOK (23.09): tum daire boyanir (B.PAN_MAX = ±180,
+    # isaretli azimutun tanim araligi); hangi diliminin yasak oldugunu OPERATORUN
+    # yazdigi pencere belirler.
+    ARALIK = (-B.PAN_MAX, B.PAN_MAX)
 
     def qt_aci(self, a):
         return 90.0 - a                       # on = yukari, + = saat yonu
@@ -2782,12 +2783,46 @@ class MainWindow(QMainWindow):
             self._acilis_yukselisi = True
             self._acilis_yukselisi_bekliyor = True
 
+    def _acilis_sifir_onayi(self):
+        """Operatore sorar: tilt kolu su an fiziksel olarak EN ALTTA mi? Doner: bool."""
+        cevap = QMessageBox.question(
+            self, "Tilt kolu başlangıç konumu",
+            "Tilt kolu şu an fiziksel olarak EN ALTTAKİ dayanakta mı?\n\n"
+            "EVET: tilt sayacı sıfırlanır ve kol 30°'ye (ekranda 0°) kaldırılır.\n"
+            "HAYIR: kol hareket ettirilmez. Kolu en alta alıp uygulamayı yeniden açın.\n\n"
+            "(Kart kolun yerini ÖLÇMEZ, gönderdiği adımları sayar. Motor enerjisi kesilince "
+            "kol düşer ama USB'den beslenen kart eski sayıda kalır.)",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return cevap == QMessageBox.Yes
+
     def _acilis_yukselisini_dene(self):
-        """Kart acilinca ilk STATE3 kilitli gelebilir; hazir olmadan denemeyi tuketme."""
+        """Kart acilinca ilk STATE3 kilitli gelebilir; hazir olmadan denemeyi tuketme.
+
+        ⚠ SIFIR ONAYI (23.09 saha): kart kolun yerini OLCMEZ, darbe sayar. Motor beslemesi
+        kesikken kol en alta duser, USB'den beslenen ESP eski sayida kalir. Sahada kart
+        kolu 10 derecede saniyordu, kol en alttaydi: acilis yukselisi 30 yerine 20 derece
+        kaldirdi (kamerada ~10), otonom tavan 10 derece asagida kaldi ve kamera/kol
+        donusum tablosu yanlis satirdan okundugu icin takip sert manevra yapti.
+        Operator "kol en altta" derse sayac SIFIRLANIR (R) ve yukselis oradan yapilir;
+        demezse kol hic hareket ettirilmez."""
         if not self._acilis_yukselisi_bekliyor:
             return
         if self._hareket_kilitli() or not self.kontrol.tilt.hazir:
             return
+        if not getattr(self, "_acilis_sifir_soruldu", False):
+            self._acilis_sifir_soruldu = True
+            if not self._acilis_sifir_onayi():
+                self._acilis_yukselisi_bekliyor = False
+                self.bolge_status.setText("Açılış yükselişi YAPILMADI — kolun en altta olduğu onaylanmadı")
+                self.bolge_status.setStyleSheet(T.durum_bandi(T.KIRMIZI))
+                return
+            if not self.kontrol.tilt_sifirla():
+                self._acilis_yukselisi_bekliyor = False
+                self.bolge_status.setText("Tilt sayacı sıfırlanamadı — açılış yükselişi yapılmadı")
+                self.bolge_status.setStyleSheet(T.durum_bandi(T.KIRMIZI))
+                return
+            self.tilt_aci = TS.ACI_MIN
+            self._tilt_goster()
         if abs(self.tilt_aci) <= 0.2:
             self._acilis_yukselisi_bekliyor = False
             return
@@ -2959,15 +2994,21 @@ class MainWindow(QMainWindow):
             # tilt_surucu.KAMERA_PPD_TABLO); orada ppd pan ile ayni.
             self._tilt_takip.olcum(t_kare, TS.kamera_acisi(k.tilt_zamaninda(t_kare)), ey,
                                    float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
-        sinir = float(algi.AYAR.get("pan_takip_siniri", 170.0))
-        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 18.0)))
+        # SINIRLAR YALNIZ ARAYUZDEN (kullanici karari 23.09): otonom takip operatorun
+        # hareket penceresini kullanir; pencere kapaliysa fiziksel aralik. Gizli tavan,
+        # ayri "otonom siniri" ya da pay YOK. Tilt sinirlari KOL (operator) acisindadir,
+        # kontrolcuye kamera acisina cevrilerek verilir.
+        hp, ht = self.bolge.hareket_pan, self.bolge.hareket_tilt
+        pan_alt, pan_ust = (hp.alt, hp.ust) if hp.aktif else (-B.PAN_MAX, B.PAN_MAX)
+        alt, ust = (ht.alt, ht.ust) if ht.aktif else (B.TILT_CALISMA_MIN, B.TILT_CALISMA_MAX)
+        alt, ust = max(alt, B.TILT_CALISMA_MIN), min(ust, self.max_tilt_limit)
         if k.yorunge_destekli:
             # YORUNGE KIPI: (konum, hiz) — motor hedefin hizinda akar, dur-kalk yok.
-            pr = self._pan_takip.yorunge_komut(simdi, k.pan_olculen, -sinir, sinir,
-                                               hata_px=ex, olu_px=olu_x)
+            pr = self._pan_takip.yorunge_komut(simdi, k.pan_olculen, pan_alt, pan_ust,
+                                               hata_px=ex, olu_px=olu_x, pay=0.0)
             tr = self._tilt_takip.yorunge_komut(
-                simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(B.TILT_CALISMA_MIN),
-                TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y)
+                simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(alt),
+                TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y, pay=0.0)
             if pr is None and tr is None:
                 return
             d_pan = pan_v = d_tilt = tilt_v = None
@@ -2975,20 +3016,19 @@ class MainWindow(QMainWindow):
                 d_pan, pan_v = pr[0] - self.pan_ham, pr[1]
             if tr is not None:
                 # kamera acisi -> kol acisi; hiz yerel egimle (kol-biyel dogrusal degil)
-                kol = max(B.TILT_CALISMA_MIN, min(ust, TS.kol_acisi(tr[0])))
+                kol = max(alt, min(ust, TS.kol_acisi(tr[0])))
                 egim = (TS.kamera_acisi(kol + 0.05) - TS.kamera_acisi(kol - 0.05)) / 0.1
                 d_tilt, tilt_v = kol - self.tilt_aci, tr[1] / max(1e-3, egim)
             if self._aci_hareket(d_pan or 0.0, d_tilt or 0.0, hiz=(pan_v, tilt_v)):
                 self._nisan_mesgul_ta = simdi + 0.15
             return
-        pan_k = self._pan_takip.komut(simdi, k.pan_olculen, -sinir, sinir,
+        pan_k = self._pan_takip.komut(simdi, k.pan_olculen, pan_alt, pan_ust,
                                       hata_px=ex, olu_px=olu_x)
-        ust = min(self.max_tilt_limit, float(algi.AYAR.get("tilt_takip_ust", 18.0)))
         tilt_k = TS.kol_acisi(self._tilt_takip.komut(
-            simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(B.TILT_CALISMA_MIN), TS.kamera_acisi(ust),
+            simdi, TS.kamera_acisi(k.tilt_olculen), TS.kamera_acisi(alt), TS.kamera_acisi(ust),
             hata_px=ey, olu_px=olu_y))
         if tilt_k is not None:
-            tilt_k = max(B.TILT_CALISMA_MIN, min(ust, tilt_k))
+            tilt_k = max(alt, min(ust, tilt_k))
         if pan_k is None and tilt_k is None:
             return
         d_pan = 0.0 if pan_k is None else pan_k - self.pan_ham
@@ -3036,8 +3076,9 @@ class MainWindow(QMainWindow):
         izgara = QGridLayout()
         izgara.setHorizontalSpacing(8)
         izgara.setVerticalSpacing(8)
-        # Kutularin araligi YAPISAL sinirdir: yataya 100 yazilamaz (namlu on yarinin
-        # disina cikamaz, B.PAN_MAX), dikeye 40 yazilamaz. Operator yalniz DARALTIR.
+        # Kutularin araligi FIZIKSEL/tanim araligidir: yatay +-180 (isaretli azimut),
+        # dikey kalibre edilmis kol araligi. Gizli bir sinir yok; pencere burada ne
+        # ise gimbal (manuel ve otonom) ona uyar.
         for satir, (eksen, ad, sinir) in enumerate(
                 (("pan", "Yatay", int(B.PAN_MAX)), ("tilt", "Dikey", int(B.TILT_CALISMA_MAX)))):
             p = getattr(self.bolge, f"{tur}_{eksen}")

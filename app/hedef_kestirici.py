@@ -566,7 +566,7 @@ class EksenTakip:
 
 
     @staticmethod
-    def _yorunge_sinirla(konum, hiz, alt, ust):
+    def _yorunge_sinirla(konum, hiz, alt, ust, pay=None):
         """Yorunge ucunun gelecek 250 ms'de yazilim sinirini asmamasini sagla.
 
         Kart referansi 150 ms hizla akip ardindan ivmeyle durur; yalniz konumu
@@ -574,7 +574,11 @@ class EksenTakip:
         birakilir. Bu yumusak sinir, kartin donanimsal sonlandirmasi DEGILDIR.
         """
         alt, ust = float(alt), float(ust)
-        pay = min(1.5, max(0.0, (ust - alt) * 0.15))
+        # `pay` verilmezse 1.5 birim (eksenin kendi biriminde). ⚠ Tilt KAMERA acisinda
+        # izlenir; kolun ust bolgesinde kamera kol derecesi basina ~0.3 derece doner,
+        # 1.5 kamera derecesi ~5 KOL derecesi eder (23.09: tavan +25 yerine +19.8'de
+        # kaldi). Arayuz payi kol acisinda kendisi hesaplayip burada 0 verir.
+        pay = min(1.5, max(0.0, (ust - alt) * 0.15)) if pay is None else max(0.0, float(pay))
         ic_alt, ic_ust = alt + pay, ust - pay
         konum = max(ic_alt, min(ic_ust, float(konum)))
         hiz = max((ic_alt - konum) / 0.25,
@@ -582,7 +586,7 @@ class EksenTakip:
         return konum, hiz
 
 
-    def yorunge_komut(self, simdi, aci, alt, ust, hata_px=None, olu_px=None):
+    def yorunge_komut(self, simdi, aci, alt, ust, hata_px=None, olu_px=None, pay=None):
         """YORUNGE KIPI cikisi: (motor_konumu, hiz) ya da None.
 
         Konum kipindeki `komut`tan farki: karta "su aciya git" degil, "hedef SU AN burada
@@ -608,7 +612,7 @@ class EksenTakip:
             self._kayip_durdu = True
             self._tut = max(float(alt), min(float(ust), aci))
             self.son_komut_t = simdi
-            return self._yorunge_sinirla(self._tut, 0.0, alt, ust)
+            return self._yorunge_sinirla(self._tut, 0.0, alt, ust, pay)
         if self._kayip_durdu:
             return None
         if kayip_sure > self.kayip_kovalamasi:
@@ -647,7 +651,7 @@ class EksenTakip:
         if self._duragan:
             self._tut = None
             c = self.komut(simdi, aci, alt, ust, hata_px=hata_px, olu_px=olu_px)
-            return None if c is None else self._yorunge_sinirla(c, 0.0, alt, ust)
+            return None if c is None else self._yorunge_sinirla(c, 0.0, alt, ust, pay)
         self._kip_ayari(True)
         # TUTMA: hedef gorunurde olu bolgede ve duruyor -> namlu oldugu yerde sabit.
         # Tutma konumu GIRISTE bir kez alinir; her cagrida olculen aciya "yeniden
@@ -657,7 +661,7 @@ class EksenTakip:
             if self._tut is None:
                 self._tut = max(float(alt), min(float(ust), aci))
             self.son_komut_t = simdi
-            return self._yorunge_sinirla(self._tut, 0.0, alt, ust)
+            return self._yorunge_sinirla(self._tut, 0.0, alt, ust, pay)
         self._tut = None
         # ONGORU YOK (konum kipindeki `ileri` burada kullanilmaz): kart referansi
         # komut anindan itibaren kendisi ilerletir. Eklenirse namlu hedefin hiz x ileri
@@ -679,7 +683,7 @@ class EksenTakip:
         elif motor <= alt:
             motor, hiz = float(alt), max(0.0, hiz)
         self.son_komut, self.son_komut_t = hedef, simdi
-        return self._yorunge_sinirla(motor, hiz, alt, ust)
+        return self._yorunge_sinirla(motor, hiz, alt, ust, pay)
 
 
 def olcum_acisi(kol_kare, hata_px, ppd):

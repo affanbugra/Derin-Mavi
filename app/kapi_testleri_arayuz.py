@@ -223,8 +223,9 @@ def test_ekran_aci_kart_hedefi_ayni():
     w = SahtePencere()
     for _ in range(12):                       # limitin otesine zorla
         w._aci_hareket(0.0, 5.0)
-    # Tavan artik POLITIKA degil: acilistaki hareket penceresi (varsayilan ±25).
-    assert w.tilt_aci == w.bolge.hareket_tilt.ust == 25.0, w.tilt_aci
+    # Tavan artik POLITIKA degil: acilistaki hareket penceresi (varsayilan ±30 =
+    # kalibre edilmis kolun tamami). Operator daraltmak isterse arayuzden yazar.
+    assert w.tilt_aci == w.bolge.hareket_tilt.ust == 30.0, w.tilt_aci
     assert w.kontrol.mock.tilt_hedef == w.tilt_aci, w.kontrol.mock.tilt_hedef
 
     # Limitte fazladan komut: gonderilecek yeni bir aci yok, bos komut da atilmamali.
@@ -234,12 +235,12 @@ def test_ekran_aci_kart_hedefi_ayni():
     assert len(w.kontrol.mock.kayit) == komut, w.kontrol.mock.kayit[-1]
 
     w._aci_hareket(0.0, -5.0)                 # asagi normal calisir
-    assert w.tilt_aci == 20.0 and w.kontrol.mock.tilt_hedef == 20.0
+    assert w.tilt_aci == 25.0 and w.kontrol.mock.tilt_hedef == 25.0
 
-    # Kismi kirpma: 20°'de +8 istenir, ancak +5 uygulanabilir -> ikisi de 25 olmali.
+    # Kismi kirpma: 25°'de +8 istenir, ancak +5 uygulanabilir -> ikisi de 30 olmali.
     w._aci_hareket(0.0, 8.0)
-    assert w.tilt_aci == 25.0, w.tilt_aci
-    assert w.kontrol.mock.tilt_hedef == 25.0, w.kontrol.mock.tilt_hedef
+    assert w.tilt_aci == 30.0, w.tilt_aci
+    assert w.kontrol.mock.tilt_hedef == 30.0, w.kontrol.mock.tilt_hedef
 
 
 def test_azimut_sarmasiz_gider():
@@ -270,11 +271,12 @@ def test_yatay_sinir_yalniz_pencereden_gelir():
     w._aci_hareket(60.0, 0.0)
     assert w.pan_ham == 120.0, w.pan_ham
 
-    # Pencere KAPALIYSA kod hiç karışmaz
+    # Pencere KAPALIYSA politika sinir yok; yalnizca isaretli azimutun TANIM araligi
+    # (±180 = tam arka) kalir — arkadan dolanip tur atilmasin diye.
     w2 = SahtePencere()
     w2.bolge.hareket_pan = B.Pencere(False, -60.0, 60.0)
     w2._aci_hareket(200.0, 0.0)
-    assert w2.pan_ham == 200.0, w2.pan_ham      # kod karismaz, tam tur bile serbest
+    assert w2.pan_ham == B.PAN_MAX == 180.0, w2.pan_ham
 
     # Pencere DARALTILIRSA sınırda kırpılır ve arkadan dolanılamaz
     w3 = SahtePencere()
@@ -492,10 +494,10 @@ def test_devam_edince_referans_korunur():
     assert w.kontrol.pan_hedef == 50.0 and w.kontrol.tilt_hedef == 20.0
 
     # Durulan noktadan hareket normal sürer (referans kaymadığı için sıçrama yok).
-    w._aci_hareket(0.0, 10.0)                 # 20 -> 25 (tavanda kirpilir)
-    assert w.tilt_aci == 25.0 and w.kontrol.mock.tilt_hedef == 25.0
+    w._aci_hareket(0.0, 10.0)                 # 20 -> 30 (tavanda kirpilir)
+    assert w.tilt_aci == 30.0 and w.kontrol.mock.tilt_hedef == 30.0
     w._aci_hareket(0.0, -10.0)
-    assert w.tilt_aci == 15.0 and w.kontrol.mock.tilt_hedef == 15.0
+    assert w.tilt_aci == 20.0 and w.kontrol.mock.tilt_hedef == 20.0
 
 
 def test_basili_tutma_motor_hizini_asmaz():
