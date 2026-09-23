@@ -936,7 +936,9 @@ class InferenceThread(QThread):
                                                           "roi" if aktif_det.get("roi") else "model"),
                                                "id": aktif_det.get("id"), "cls": aktif_det.get("cls"),
                                                "conf": aktif_det.get("conf"), "box": kutu,
-                                               "n_det": len(dets)})
+                                               "n_det": len(dets),
+                                               # gonderim ani: arayuz kuyrugunda bekleme olculsun
+                                               "t_gonder": time.time()})
                 else:
                     self.nisanci.sifirla()
                 if self.otonom and not self.estop and not gercek_hedef:
@@ -950,7 +952,8 @@ class InferenceThread(QThread):
                         "onayli": iyi is not None and algi._onayli_mi(iyi.get("id")),
                         "kirmizi": iyi and iyi.get("anlik_kirmizi"),
                         "kilit": algi.kilitli_hedef(), "vurulan": len(algi._vurulanlar),
-                        "yasak": round(max(0.0, algi._kilitleme_yasagi_t - time.time()), 2)})
+                        "yasak": round(max(0.0, algi._kilitleme_yasagi_t - time.time()), 2),
+                        "t_gonder": time.time()})
 
                 now = time.perf_counter()
                 dt = now - t_son
@@ -3054,7 +3057,7 @@ class MainWindow(QMainWindow):
                 f = self._takip_dosya = open(yol, "w", encoding="utf-8", newline="")
                 f.write("t,t_kare,var,ex,ey,olu_x,olu_y,kaynak,id,cls,conf,x1,y1,x2,y2,n_det,"
                         "pan,tilt,pan_kom,pan_v,tilt_kom,tilt_v,onayli,kirmizi,kilit,vurulan,"
-                        "yasak,asama\n")
+                        "yasak,asama,t_gonder\n")
                 self._takip_satir = 0
             k = self.kontrol
             pr, tr = getattr(self, "_takip_son_komut", (None, None))
@@ -3064,7 +3067,7 @@ class MainWindow(QMainWindow):
                     d.get("conf"), *box, d.get("n_det"), k.pan_olculen, k.tilt_olculen,
                     *(pr or (None, None)), *(tr or (None, None)),
                     d.get("onayli"), d.get("kirmizi"), d.get("kilit"), d.get("vurulan"),
-                    d.get("yasak"), self.asama]
+                    d.get("yasak"), self.asama, d.get("t_gonder")]
             f.write(",".join("" if v is None else (f"{v:.4f}" if isinstance(v, float) else str(v))
                              for v in alan) + "\n")
             self._takip_satir += 1
