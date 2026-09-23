@@ -224,6 +224,13 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **23.09.2026 · final_v7** — `final_v6` + uzak/hareketli hedef takibi (10 m motorlu saha
+  testleriyle). Model kilitli hedefi bir karede kaçırırsa yanındaki kırmızı leke o karenin
+  ölçümü olur (`renk_takip`; model 1.5 sn doğrulamazsa kilit yine düşer). Küçük + kırmızı
+  uzak aday %35 güvenle onaylanır (`uzak_onay_esigi`). Kilit penceresi 213 + 320 px birlikte
+  taranır (10 m'de bulma %70 → %92). A2/A3 renk kuralları v6'daki gibi kaldı. Ölçüm: aynı
+  10 m kayıtlarında yavaş yürüyen hedef %73 → %100, motorlu canlı %83 → %91.
+  ⚠ Hedef aynı renkte geniş bir yüzeyin (kırmızı tişört) önündeyken model onu göremiyor.
 - **23.09.2026 · final_v6 (balon)** — Arkadaşın `balontespit` dalındaki balon işi alındı
   (başka hiçbir şeyi değiştirmeden): ek balon modeli tam kareyi değil **tanınan hedefin alt
   penceresini** tarar. Üstüne iki karar: balon **yalnız düşman** için aranır (dosta ateş
@@ -237,6 +244,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   dokunuş; otonom ateşte "kırmızı kanıtı" şartı kalktı (dost koruması Aşama-3 hedef
   seçiminde). Açılışta "kol en altta mı?" onayı eklendi (kart açıyı ölçmez, darbe sayar).
   Şartname V1.4'e göre güncellendi; CLAUDE.md 1392 → ~220 satır.
-- **22.09.2026** — `final_v3`: arayüz + çoklu hedef/tilt takip birleşti; tilt ayrı
-  ESP32-S3 kartına taşındı (operatör açısı −25…+25), pan sınırı ±60, güvenlik testleri
-  geri getirildi.

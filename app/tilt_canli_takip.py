@@ -256,9 +256,10 @@ def calistir(args):
                 tilt_tk.olcum(t_kare, TS.kamera_acisi(kol_kare), ey, ppd_k)
             ust = tilt_ust
             pr = pan_tk.yorunge_komut(simdi, pan_olc, -args.pan_sinir, args.pan_sinir,
-                                      hata_px=ex, olu_px=olu_x) if pan_acik else None
+                                      hata_px=ex, olu_px=olu_x, pay=0.0) if pan_acik else None
             tr = tilt_tk.yorunge_komut(simdi, TS.kamera_acisi(kol), TS.kamera_acisi(tilt_alt),
-                                       TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y)
+                                       TS.kamera_acisi(ust), hata_px=ey, olu_px=olu_y,
+                                       pay=0.0)   # arayuzle ayni: gizli pay yok
             tilt_kol = tilt_v = None
             if tr is not None:
                 tilt_kol = max(tilt_alt, min(ust, TS.kol_acisi(tr[0])))
