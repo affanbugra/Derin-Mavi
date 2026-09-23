@@ -326,9 +326,21 @@ class EksenTakip:
     def __init__(self, isaret=1.0, q=40.0, r=0.6, ileri=0.05, komut_hz=25.0,
                  olu=0.5, bosluk=1.5, telafi=0.5, durus_hizi=3.0, kayip_kovalamasi=0.45,
                  azami_sicrama=25.0, hedef_hiz_siniri=120.0, yor_q=800.0, yor_r=0.3,
-                 yor_q_min=60.0, yor_hiz_tavan=45.0):
+                 yor_q_min=60.0, yor_hiz_tavan=45.0, yor_ff_dusuk=0.5, yor_ff_esik=0.3,
+                 yor_ff_pencere=0.6):
         self.isaret = 1.0 if isaret >= 0 else -1.0
         self.yor_hiz_tavan = max(1.0, float(yor_hiz_tavan))
+        # UYARLAMALI HIZ ILERI BESLEMESI (bkz. _ileri_besleme_orani). Tespit karenin
+        # cekilisinden ~130 ms (kotu durumda ~230 ms) sonra kontrolcuye ulasir, kart da
+        # son komutu 150 ms akitir. Hedef durunca/donunce namlu eski hizla gitmeye
+        # devam eder: benzetimde 10 der/sn'den duran hedefi 2.0, 20'den 3.5 derece
+        # asiyordu (sahada "cok fazla iniyor, sonra cikiyor"). Sabit hizla giden
+        # (rayda) hedefte tam besleme gerekir: sabit %50 besleme orada hatayi
+        # 1.7 -> 13 px buyuttu. Hedef acilari son `yor_ff_pencere` sn'de bir DOGRUYA
+        # oturuyorsa (artik < `yor_ff_esik` derece) tam, oturmuyorsa `yor_ff_dusuk`.
+        self.yor_ff_dusuk = max(0.0, min(1.0, float(yor_ff_dusuk)))
+        self.yor_ff_esik = max(0.0, float(yor_ff_esik))
+        self.yor_ff_pencere = max(0.1, float(yor_ff_pencere))
         self.kestirici = HedefKestirici(q=q, r=r, hiz_siniri=hedef_hiz_siniri)
         # Kip basina filtre ayari. Yorunge kipi hizi DOGRUDAN motora ileri besleme
         # olarak verir: hiz kestirimi hedefin hiz degisimine hizli uymali (benzetim:
@@ -388,7 +400,28 @@ class EksenTakip:
         self._duragan = True                        # yorunge kipi: hedef duruyor mu (histerezisli)
         self._yavas_t = None                        # hiz esigin altina ne zaman indi
         self._hiz_gecmisi = []                      # [(t_kare, hiz)] — son ~1 sn
+        self._z_gecmisi = []                        # [(t_kare, hedef acisi)] — ileri besleme
         self._kayip_durdu = False                   # kayipta tek hiz-sifir komutu
+
+    def _ileri_besleme_orani(self):
+        """Hiz ileri beslemesinin carpani: 1.0 ya da yor_ff_dusuk.
+
+        Son pencerede olculen hedef acilarina dogru uydurulur. Artik kucuk ve egim
+        belirginse hedef SABIT HIZLA gidiyor (rayda) -> tam besleme. Artik buyukse
+        (durus, donus, el hareketi) ya da olcum azsa -> dusuk besleme: gecikme
+        yuzunden eski hizla hedefi asmasin."""
+        z = self._z_gecmisi
+        if len(z) < 6:
+            return self.yor_ff_dusuk
+        n = float(len(z))
+        tm = sum(a for a, _ in z) / n
+        zm = sum(b for _, b in z) / n
+        sxx = sum((a - tm) ** 2 for a, _ in z)
+        if sxx < 1e-6:
+            return self.yor_ff_dusuk
+        egim = sum((a - tm) * (b - zm) for a, b in z) / sxx
+        artik = (sum((b - zm - egim * (a - tm)) ** 2 for a, b in z) / n) ** 0.5
+        return 1.0 if (artik < self.yor_ff_esik and abs(egim) > 1.0) else self.yor_ff_dusuk
 
     def hedef_degisti(self):
         """Kilit BASKA bir nesneye gecti: hedef kestirimi sifirdan kurulur.
@@ -408,6 +441,7 @@ class EksenTakip:
         self._duragan = True
         self._yavas_t = None
         self._hiz_gecmisi = []
+        self._z_gecmisi = []
         self._kayip_durdu = False
 
     @property
@@ -488,6 +522,9 @@ class EksenTakip:
         self._son_kare = (float(t_kare), float(hata_px), float(ppd))
         kabul = self.kestirici.guncelle(t_kare, z)
         if kabul:
+            self._z_gecmisi.append((float(t_kare), z))
+            while self._z_gecmisi and self._z_gecmisi[0][0] < t_kare - self.yor_ff_pencere:
+                self._z_gecmisi.pop(0)
             self._kayip_durdu = False
             self._hiz_gecmisi.append((float(t_kare), self.kestirici.hiz))
             while self._hiz_gecmisi and self._hiz_gecmisi[0][0] < t_kare - 1.0:
@@ -702,7 +739,7 @@ class EksenTakip:
         # HIZ TAVANI: karta giden ileri besleme hizi. 5 m'de 1 m/s hedef ~11 der/sn,
         # sahada elle savrulan drone tepede 30-60. 23.09 kaydinda 62 der/sn komut
         # gercek bir hedefin degil kilit sicramasinin imzasiydi.
-        hiz = max(-self.yor_hiz_tavan, min(self.yor_hiz_tavan, hiz))
+        hiz = max(-self.yor_hiz_tavan, min(self.yor_hiz_tavan, hiz * self._ileri_besleme_orani()))
         if motor >= ust:
             motor, hiz = float(ust), min(0.0, hiz)
         elif motor <= alt:
@@ -987,6 +1024,37 @@ if __name__ == "__main__":
             tepe = max(tepe, abs(r[1]))
     assert 40.0 <= tepe <= 45.0 + 1e-6, f"yorunge hiz tavani: tepe {tepe:.1f} der/sn"
 
+    # UYARLAMALI ILERI BESLEME: sabit hizla giden (rayda) hedefte TAM hiz beslemesi;
+    # hedef durunca (acilar artik dogruya oturmaz) YARIM — gecikme yuzunden eski hizla
+    # hedefi asmasin. Benzetim: 20 der/sn'den duran hedefte asma 3.45 -> 1.88 derece,
+    # raydaki (8 der/sn) hedefte hata degismedi.
+    e = EksenTakip(isaret=1.0)
+    for i in range(30):                                    # 10 der/sn, 1 sn
+        t = i / 30.0
+        e.olcum(t, 0.0, 10.0 * t * 18.7, 18.7)
+    assert e._ileri_besleme_orani() == 1.0, "sabit hizli hedefte ileri besleme kisildi"
+    for i in range(30, 42):                                # hedef DURDU (0.4 sn)
+        t = i / 30.0
+        e.olcum(t, 0.0, 10.0 * 1.0 * 18.7, 18.7)
+    assert e._ileri_besleme_orani() == e.yor_ff_dusuk, "duran hedefte ileri besleme tam kaldi"
+    # Yorunge komutu bu carpani KULLANIR: ayni olcumler, uyarlamali ve uyarlamasiz iki
+    # takipci; hedef durduktan sonra karta giden hiz uyarlamalida belirgin kucuk.
+    def _durus_hizlari(dusuk):
+        e = EksenTakip(isaret=1.0, yor_ff_dusuk=dusuk)
+        hiz = []
+        for i in range(48):
+            t = i / 30.0
+            h = 10.0 * min(t, 1.0) * 18.7                 # 1 sn 10 der/sn, sonra durur
+            e.olcum(t, 0.0, h, 18.7)
+            r = e.yorunge_komut(t + 0.001, 0.0, -90.0, 90.0, hata_px=h, olu_px=7.0)
+            # durus ~3 olcumde (ornek pencere) anlasilir; ondan sonraki komutlar
+            if r is not None and t > 1.12:
+                hiz.append(abs(r[1]))
+        return hiz
+    uyar, sabit = _durus_hizlari(0.5), _durus_hizlari(1.0)
+    assert uyar and sum(sabit) > 1.0, "kurulum: durus sonrasi yorunge komutu uretilmedi"
+    assert sum(uyar) < 0.75 * sum(sabit), f"durusta hiz kisilmadi: {sum(uyar):.1f} vs {sum(sabit):.1f}"
+
     print("hedef_kestirici testleri OK — hiz kestirimi, kesintide tahmin, gurultu, "
           "aykiri/geri-zaman korumasi, hiz-sinirli yumusak komut, sentetik takip, "
-          "hedef degisiminde sifirlama, yorunge hiz tavani")
+          "hedef degisiminde sifirlama, yorunge hiz tavani, uyarlamali ileri besleme")
