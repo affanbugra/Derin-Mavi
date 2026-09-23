@@ -138,8 +138,8 @@ Bir sayıyı değiştireceksen **iki tarafı birden** (Python + firmware) günce
 
 | Büyüklük | Değer | Kaynak |
 |---|---|---|
-| Yatay sınır | **politika sınırı YOK** — pencere (varsayılan ±60); pencere kapalıysa yalnız işaretli azimutun tanım aralığı ±180 | `bolge.PAN_VARSAYILAN` / `PAN_MAX` |
-| Dikey sınır | **politika sınırı YOK** — pencere (varsayılan ±30 = kalibre kolun tamamı) | `bolge.TILT_CALISMA_MIN/MAX` |
+| Yatay sınır | **kodda sınır YOK** — yalnız hareket penceresi; açılış değeri **±90** (arayüzden değişir). Pencere kapalıysa hareket serbesttir. | `bolge.PAN_VARSAYILAN` |
+| Dikey sınır | **kodda sınır YOK** — pencere (açılış ±30 = kalibre kolun tamamı); geriye yalnız mekaniğin kendisi kalır | `bolge.TILT_CALISMA_MIN/MAX` |
 | Otonom takip sınırı | **ayrı sınır YOK** — aynı hareket penceresini kullanır (gizli tavan/pay kaldırıldı) | `arayuz_qt._nisan_geldi` |
 | Operatör 0° = kol | 30° | `tilt_surucu.KULLANICI_SIFIR` |
 | Sürücü çözünürlüğü | 6400 step/tur | `protokol.STEP_TUR` |
@@ -153,7 +153,7 @@ Bir sayıyı değiştireceksen **iki tarafı birden** (Python + firmware) günce
 
 ## 5. Yasak alanlar ve operatör kuralları
 
-**[23.09] Kodda açı sınırı YOKTUR.** Eskiden `bolge` içinde ±60 yatay / ±25 dikey
+**[23.09] Kodda açı sınırı YOKTUR — tek sınır arayüzdeki pencerelerdir.** Eskiden `bolge` içinde ±60 yatay / ±25 dikey
 "çalışma sınırı" vardı; ekranda görünmediği için sahada "neden bu açıya gitmiyor"un
 cevabı kodun içinde kalıyordu. Artık sınırı yalnız operatör koyar; geriye kalan tek
 sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).

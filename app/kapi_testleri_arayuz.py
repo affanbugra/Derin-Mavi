@@ -261,22 +261,22 @@ def test_yatay_sinir_yalniz_pencereden_gelir():
     penceresinden koyar. Pencere kapalıysa gimbal serbesttir; pencere varsa dışına
     çıkamaz ve arkadan dolanamaz (pan sarmasız hesaplanır)."""
     w = SahtePencere()
-    # Varsayılan: pencere AÇIK (±60) — ama bu bir VARSAYILAN, kod sınırı değil
+    # Varsayılan: pencere AÇIK (±90) — ama bu bir VARSAYILAN, kod sınırı değil
     assert w.bolge.hareket_pan.aktif
+    assert w.bolge.hareket_pan.ust == B.PAN_VARSAYILAN == 90.0
     w._aci_hareket(120.0, 0.0)
-    assert w.pan_ham == 60.0, w.pan_ham
+    assert w.pan_ham == 90.0, w.pan_ham
 
     # Operatör pencereyi GENİŞLETİRSE gimbal oraya gider (eskiden ±60'ta takılırdı)
     w.bolge.hareket_pan = B.Pencere(True, -150.0, 150.0)
     w._aci_hareket(60.0, 0.0)
-    assert w.pan_ham == 120.0, w.pan_ham
+    assert w.pan_ham == 150.0, w.pan_ham
 
-    # Pencere KAPALIYSA politika sinir yok; yalnizca isaretli azimutun TANIM araligi
-    # (±180 = tam arka) kalir — arkadan dolanip tur atilmasin diye.
+    # Pencere KAPALIYSA kod hic karismaz (arayuz disinda sinir yok)
     w2 = SahtePencere()
-    w2.bolge.hareket_pan = B.Pencere(False, -60.0, 60.0)
+    w2.bolge.hareket_pan = B.Pencere(False, -90.0, 90.0)
     w2._aci_hareket(200.0, 0.0)
-    assert w2.pan_ham == B.PAN_MAX == 180.0, w2.pan_ham
+    assert w2.pan_ham == 200.0, w2.pan_ham
 
     # Pencere DARALTILIRSA sınırda kırpılır ve arkadan dolanılamaz
     w3 = SahtePencere()
