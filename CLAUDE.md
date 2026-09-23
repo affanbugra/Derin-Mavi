@@ -232,9 +232,11 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   en tutarlı kutuyu seçer. (4) **E-Stop pan'ı 0 sanıyordu** (pan motoru olmayan eski
   kartın satırı) → ilk manuel tuş namluyu 28°→1° savurdu; artık ölçülen pan. (5) Otonomdan
   manuele geçişte açılar ölçülen konuma hizalanır. (6) Kilit kimliği değişince takip
-  sıfırlanır, yörünge hız komutu ≤45 °/s. Otonomda her ölçüm `app/loglar/takip_*.csv`.
-  Not: A2'de hedef 0.5 sn merkezde kalınca "vuruldu" sayılıp 10 sn seçilmez — saf takip
-  testi **Aşama 1**'de yapılır. Pilde algı %40–60 yavaş: testte şarj takılı olsun.
+  sıfırlanır, yörünge hız komutu ≤45 °/s. (7) Otonom ateş sonrası hedef **yalnız lazer
+  gerçek porttaysa** "vuruldu" sayılıp 10 sn bırakılır (`kontrol.lazer_gercek`); sahte
+  lazerde (Baslat.bat'ta port boş = mock) her kilitten 1.5 sn sonra hedef yasaklanıyordu
+  ("görüyor ama + çıkmıyor"). Otonomda her ölçüm — kilit yokken sebebiyle birlikte —
+  `app/loglar/takip_*.csv`. Pilde algı %40–60 yavaş: testte şarj takılı olsun.
 - **23.09.2026 · final_v7** — `final_v6` + uzak/hareketli hedef takibi (10 m motorlu saha
   testleriyle). Model kilitli hedefi bir karede kaçırırsa yanındaki kırmızı leke o karenin
   ölçümü olur (`renk_takip`; model 1.5 sn doğrulamazsa kilit yine düşer). Küçük + kırmızı

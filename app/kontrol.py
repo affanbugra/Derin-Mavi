@@ -113,6 +113,12 @@ class Kontrol:
         return self.mock is not None
 
     @property
+    def lazer_gercek(self):
+        """Lazer GERCEK bir karta (seri port) mi bagli? Sahte/kapaliysa ates hicbir
+        lazere ulasmaz — o zaman hedef "vuruldu" SAYILMAMALI (bkz. arayuz otonom ates)."""
+        return self.seri is not None
+
+    @property
     def tilt_ayri(self):
         """Dikey eksen ayri kartta mi? (yonlendirmenin tek kosulu)"""
         return self.tilt.bagli

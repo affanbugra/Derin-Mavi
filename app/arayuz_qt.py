@@ -940,7 +940,17 @@ class InferenceThread(QThread):
                 else:
                     self.nisanci.sifirla()
                 if self.otonom and not self.estop and not gercek_hedef:
-                    self.takip_olcum.emit({"var": False, "t": kare_t})
+                    # Teshis: hedef GORUNUYOR ama kilit YOKSA sebebi kayitta okunsun
+                    # (23.09: kutu "F-16 %88" gorunurken 6 sn "Hedef Araniyor").
+                    iyi = max(dets, key=lambda x: x.get("conf", 0)) if dets else None
+                    self.takip_olcum.emit({
+                        "var": False, "t": kare_t, "n_det": len(dets),
+                        "cls": iyi and iyi.get("cls"), "conf": iyi and iyi.get("conf"),
+                        "id": iyi and iyi.get("id"), "box": iyi and iyi.get("box"),
+                        "onayli": iyi is not None and algi._onayli_mi(iyi.get("id")),
+                        "kirmizi": iyi and iyi.get("anlik_kirmizi"),
+                        "kilit": algi.kilitli_hedef(), "vurulan": len(algi._vurulanlar),
+                        "yasak": round(max(0.0, algi._kilitleme_yasagi_t - time.time()), 2)})
 
                 now = time.perf_counter()
                 dt = now - t_son
@@ -3043,7 +3053,8 @@ class MainWindow(QMainWindow):
                 os.makedirs(os.path.dirname(yol), exist_ok=True)
                 f = self._takip_dosya = open(yol, "w", encoding="utf-8", newline="")
                 f.write("t,t_kare,var,ex,ey,olu_x,olu_y,kaynak,id,cls,conf,x1,y1,x2,y2,n_det,"
-                        "pan,tilt,pan_kom,pan_v,tilt_kom,tilt_v\n")
+                        "pan,tilt,pan_kom,pan_v,tilt_kom,tilt_v,onayli,kirmizi,kilit,vurulan,"
+                        "yasak,asama\n")
                 self._takip_satir = 0
             k = self.kontrol
             pr, tr = getattr(self, "_takip_son_komut", (None, None))
@@ -3051,7 +3062,9 @@ class MainWindow(QMainWindow):
             alan = [simdi, d.get("t"), int(bool(d.get("var"))), d.get("ex"), d.get("ey"),
                     d.get("olu_x"), d.get("olu_y"), d.get("kaynak"), d.get("id"), d.get("cls"),
                     d.get("conf"), *box, d.get("n_det"), k.pan_olculen, k.tilt_olculen,
-                    *(pr or (None, None)), *(tr or (None, None))]
+                    *(pr or (None, None)), *(tr or (None, None)),
+                    d.get("onayli"), d.get("kirmizi"), d.get("kilit"), d.get("vurulan"),
+                    d.get("yasak"), self.asama]
             f.write(",".join("" if v is None else (f"{v:.4f}" if isinstance(v, float) else str(v))
                              for v in alan) + "\n")
             self._takip_satir += 1
@@ -4275,8 +4288,17 @@ class MainWindow(QMainWindow):
                 
                 # Atis suresi dolduysa (imha): bu hedefi birak ve bir sure yeniden secme;
                 # siradaki hedefe HEMEN gec (Asama 2: tur basina 3 hedef ayni anda).
+                # ⚠ YALNIZ GERCEK LAZERLE: sahte/kapali lazerde (DERINMAVI_ESP=mock/off,
+                # Baslat.bat'ta port bos gecilince) ates hicbir yere gitmez. 23.09 saha:
+                # her kilitten 1.5 sn sonra hedef "vuruldu" sayilip 10 sn secilmedi —
+                # "hedefi goruyor ama + cikmiyor, yonelmiyor" sikayeti buydu.
                 if a and simdi >= self._otonom_ates_bitis_t:
-                    algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
+                    if getattr(self.kontrol, "lazer_gercek", False):
+                        algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
+                    else:
+                        self.sb_msg.setText(
+                            f'<span style="color:{AMB}">●</span>&nbsp;Lazer kartı bağlı değil '
+                            f'(sahte) — hedef "vuruldu" sayılmadı, takip sürüyor')
 
     def _otonom_panel_guncelle(self, active_hedef, data, estop):
         """Otonom moddaki takip ve nisan durumunu (sag kolon paneli) gunceller."""

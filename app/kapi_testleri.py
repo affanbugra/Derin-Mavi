@@ -357,6 +357,34 @@ def test_otonom_ates_estopta_ve_asama1de_yok(w):
     assert w.kontrol.mock.lazer is False, "E-Stop'ta otonom ates"
 
 
+def test_sahte_lazerde_hedef_vuruldu_sayilmaz(w):
+    """Otonom ates suresi dolunca hedef "vuruldu" sayilip 10 sn secilmez — ama YALNIZ
+    lazer gercek bir porttaysa. 23.09 saha: lazer sahteydi (DERINMAVI_ESP=mock), her
+    kilitten 1.5 sn sonra hedef yasaklandi; "hedefi goruyor ama + cikmiyor" sikayeti."""
+    w.mod, w.asama = "Otonom", "Aşama 2"
+    cagri = []
+    eski = A.algi.hedef_vuruldu
+    A.algi.hedef_vuruldu = lambda s, simdi=None: cagri.append(s)
+
+    def ates_turu():
+        w._otonom_ates_aktif = False
+        _dwell_doldu(w)
+        w._otonom_ates_kontrol(_otonom_veri(), False)            # dwell doldu -> ates
+        assert w._otonom_ates_aktif, "kurulum: otonom ates baslamadi"
+        w._otonom_ates_bitis_t = time.time() - 0.01              # ates suresi doldu
+        w._otonom_ates_kontrol(_otonom_veri(), False)
+    try:
+        assert not w.kontrol.lazer_gercek, "kurulum: test kontrolu sahte olmali"
+        ates_turu()
+        assert cagri == [], "SAHTE lazerde hedef 'vuruldu' sayildi (10 sn yasak)"
+        w.kontrol.__class__ = type("GercekLazerli", (w.kontrol.__class__,),
+                                   {"lazer_gercek": property(lambda s: True)})
+        ates_turu()
+        assert cagri == [A.OTONOM_BEKLEME_SURE], f"gercek lazerde vuruldu sayilmadi: {cagri}"
+    finally:
+        A.algi.hedef_vuruldu = eski
+
+
 def test_operator_acisi_karta_kol_acisi_gider(w):
     """Tilt iki cercevelidir: operator -30..+30, kart kolu 0..60. Operator 10
     derece -> karta G40 gitmeli (cevrim tek yerde: tilt_surucu)."""
@@ -607,6 +635,7 @@ GERCEK_KART_TESTLERI = [
     test_kart_disaridan_durunca_ates_ve_hareket_kesilir,
     test_otonom_ates_gorunen_hedefe,
     test_otonom_ates_estopta_ve_asama1de_yok,
+    test_sahte_lazerde_hedef_vuruldu_sayilmaz,
     test_operator_acisi_karta_kol_acisi_gider,
     test_estop_pan_acisini_kaybetmez,
     test_otonomdan_manuele_gecis_olculen_konumdan_devam_eder,
