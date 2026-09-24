@@ -48,7 +48,7 @@ Bunların her biri **gerçekten yaşanmış bir hatanın** karşılığıdır. D
 | 3 | **Karta giden açı MUTLAK, birim DERECE.** Firmware `moveTo` kullanır; step'e çevirim karttadır. | Delta protokolde ekrandaki açı kartın hedefinden kopuyordu. |
 | 4 | **Lazer ölü adam anahtarı**: 250 ms'de bir `L1` tazelemesi; kart 1 sn tazeleme almazsa lazeri KENDİ keser (`protokol.ATES_TAZELE_MS` / `ATES_ZAMAN_ASIMI_MS`, firmware ile aynı). Tazeleme 1 sn kesildiyse PC lazeri **kendiliğinden yeniden yakmaz**. Kesme (`L0`/`STOP`) her karta ve her porttan gider. | "Kes" komutunun gideceğine güvenilemez: kablo koptuğunda o komut zaten gidemez. Donan arayüz geri gelince eski tazeleme lazeri yeniden yakıyordu (24.09 testte yakalandı). |
 | 5 | **Mekanik sınırlar iki tarafta da uygulanır** (Python + firmware). Tek tarafa güvenilmez. | Seri monitörden elle `T500` yazan biri mekaniği kırabilir. |
-| 6 | **Ateş tek kapıdan, kesmek kolay; ACİL DURDUR kısayolla yalnız KURULUR.** Ateş: `Space`/`B`, kol `L2`+`R2` (tek dokunuş, 23.09 takım kararı) — hepsi `_ates_bas`. `Esc` ateşi keser. ACİL DURDUR: `Backspace`, kol `Options` veya `Daire/B`; kısayol asla DEVAM ettirmez, devam yalnız arayüz butonu. | Kol eskiden Options'ın ikinci basışında acil durdurmayı kaldırıyordu. |
+| 6 | **Ateş tek kapıdan, kesmek kolay; ACİL DURDUR kısayolla yalnız KURULUR.** Ateş: `Space`+`B` birlikte, kol `L2`+`R2` birlikte (tek dokunuş, bekleme yok; tek tuş boş) — hepsi `_ates_bas`. ACİL DURDUR: `Esc`, kol `Options/Start` (24.09; Backspace ve Daire artık boş); kısayol asla DEVAM ettirmez, devam yalnız arayüz butonu. | Kol eskiden Options'ın ikinci basışında acil durdurmayı kaldırıyordu. |
 | 7 | **Otonom ateş yalnız o karede GERÇEKTEN görülen hedefte BAŞLAR** — hayalet kutu / eski sınıf belleği yetmez; A3'te yalnız kartı "Düşman" olan (renk kanıtı şartı 23.09 takım kararıyla kalktı). Başlamış ateşi kesen: E-Stop, atışa yasak açı, dost/menzil engeli, kilidin düşmesi ya da başka hedefe geçmesi. **Balonda istisna (24.09, kullanıcı isteği):** ateş `OTONOM_ATES_SURE` (2 sn) sürer, hayalet kesmez — lazer noktası modeli kör ediyor. Araçta hayalet keser. | Aşama-3'te dost vurmak −10 puan. Lazer altındaki balona 37 atışın 37'si 0.2 sn'de kesildi. |
 | 8 | **Sahte cihaz (mock) asla "hazır/yeşil" görünmez.** Alt çubukta sarı + "kart takılı değil". | Operatör kablosuz sistemi hazır sanıyordu. |
 | 9 | **Merkeze alma kademelidir** (motor tavan hızıyla), anlık sıfırlama yok; yön komutu veya E-Stop dönüşü keser. | Ekran sıfıra zıplarken gimbal yolda kalıyor, açı referansı kopuyordu. |
@@ -122,12 +122,14 @@ Kamera → algi.py (YOLO+takip) → nisan.py / hedef_kestirici.py (PD + kestirim
 | Nişan | `nisan.py`, `hedef_kestirici.py` | Piksel hatası → açı (PD), yörünge kestirimi |
 | Güvenlik alanı | `bolge.py` | İzinli pencere modeli (hareket/atış) — **tek sınır kaynağı** |
 | Kontrol | `kontrol.py`, `protokol.py`, `tilt_surucu.py`, `mock_esp32.py` | Karta giden **tek kapı** + donanımsız çalışma |
-| Girdi | `gamepad.py`, `kol_ikon.py` | Kol okuma + ekrandaki kol göstergesi |
+| Girdi | `gamepad.py`, `kol_ikon.py`, `kontroller.py` | Kol okuma + ekrandaki kol göstergesi + **tuş listesi (tek kaynak, üstteki "Kontroller" paneli)** |
 | Kamera | `kamera.py` | **Yalnız harici USB kamera** (dahili/telefon/sanal elenir) |
 | Testler | `kapi_testleri.py` | Güvenlik kapıları (§6) |
 
 **Ortam değişkenleri:** `DERINMAVI_ESP` (`mock` \| port \| `off`) · `DERINMAVI_TILT`
 (`off` \| port) · `DERINMAVI_CAM` (dosya/RTSP) · `DERINMAVI_MODEL`.
+Port adı `tilt_surucu.port_adi`'dan geçer: yalnız `COM3` biçimi büyütülür, Mac/Linux yolu
+(`/dev/cu.usbmodem…`) harf duyarlıdır — `.upper()` Mac'te kartı "yok" gösteriyordu.
 
 **Protokol (eski kart):** `P<derece>` `T<derece>` `S<der/sn>` `A<der/sn²>` `G<%>`
 `L1`/`L0` `STOP`/`START`; kart insan-okur metin yazar, `protokol.satir_*` ayrıştırır
@@ -173,10 +175,12 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
 - Hazır ayar: atış yatay ±30 / dikey ±15 (ateş alanı hareket alanından dar başlar).
 - Açı karolarında açık pencereler saydam renkli dilim olarak görünür: **sarı** =
   harekete yasak, **kırmızı** = atışa yasak, **soluk yeşil** = atış izni.
-- Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · `Space`/`B` = ateş · `Esc` = ateşi kes ·
-  **`Backspace` = ACİL DURDUR** (yalnız kurar). Kol: D-pad + sol çubuk (yatay) / sağ çubuk (dikey) ·
-  **Options veya Daire/B = ACİL DURDUR** (yalnız kurar) · L2+R2 = ateş · L1/R1 = merkez.
+- Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) ·
+  **`Esc` = ACİL DURDUR** (yalnız kurar). Kol: D-pad + **sol joystick (yatay + dikey)**, sağ joystick **boş** ·
+  **Options/Start = ACİL DURDUR** (yalnız kurar) · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
   Acil durdurmadan çıkış (DEVAM ET) yalnız arayüz butonuyla; donanım butonu basılıyken olmaz.
+- **Bir tuşu değiştiren `kontroller.py`'yi de değiştirir** (üst çubuktaki "Kontroller" paneli oradan
+  okur). Ayrışırsa `kontroller.py` / `kapi_testleri_arayuz.py` kırmızıya düşer.
 
 ---
 
@@ -189,7 +193,7 @@ python app/bolge.py            # yasak alan matematiği
 python app/protokol.py         # komut üretimi + sabit tutarlılığı
 python app/kontrol.py          # mock cihazla uçtan uca
 python app/tasarim.py          # arayüzde stilsiz bileşen var mı
-python app/algi.py  app/nisan.py  app/kamera.py  app/gamepad.py  app/kol_ikon.py
+python app/algi.py  app/nisan.py  app/kamera.py  app/gamepad.py  app/kol_ikon.py  app/kontroller.py
 python app/balon_takip.py      # A2/A3 balon takibi (kart, gövde rengi, menzil, dost engeli)
 ```
 

@@ -895,18 +895,19 @@ def test_tek_kart_otonom_ates_ve_gercek_lazer():
 
 
 def test_klavye_ve_kol_acil_durdurur_ama_kaldirmaz():
-    """[Backspace] ve kolda [Options] / [Daire-B] ACIL DURDURU kurar; tekrar basmak onu
-    KALDIRMAZ (eski kol yolu ikinci basista devam ediyordu). Devam yalniz butondan."""
+    """[Esc] ve kolda [Options/Start] ACIL DURDURU kurar; tekrar basmak onu KALDIRMAZ
+    (eski kol yolu ikinci basista devam ediyordu). Devam yalniz butondan. Daire/B
+    24.09'dan beri acil durdur DEGILDIR."""
     import gamepad as G
     w = _tek_pencere()
     try:
         m = w.kontrol.tilt.mock
         _ates_ac(w)
         from PySide6.QtGui import QKeyEvent
-        tus = QKeyEvent(A.QEvent.KeyPress, A.Qt.Key_Backspace, A.Qt.NoModifier)
+        tus = QKeyEvent(A.QEvent.KeyPress, A.Qt.Key_Escape, A.Qt.NoModifier)
         assert w._tus_bas(tus)
-        assert w.estop_btn.isChecked() and m.acil and not m.lazer_acik, "Backspace acil durdurmadi"
-        assert w._tus_bas(tus) and w.estop_btn.isChecked(), "ikinci Backspace acil durdurmayi kaldirdi"
+        assert w.estop_btn.isChecked() and m.acil and not m.lazer_acik, "Esc acil durdurmadi"
+        assert w._tus_bas(tus) and w.estop_btn.isChecked(), "ikinci Esc acil durdurmayi kaldirdi"
         w.estop_btn.setChecked(False)
         w._estop_bas()
         _yokla(w, 0.2)
@@ -925,7 +926,11 @@ def test_klavye_ve_kol_acil_durdurur_ama_kaldirmaz():
                 pass
         kol = SahteKol()
         w.gamepad = kol
-        for tus_adi in ("daire", "start", "daire"):
+        kol.d = G.Durum()
+        kol.d.basili, kol.d.kenar = {"daire"}, {"daire"}
+        w._gamepad_tik()
+        assert not w.estop_btn.isChecked(), "Daire hala acil durduruyor"
+        for tus_adi in ("start", "start"):
             kol.d = G.Durum()
             kol.d.basili, kol.d.kenar = {tus_adi}, {tus_adi}
             w._gamepad_tik()

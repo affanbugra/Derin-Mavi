@@ -11,9 +11,8 @@ kendi kapılarından (`_dpad_press`, `_ates_bas`, `_aci_reset`, `_estop_bas`) ve
 gerçek gamepad okumasından beslenir — yani ekranda yanan tuş, sistemin gerçekten
 aldığı komuttur (klavye, ekrandaki D-pad ve kol aynı ışığı yakar).
 
-Düzen (CLAUDE.md §5.4, 22.09'da güncellendi):
-    D-pad          → yön        · L2 + R2 (2 sn) → ateş aç, tekrar bas → kes
-    L1 / R1 (2 sn) → merkeze al · Options        → ACİL DURDUR / DEVAM
+Düzen: tuşların tam listesi `kontroller.py`dedir (arayüzdeki "Kontroller" penceresi
+de oradan okur) — burada tekrar yazılmaz, eskir.
 
 Kendi kendini test:  python app/kol_ikon.py   (pencere açmaz)
 """
@@ -57,11 +56,11 @@ DOKUNMATIK = QRectF(82, 38, 36, 28)          # orta dokunmatik yüzey (tuş değ
 
 # Sistemin gerçekten kullandığı tuşlar; kalanları soluk çizilir ki göz ilgisizleri
 # aramasın (video anlatımında "bunlar çalışıyor" demek kolay olsun).
-ETKIN = ("up", "down", "left", "right", "l1", "r1", "l2", "r2", "start", "daire",
-         "sol_cubuk", "sag_cubuk")   # cubuklar da komut verir: sol=yatay, sag=dikey
+ETKIN = ("up", "down", "left", "right", "l1", "r1", "l2", "r2", "start",
+         "sol_cubuk")   # sol cubuk = yatay + dikey; sag cubuk BOS (24.09)
 
-# Ates (L2/R2) ve ACIL DURDUR (Options, Daire) kirmizi yanar; geri kalani AKSAN.
-ISIK_RENK = {"l2": T.KIRMIZI, "r2": T.KIRMIZI, "start": T.KIRMIZI, "daire": T.KIRMIZI}
+# Ates (L2/R2) ve ACIL DURDUR (Options) kirmizi yanar; geri kalani AKSAN.
+ISIK_RENK = {"l2": T.KIRMIZI, "r2": T.KIRMIZI, "start": T.KIRMIZI}
 
 
 def isik_rengi(ad):

@@ -42,6 +42,7 @@ import bolge as B
 import kol_ikon as KI            # harekete/atisa izinli pencereler (sartname §4.2)
 import gamepad as gamepad_mod
 import kontrol as kontrol_mod
+import kontroller as kontroller_mod   # tus listesi — "Kontroller" paneli TEK KAYNAK
 import protokol as P          # hiz duzeyi/durum sabitleri — TEK KAYNAK (bkz. protokol.py)
 import hedef_kestirici as HK
 import tilt_surucu as TS
@@ -606,6 +607,10 @@ ATES_METIN_ACIK = "ATEŞİ KES"
 TUS_YON = {Qt.Key_W: "up", Qt.Key_Up: "up", Qt.Key_S: "down", Qt.Key_Down: "down",
            Qt.Key_A: "left", Qt.Key_Left: "left", Qt.Key_D: "right", Qt.Key_Right: "right",
            Qt.Key_R: "center"}
+# [Esc] = ACIL DURDUR (yalniz kurar; 24.09). Backspace artik bos.
+# Tuslarin ne is yaptigi arayuzdeki "Kontroller" penceresinde listelenir: bir tus
+# degisirse kontroller.py de degismeli (kapi testi ikisini karsilastirir).
+ESTOP_TUSU = Qt.Key_Escape
 
 # Ayar paneli sekmeleri: kalabalik tek liste yerine iki grup.
 #   "Tespit"  — YOLO/ByteTrack davranisi
@@ -1625,12 +1630,22 @@ class MainWindow(QMainWindow):
 
         # NOT: cihaz durum gostergeleri (Kamera/Lazer/ESP32/Seri Port) alt cubuga tasindi.
         ekle(self._div())
+        # Tus listesi (kontroller.py'den). NoFocus: tiklamak klavye odagini canli
+        # goruntuden almamali, yoksa panel acikken W/A/S/D ve Esc gimbal'a gitmez.
+        self.kontrol_btn = QPushButton("⌨ Kontroller")
+        self.kontrol_btn.setObjectName("kontrolbtn")
+        self.kontrol_btn.setCheckable(True)
+        self.kontrol_btn.setFocusPolicy(Qt.NoFocus)
+        self.kontrol_btn.setCursor(Qt.PointingHandCursor)
+        self.kontrol_btn.setToolTip("Klavye ve oyun kolunda hangi tuş ne yapar")
+        self.kontrol_btn.clicked.connect(self._kontroller_toggle)
+        ekle(self.kontrol_btn)
         self.estop_btn = QPushButton("⏻ ACİL DURDUR")
         self.estop_btn.setObjectName("estop")
         self.estop_btn.setCheckable(True)
         self.estop_btn.setToolTip(
             "ACİL DURDUR: lazer kesilir, iki eksen olduğu yerde durur, kart kilitlenir.\n"
-            "Kısayol: klavyede [Backspace] · kolda [Options] veya [Daire / B].\n"
+            "Kısayol: klavyede [Esc] · kolda [Options / Start].\n"
             "Kısayollar YALNIZ DURDURUR — devam için bu butona (DEVAM ET) tıklayın.\n"
             "Donanım butonu (kart GPIO 15) basılıyken devam edilemez.")
         self.estop_btn.clicked.connect(self._estop_bas)
@@ -1958,6 +1973,51 @@ class MainWindow(QMainWindow):
         self.ayar_panel.setVisible(False)
         self._odak_geri()                 # kaydirici odagi kalirsa klavye gimbal'a gitmez
 
+    # ================= KONTROLLER PANELI (tus listesi) =================
+    def _kontroller_toggle(self):
+        """Ust cubuktaki "Kontroller": tum klavye/kol tuslarini gosteren panel.
+
+        Ayri pencere (QDialog) DEGIL, icerigin ustunde bir panel: ayri pencere klavye
+        odagini alirdi ve panel acikken [Esc] atesi KESMEZ, pencereyi kapatirdi.
+        Metin kontroller.py'den gelir — tuslar tek yerde yazili."""
+        panel = getattr(self, "kontrol_panel", None)
+        if panel is None:
+            panel = self.kontrol_panel = QFrame(self.content)
+            panel.setObjectName("kontrolpanel")
+            panel.setFixedWidth(720)
+            pv = QVBoxLayout(panel)
+            pv.setContentsMargins(22, 16, 22, 18)
+            pv.setSpacing(2)
+            brow = QHBoxLayout()
+            bas = QLabel("Kontroller")
+            bas.setObjectName("ayarbaslik")
+            brow.addWidget(bas)
+            brow.addStretch(1)
+            kapat = QPushButton("✕")
+            kapat.setObjectName("ayarkapat")
+            kapat.setFocusPolicy(Qt.NoFocus)
+            kapat.setCursor(Qt.PointingHandCursor)
+            kapat.clicked.connect(self._kontroller_toggle)
+            brow.addWidget(kapat)
+            pv.addLayout(brow)
+            metin = QLabel(kontroller_mod.html())
+            metin.setObjectName("kontrolmetin")
+            metin.setTextFormat(Qt.RichText)
+            metin.setWordWrap(True)
+            pv.addWidget(metin)
+            panel.adjustSize()
+            panel.hide()
+        gorunur = not panel.isVisible()
+        if gorunur:
+            # ACIL DURDUR butonunun altina, sag kenara hizali
+            panel.move(self.CW - panel.width() - 24, 96)
+            panel.show()
+            panel.raise_()
+        else:
+            panel.hide()
+        self.kontrol_btn.setChecked(gorunur)
+        self._odak_geri()
+
     def _ayar_toggle(self):
         gorunur = not self.ayar_panel.isVisible()
         self.ayar_panel.setVisible(gorunur)
@@ -2012,9 +2072,14 @@ class MainWindow(QMainWindow):
         # tuslari pencereye hic ulasmiyordu (W/A/S/D ulasiyordu cunku gorunum harfleri
         # kullanmaz). Bizim tuslarimizi gorunume gitmeden burada yakalariz.
         if (obj is getattr(self, "view", None)
-                and event.type() == QEvent.KeyPress and event.key() == Qt.Key_Escape):
-            self._tus_bas(event)                       # ESC ates keser — odak nerede olursa olsun
+                and event.type() == QEvent.KeyPress and event.key() == ESTOP_TUSU):
+            self._tus_bas(event)                       # ESC acil durdurur — odak nerede olursa olsun
             return True
+        # Odak giderse (baska pencere, sayi kutusu) Space/B'nin BIRAKMA olayi bize hic
+        # gelmeyebilir; takili kalan "basili" kaydi sonra TEK tusla atesi acardi.
+        if (obj is getattr(self, "view", None) and event.type() == QEvent.FocusOut
+                and getattr(self, "_ates_tus_basili", None)):
+            self._ates_tus_basili.clear()
         if (obj is getattr(self, "view", None)
                 and event.type() in (QEvent.KeyPress, QEvent.KeyRelease)
                 and not self._metin_girisi_odakta()):
@@ -2425,10 +2490,11 @@ class MainWindow(QMainWindow):
         self._fren_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._fren_timer.timeout.connect(self._fren_tik)
 
-        # Klavyeden ATES: [Space] ya da [B] -> ac/kes (bekleme yok). Kaza
-        # ile tek tusa basmak lazeri acmasin diye kasitli olarak zor bir hareket.
+        # Klavyeden ATES: [Space] + [B] BIRLIKTE -> ac/kes (bekleme yok). Tek tus bir
+        # sey yapmaz: kaza ile tek tusa basmak lazeri acmasin.
+        self._ates_tus_basili = set()
         self._kol_ui, self._kol_gp = set(), set()   # kol gostergesindeki isik kaynaklari
-        # Merkeze alma: kademeli yurutme + "basili tut" sayaci (MERKEZ butonu, L1/R1)
+        # Merkeze alma: kademeli yurutme + "basili tut" sayaci (MERKEZ butonu, L1+R1)
         self._merkez_calisiyor = False
         self._merkez_son_t = 0.0
         self._merkez_timer = QTimer(self)
@@ -2833,13 +2899,12 @@ class MainWindow(QMainWindow):
         # E-STOP her kosulda islenir (digerlerinden ONCE): acil durdurma bir moda ya da
         # baska bir kosula bagli olamaz. Ayni buton DEVAM icin de kullanilir.
         # Koldaki gercek tuslar ekrandaki kol resminde yanar (durum gostergesi).
-        # Cubuklar analogdur (dugme degil): sapinca kendi daireleri yanar — yoksa
-        # sag cubukla yukari/asagi surerken ekranda hicbir sey degismiyordu.
+        # Cubuk analogdur (dugme degil): sapinca kendi dairesi yanar. Iki eksen de SOL
+        # cubukta (24.09); sag cubuk bos. D-pad de pan/tilt'i doldurur — o an cubuk degil
+        # D-pad yanmali.
         isiklar = set(d.basili)
-        if d.pan:
+        if d.hareket_var and not ({"up", "down", "left", "right"} & d.basili):
             isiklar.add("sol_cubuk")
-        if d.tilt:
-            isiklar.add("sag_cubuk")
         self._kol_gamepad_isik(isiklar)
         self._gp_ates_basili = d.ates_basili
 
@@ -2851,7 +2916,7 @@ class MainWindow(QMainWindow):
         if d.ates_kenar:
             self._ates_kisayolu()                   # -> _ates_bas (tek kapi)
 
-        # MERKEZ: L1 ya da R1 -> dogrudan merkeze al (kademeli hareket korunur).
+        # MERKEZ: L1 + R1 BIRLIKTE -> merkeze al (kademeli hareket korunur).
         if d.merkez:
             self._aci_reset()
 
@@ -3760,10 +3825,9 @@ class MainWindow(QMainWindow):
         self._ates_bas()
 
     ATES_TUSLARI = frozenset({Qt.Key_Space, Qt.Key_B})
-    # ⚠ BASILI TUTMA KALDIRILDI (takim karari 23.09): ates ve merkeze alma TEK
-    # DOKUNUSLA calisir, hicbir fonksiyonda bekleme yoktur. Yarismada saniyeler
-    # puandir; "2 sn bekle" kurali operatoru yavaslatiyordu. Ates yine TEK KAPIDAN
-    # (`_ates_bas`) gecer: E-Stop ve atisa-yasak alan denetimleri aynen durur.
+    # ⚠ BASILI TUTMA KALDIRILDI (takim karari 23.09): bekleme yok. 24.09: ates icin
+    # Space ve B BIRLIKTE basilmali (ikinci tusun basildigi an ac/kes); tek tus bos.
+    # Ates yine TEK KAPIDAN (`_ates_bas`) gecer: E-Stop ve atisa-yasak alan aynen durur.
 
     def _ates_isigi(self):
         """Koldaki L2/R2 ates acikken yanar."""
@@ -3772,17 +3836,27 @@ class MainWindow(QMainWindow):
             self._kol_isik(ad, acik)
 
     def _ates_tusu(self, event, basildi):
-        """[Space] veya [B]: atesi AC/KES (tek dokunus). HER MODDA calisir — ATES
-        butonu Otonom'da gorunmez ama klavye yolu moda bagli olmamalidir."""
+        """[Space] + [B] birlikte: atesi AC/KES. Ikinci tusun basildigi AN bir kez
+        tetiklenir; basili tutmak tekrarlamaz, tek tus hicbir sey yapmaz. HER MODDA
+        calisir — ATES butonu Otonom'da gorunmez ama klavye yolu moda bagli olmamalidir."""
         if event.key() not in self.ATES_TUSLARI:
             return False
-        if event.isAutoRepeat() or not basildi:
-            return True                       # islem YALNIZ basma aninda
-        self._ates_kisayolu()                 # -> _ates_bas (tek kapi)
+        if event.isAutoRepeat():
+            return True
+        basili = getattr(self, "_ates_tus_basili", None)
+        if basili is None:
+            basili = self._ates_tus_basili = set()
+        if not basildi:
+            basili.discard(event.key())
+            return True
+        onceden_tam = basili >= self.ATES_TUSLARI
+        basili.add(event.key())
+        if not onceden_tam and basili >= self.ATES_TUSLARI:
+            self._ates_kisayolu()             # -> _ates_bas (tek kapi)
         return True
 
     def _estop_kisayolu(self):
-        """Klavye [Backspace] / kol [Options], [Daire/B]: ACIL DURDURU KURAR, asla kaldirmaz.
+        """Klavye [Esc] / kol [Options/Start]: ACIL DURDURU KURAR, asla kaldirmaz.
 
         Kaldirma (DEVAM) yalniz arayuz butonundan: panikte iki kez basmak ya da tusa
         takili kalmak acil durdurmayi sessizce kaldirmamali (eski kol yolu bunu yapiyordu).
@@ -3796,12 +3870,9 @@ class MainWindow(QMainWindow):
     def _tus_bas(self, event):
         """Klavyenin TEK kapisi (basma). Doner: tus bizimse True.
         Hareket `_dpad_press` -> `_aci_hareket` ile gider: ekran + KART (motor) birlikte."""
-        # [Esc] = ateşi kes. Her modda ve her durumda; kesmek her zaman guvenlidir.
-        if event.key() == Qt.Key_Escape:
-            self._ates_kes("ESC")
-            return True
-        # [Backspace] = ACIL DURDUR (yalniz kurar). Tekrar/basili tutma zararsiz.
-        if event.key() == Qt.Key_Backspace:
+        # [Esc] = ACIL DURDUR (yalniz kurar; ates de kesilir). Her modda, her durumda.
+        # Tekrar/basili tutma zararsiz.
+        if event.key() == ESTOP_TUSU:
             self._estop_kisayolu()
             return True
         if self._ates_tusu(event, basildi=True):
@@ -3813,7 +3884,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _tus_birak(self, event):
-        if event.key() in (Qt.Key_Escape, Qt.Key_Backspace):
+        if event.key() == ESTOP_TUSU:
             return True
         if self._ates_tusu(event, basildi=False):
             return True
@@ -3890,8 +3961,7 @@ class MainWindow(QMainWindow):
         ediyor" gibi gorunur). Artik hareket kapisi da E-Stop'ta kapaniyor.
         """
         aktif = self.estop_btn.isChecked()
-        self._kol_isik("start", aktif)      # koldaki Options/Daire: E-Stop suresince yanar
-        self._kol_isik("daire", aktif)
+        self._kol_isik("start", aktif)      # koldaki Options: E-Stop suresince yanar
         self.thread.estop = aktif
         self.inference_thread.estop = aktif
         self.estop_btn.setText("▶ DEVAM ET" if aktif else "⏻ ACİL DURDUR")

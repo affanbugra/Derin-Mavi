@@ -419,6 +419,26 @@ def qss() -> str:
     #estop:pressed {{ background: {_a(KIRMIZI, 0.38)}; }}
     #estop:checked {{ background: {KIRMIZI}; color: #FFFFFF; }}
 
+    /* ---------- Kontroller (tuş listesi) butonu + paneli ---------- */
+    #kontrolbtn {{
+        background: {DOLGU_BOSTA};
+        border: none;
+        border-radius: {YC_KAPSUL_XL}px;
+        color: {L1};
+        padding: 0 16px;
+        min-height: {BOY_XL}px;
+        {yazi(GOVDE_VURGU)}
+    }}
+    #kontrolbtn:hover   {{ background: {DOLGU_USTUNDE}; }}
+    #kontrolbtn:pressed, #kontrolbtn:checked {{ background: {DOLGU_BASILI}; }}
+    #kontrolpanel {{
+        background: rgba(30, 30, 30, 0.97);
+        border: 1px solid {KENAR};
+        border-top: 1px solid {KENAR_ISIK};
+        border-radius: {YC_PANEL}px;
+    }}
+    #kontrolmetin {{ {yazi(GOVDE, L1)} background: transparent; }}
+
     /* ---------- kamera kuyusu ---------- */
     #cam {{
         background: {SIYAH};

@@ -547,7 +547,7 @@ class SahteTus:
 
 
 def test_klavye_atesi_tek_dokunus():
-    """Klavyeden ateş: [Space] veya [B] → AÇ/KES (bekleme YOK); [Esc] → kes.
+    """Klavyeden ateş: [Space] + [B] BİRLİKTE → AÇ/KES (bekleme YOK); tek tuş boş (24.09).
 
     Basılı tutma kuralı 23.09'da kaldırıldı (yarışmada saniye = puan). Klavyenin
     ATEŞ butonundan fazla yetkisi yoktur: E-Stop'ta ve atışa yasak bölgede
@@ -559,34 +559,53 @@ def test_klavye_atesi_tek_dokunus():
     def bas(tus):
         w._tus_bas(SahteTus(tus))
 
-    # TEK DOKUNUS acar, ikincisi keser
-    bas(Qt.Key_Space)
-    assert w.fire_btn.isChecked() and w.kontrol.mock.lazer is True, "Space atesi acmadi"
-    bas(Qt.Key_Space)
-    assert not w.fire_btn.isChecked() and w.kontrol.mock.lazer is False, "Space atesi kesmedi"
+    def birak(tus):
+        w._tus_birak(SahteTus(tus))
 
-    # [B] de ayni kapidan gecer
-    bas(Qt.Key_B)
+    def ikili():
+        bas(Qt.Key_Space); bas(Qt.Key_B); birak(Qt.Key_B); birak(Qt.Key_Space)
+
+    # TEK TUS bir sey yapmaz (ne Space ne B)
+    for tus in (Qt.Key_Space, Qt.Key_B):
+        bas(tus); birak(tus)
+        assert w.kontrol.mock.lazer is not True and not w.fire_btn.isChecked(), \
+            "tek tusla ates acildi"
+
+    # Space + B birlikte acar, tekrar birlikte keser (siranin onemi yok)
+    ikili()
+    assert w.fire_btn.isChecked() and w.kontrol.mock.lazer is True, "Space+B atesi acmadi"
+    bas(Qt.Key_B); bas(Qt.Key_Space)
+    assert not w.fire_btn.isChecked() and w.kontrol.mock.lazer is False, "Space+B atesi kesmedi"
+    birak(Qt.Key_Space); birak(Qt.Key_B)
+
+    # Basili tutmak tekrarlamaz: ikisi basili kalirken otomatik tekrar gelir
+    bas(Qt.Key_Space); bas(Qt.Key_B)
     assert w.kontrol.mock.lazer is True
-    # Tus BIRAKMAK atesi kesmez (ac/kapa mantigi)
-    w._tus_birak(SahteTus(Qt.Key_B))
+    w._tus_bas(SahteTus(Qt.Key_B, tekrar=True))
+    assert w.kontrol.mock.lazer is True, "basili tutmak atesi kapatti"
+    # Tuslari BIRAKMAK atesi kesmez (ac/kapa mantigi)
+    birak(Qt.Key_B); birak(Qt.Key_Space)
     assert w.kontrol.mock.lazer is True, "tus birakinca ates kendiliginden kesildi"
+    ikili()
+    assert w.kontrol.mock.lazer is False
 
-    # ESC her zaman keser
-    bas(Qt.Key_Escape)
-    assert not w.fire_btn.isChecked() and w.kontrol.mock.lazer is False
+    # Odak kaybi basili kaydini silmeli; yoksa sonra TEK B atesi acardi
+    bas(Qt.Key_Space)
+    w._ates_tus_basili.clear()                   # FocusOut'un yaptigi (eventFilter)
+    bas(Qt.Key_B); birak(Qt.Key_B)
+    assert w.kontrol.mock.lazer is False, "takili Space ile tek B atesi acti"
 
     # E-Stop: buton kilitli -> klavye de acamaz
     w.thread.estop = True
     w.fire_btn.setEnabled(False)
-    bas(Qt.Key_Space)
+    ikili()
     assert w.kontrol.mock.lazer is False, "E-Stop'ta klavyeden ates acildi"
 
     # Atisa yasak bolge de reddedilir (ates kapisi ortak)
     w.thread.estop = False
     w.fire_btn.setEnabled(True)
     w.bolge.atis_pan = B.Pencere(True, 40.0, 60.0)   # pan 0 -> pencere DISI (yasak)
-    bas(Qt.Key_Space)
+    ikili()
     assert w.kontrol.mock.lazer is False, "yasak bolgede klavyeden ates acildi"
 
     # [L] ates tusu DEGILDIR (gecmiste oyleydi; kaldirildi)
@@ -714,14 +733,17 @@ def test_gamepad_ayni_kapilardan_gecer():
     assert w.kontrol.mock.lazer is False, "yasak bölgede gamepad ile ateş açıldı"
     w.bolge.atis_pan.aktif = False
 
-    # --- MERKEZ: L1/R1 -> dogrudan merkeze al (kademeli hareketle)
+    # --- MERKEZ: L1 + R1 BIRLIKTE -> merkeze al (kademeli); tek omuz tusu bos (24.09)
     w.bolge.atis_pan.aktif = False
     w._aci_hareket(5.0, 5.0)
     w.gamepad = SahteGamepad(basili=("r1",))
     w._gamepad_tik()
-    assert w._merkez_timer.isActive(), "R1 merkeze almayı başlatmadı"
+    assert not w._merkez_timer.isActive(), "tek R1 merkeze almaya basladi"
+    w.gamepad = SahteGamepad(basili=("l1", "r1"))
+    w._gamepad_tik()
+    assert w._merkez_timer.isActive(), "L1+R1 merkeze almayı başlatmadı"
     _merkeze_yurut(w)
-    assert abs(w.pan_aci) < 0.1 and abs(w.tilt_aci) < 0.1, "R1 merkeze almadı"
+    assert abs(w.pan_aci) < 0.1 and abs(w.tilt_aci) < 0.1, "L1+R1 merkeze almadı"
 
     # --- Cihaz koparsa arayüz kilitlenmemeli (istisna sızmamalı)
     w.gamepad = SahteGamepad(kopuk=True)
@@ -975,6 +997,32 @@ def test_odunc_kapilar_gercek_pencerede_de_metot():
     assert not bozuk, f"gercek pencerede metot OLMAYAN kapilar: {bozuk}"
 
 
+def test_kontroller_listesi_gercek_tuslarla_ayni():
+    """Arayüzdeki "Kontroller" paneli (kontroller.py) ile arayüzün GERÇEKTEN dinlediği
+    klavye tuşları aynı olmalı. Bir tuş eklenir/değişir de liste unutulursa operatör
+    yanlış tuşu öğrenir — bu test o unutkanlığı kırmızıya düşürür (24.09)."""
+    import kontroller as K
+    Qt = A.Qt
+    dinlenen = set(A.TUS_YON) | set(A.MainWindow.ATES_TUSLARI) | {A.ESTOP_TUSU}
+    yazili = K.klavye_tuslari()
+    assert dinlenen == yazili, (
+        f"kontroller.py ile arayuz ayrisiyor — listede eksik: {dinlenen - yazili}, "
+        f"listede fazla: {yazili - dinlenen}")
+
+    # Her tuş gerçekten arayüzün kapısında karşılık buluyor (Manuel modda).
+    w = SahtePencere()
+    w.thread = A.VideoThread(None, None, None)
+    estop = []                                   # gercek E-Stop kapi_testleri.py'de denenir
+    w._estop_kisayolu = lambda: estop.append(1)
+    for tus in yazili:
+        assert w._tus_bas(SahteTus(tus)), f"listede var ama arayuz dinlemiyor: {tus}"
+        w._tus_birak(SahteTus(tus))
+    assert estop, "listedeki Esc acil durdurmayi cagirmadi"
+    assert A.ESTOP_TUSU == Qt.Key_Escape and Qt.Key_Backspace not in yazili
+    # Backspace artik BOS: arayuz onu yutmamali (sayi kutularinda silme icin lazim)
+    assert not w._tus_bas(SahteTus(Qt.Key_Backspace)), "Backspace hala arayuzun tusu"
+
+
 if __name__ == "__main__":
     test_ekran_aci_kart_hedefi_ayni()
     test_azimut_sarmasiz_gider()
@@ -1006,6 +1054,7 @@ if __name__ == "__main__":
     test_dikey_atis_penceresi_ates_keser()
     test_lazer_gucu_onaysiz_degismez()
     test_odunc_kapilar_gercek_pencerede_de_metot()
+    test_kontroller_listesi_gercek_tuslarla_ayni()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "

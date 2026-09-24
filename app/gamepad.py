@@ -4,9 +4,10 @@
 Sartname Yetenek 1 kullanici komut arayuzlerini "UI/joystick/klavye" diye sayar; joystick
 video icin dogrudan puandir (CLAUDE.md §2).
 
-DUZEN (takim karari 22.09): SOL cubuk = yatay, SAG cubuk = dikey, D-pad = iki
-eksen · L2+R2 birlikte = ATES ac (tekrar basinca kes) · L1/R1 = merkeze
-al (kademeli) · Options VEYA Daire (Xbox: B) = ACIL DURDUR. Tek tusla ates YOKTUR.
+DUZEN (24.09): SOL cubuk = yatay + dikey (iki eksen), SAG cubuk = BOS (hicbir sey
+yapmaz), D-pad = iki eksen · L2+R2 birlikte = ATES ac (tekrar basinca kes) · L1+R1
+birlikte = merkeze al (kademeli; 24.09'dan beri tek basina degil) · Options/Start =
+ACIL DURDUR (24.09'dan beri Daire/B DEGIL). Tek tusla ates YOKTUR.
 ACIL DURDUR koldan yalniz KURULUR, asla KALDIRILMAZ (24.09): eskiden Options ikinci
 basista DEVAM ediyordu — yanlislikla iki kez basmak acil durdurmayi kaldiriyordu.
 Devam yalniz arayuzdeki "DEVAM ET" butonuyla, bilincli bir eylemle olur.
@@ -62,19 +63,18 @@ OLU_BOLGE = 0.15
 if PYGAME_VAR:
     # Takim karari 22.09: ATES iki omuz TETIGI birden (L2+R2) — tek tusla ates
     # istemiyoruz, klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
-    CB_MERKEZ = (pygame.CONTROLLER_BUTTON_LEFTSHOULDER,     # L1 / R1: merkeze al
+    CB_MERKEZ = (pygame.CONTROLLER_BUTTON_LEFTSHOULDER,     # L1 + R1 birlikte: merkeze al
                  pygame.CONTROLLER_BUTTON_RIGHTSHOULDER)
-    CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # Options: ACIL DURDUR
-    # Daire (PS) / B (Xbox): ikinci, BUYUK acil durdur tusu — panikte Options'i aramak
-    # gerekmesin. Standart haritada her padde ayni fiziksel tus (sag yuzdeki "dogu" tus).
-    CB_ESTOP_2 = pygame.CONTROLLER_BUTTON_B
+    # ACIL DURDUR yalniz Options/Start (24.09). Daire/B eskiden ikinci E-Stop tusuydu;
+    # yuz tuslarinin yaninda kazara basiliyordu, kaldirildi.
+    CB_ESTOP = pygame.CONTROLLER_BUTTON_START
     CB_TETIK = (pygame.CONTROLLER_AXIS_TRIGGERLEFT,     # L2 / R2 (analog)
                 pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
-    # Takim karari 22.09: SOL cubuk yalniz YATAY (pan), SAG cubuk yalniz DIKEY (tilt).
-    # Tek cubukta capraz surmek iki ekseni ayni anda kaydiriyor ve hassas nisan
-    # zorlasiyordu; eksenleri iki ele bolmek her ekseni bagimsiz kontrol ettirir.
+    # 24.09: iki eksen de SOL cubukta (X = yatay, Y = dikey); SAG cubuk BOS. 22.09'daki
+    # "sol = yatay, sag = dikey" bolmesi kaldirildi — operator tek elle nisan istedi.
+    # Sag cubuga bir is baglanacaksa kontroller.py'deki tabloyu da guncelle.
     CB_EKSEN_PAN = pygame.CONTROLLER_AXIS_LEFTX
-    CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_RIGHTY
+    CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_LEFTY
     # GameController'da D-pad ayri bir "hat" degil, dort dugmedir.
     CB_DPAD = ((pygame.CONTROLLER_BUTTON_DPAD_UP, 0.0, 1.0, "up"),
                (pygame.CONTROLLER_BUTTON_DPAD_DOWN, 0.0, -1.0, "down"),
@@ -92,15 +92,13 @@ TETIK_ESIK = 0.5
 BTN_L1, BTN_R1 = 4, 5     # omuz dugmeleri
 BTN_L2, BTN_R2 = 6, 7     # DualSense'te tetikler dugme olarak da gorunur
 BTN_ESTOP = 9             # Options/Start (ham duzende cogu padde 9)
-# ⚠ Daire/B ham duzende EKLENMEZ: numarasi padden pade degisir (XInput'ta 1, DualSense
-#   DirectInput'ta 2 = Daire, 1 = Capraz). Yanlis numara, acil durdurmayi baska tusa baglar.
 EKSEN_L2, EKSEN_R2 = 4, 5       # tetikler eksen olarak gelirse
 
-# Analog cubuklar (ham yol): SOL X = pan, SAG Y = tilt. Y ekseni SDL'de yukari =
-# NEGATIF; tilt'te yukari = ARTI oldugu icin isaret cevrilir (yoksa cubugu yukari
-# itince namlu asagi inerdi).
+# Analog cubuk (ham yol): SOL X = pan, SOL Y = tilt; sag cubuk okunmaz. Y ekseni
+# SDL'de yukari = NEGATIF; tilt'te yukari = ARTI oldugu icin isaret cevrilir (yoksa
+# cubugu yukari itince namlu asagi inerdi).
 EKSEN_PAN = 0             # sol cubuk X
-EKSEN_TILT = 3            # sag cubuk Y (XInput/DirectInput duzeninde 3)
+EKSEN_TILT = 1            # sol cubuk Y (XInput/DirectInput duzeninde 1)
 
 
 def _olu_bolge(v):
@@ -139,13 +137,14 @@ class Durum:
 
     @property
     def estop(self):
-        """Options ya da Daire/B BU yoklamada basildi mi (ACIL DURDUR — yalniz kurar)."""
-        return bool({"start", "daire"} & self.kenar)
+        """Options/Start BU yoklamada basildi mi (ACIL DURDUR — yalniz kurar)."""
+        return "start" in self.kenar
 
     @property
     def merkez(self):
-        """L1/R1 BU yoklamada basildi mi (kurma sayacini baslatmak icin)."""
-        return bool({"l1", "r1"} & self.kenar)
+        """L1 VE R1 BU yoklamada birlikte basili hale geldi mi (merkeze al). Tek omuz
+        tusu bir sey yapmaz: kazara dokunus gimbal'i merkeze kosturmasin (24.09)."""
+        return {"l1", "r1"} <= self.basili and bool({"l1", "r1"} & self.kenar)
 
     @property
     def ates_basili(self):
@@ -276,8 +275,7 @@ class Gamepad:
             else:
                 self._koy(d, ad, False)
 
-        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP),
-                        ("daire", CB_ESTOP_2)):
+        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP)):
             self._koy(d, ad, bool(c.get_button(btn)))
         for ad, eksen in (("l2", CB_TETIK[0]), ("r2", CB_TETIK[1])):
             self._koy(d, ad, c.get_axis(eksen) / CB_EKSEN_OLCEK > TETIK_ESIK)
@@ -341,14 +339,45 @@ if __name__ == "__main__":
     d.kenar = set()
     assert d.ates_basili and not d.ates_kenar, "basili tutmak tekrar tetikledi"
     d.basili, d.kenar = {"l1"}, {"l1"}
+    assert not d.merkez, "tek omuz tusu merkeze aldi (L1+R1 birlikte olmali)"
+    d.basili, d.kenar = {"l1", "r1"}, {"r1"}
     assert d.merkez and not d.estop
+    d.kenar = set()
+    assert not d.merkez, "basili tutmak merkeze almayi tekrar tetikledi"
+    d.basili, d.kenar = {"daire"}, {"daire"}
+    assert not d.estop, "Daire hala acil durduruyor (yalniz Options/Start olmali)"
     d.basili, d.kenar = {"start"}, {"start"}
     assert d.estop and not d.merkez
-    d.basili, d.kenar = {"daire"}, {"daire"}
-    assert d.estop, "Daire/B acil durdurmadi"
     d.kenar = set()
     assert not d.estop, "basili tutmak acil durdurmayi tekrar tetikledi"
-    print("olu bolge testleri OK")
+    # Cubuk duzeni (24.09): SOL cubuk iki ekseni surer, SAG cubuk hicbir sey yapmaz.
+    # Sahte GameController ile gercek okuma yolu denenir (cihaz gerekmez).
+    if PYGAME_VAR:
+        class _SahteCtrl:
+            def __init__(self, eksenler):
+                self.eksenler = eksenler
+
+            def get_axis(self, no):
+                return self.eksenler.get(no, 0)
+
+            def get_button(self, no):
+                return False
+
+        def _cubuk(eksenler):
+            g.ctrl, g._onceki = _SahteCtrl(eksenler), {}
+            d = Durum()
+            g._oku_controller(d)
+            return d
+
+        tam = int(CB_EKSEN_OLCEK)
+        d = _cubuk({pygame.CONTROLLER_AXIS_LEFTY: -tam})     # sol cubuk YUKARI
+        assert d.tilt == 1.0 and d.pan == 0.0, "sol cubuk Y dikeyi surmuyor"
+        d = _cubuk({pygame.CONTROLLER_AXIS_LEFTX: tam})
+        assert d.pan == 1.0 and d.tilt == 0.0, "sol cubuk X yatayi surmuyor"
+        d = _cubuk({pygame.CONTROLLER_AXIS_RIGHTX: tam, pygame.CONTROLLER_AXIS_RIGHTY: -tam})
+        assert not d.hareket_var, "sag cubuk hala hareket veriyor (bos olmali)"
+        g.ctrl = None
+    print("olu bolge + cubuk duzeni testleri OK")
 
     if not g.bagli:
         print(f"Gamepad yok ({g.hata}) — uygulama yine de calisir, klavye/D-pad aktif.")
@@ -364,8 +393,8 @@ if __name__ == "__main__":
               f"  hat: {g.js.get_numhats()}")
         print("       Yanlis tusa dusuyorsa gamepad.py'deki BTN_* numaralarini asagidaki")
         print("       'basili' ciktisina bakarak duzeltin.")
-    print("\nDuzen: sol cubuk=yatay, sag cubuk=dikey, D-pad=yon · L2+R2 (2 sn)=ates"
-          " · L1/R1=merkez · Options veya Daire/B=ACIL DURDUR (yalniz kurar)")
+    print("\nDuzen: sol cubuk=yatay+dikey, sag cubuk=bos, D-pad=yon · L2+R2=ates"
+          " · L1+R1=merkez · Options/Start=ACIL DURDUR (yalniz kurar)")
     print("Cubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
     try:
         while True:
