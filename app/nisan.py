@@ -131,7 +131,7 @@ class PDNisanci:
         return float(algi.AYAR.get("olu_bolge_kutu",
                                    algi.VARSAYILAN_AYAR["olu_bolge_kutu"]))
 
-    def _olu_bolge_px(self, hedef_yukseklik, w, h):
+    def _olu_bolge_px(self, hedef_yukseklik, w, h, olu_orani=None):
         """Olu bolgeyi PIKSEL olarak verir: (yatay_yaricap, dikey_yaricap).
 
         Hedef kutusunun yuksekligi biliniyorsa olcut KUTUYA oranlidir — sartname
@@ -145,7 +145,8 @@ class PDNisanci:
         birkac piksel oynuyor, onun altini kovalamak anlamsiz.
         """
         if hedef_yukseklik and hedef_yukseklik > 0:
-            r = max(TABAN_OLU_BOLGE_PX, hedef_yukseklik * self.olu_bolge_kutu)
+            oran = self.olu_bolge_kutu if olu_orani is None else float(olu_orani)
+            r = max(TABAN_OLU_BOLGE_PX, hedef_yukseklik * oran)
             return r, r
         return w * self.olu_bolge, h * self.olu_bolge
 
@@ -159,7 +160,7 @@ class PDNisanci:
     def ofset_y(self):
         return float(algi.AYAR.get("lazer_ofset_y", 0.0))
 
-    def adim(self, hedef_xy, kare_boyut, simdi=None, hedef_yukseklik=None):
+    def adim(self, hedef_xy, kare_boyut, simdi=None, hedef_yukseklik=None, olu_orani=None):
         """Bir kontrol adimi.
 
         hedef_xy        : nisan noktasi (x, y) piksel
@@ -167,6 +168,8 @@ class PDNisanci:
         hedef_yukseklik : hedef kutusunun yuksekligi (piksel). Verilirse olu bolge
                           KUTUYA oranli olur (bkz. _olu_bolge_px); verilmezse
                           kareye oranli eski davranis surer.
+        olu_orani       : kutu BALONUN kendisiyse (balon_takip) olu bolge = yukseklik x
+                          bu oran; arac kutusuna gore ayarli olu_bolge_kutu kullanilmaz.
         Doner (d_yaw, d_pitch) derece; (None, None) = komut gonderme.
         """
         if hedef_xy is None or kare_boyut is None:
@@ -184,7 +187,7 @@ class PDNisanci:
         px = hx - w * 0.5 - self.ofset_x * w   # +x = hedef sagda
         py = hy - h * 0.5 - self.ofset_y * h   # +y = hedef asagida
 
-        olu_x, olu_y = self._olu_bolge_px(hedef_yukseklik, w, h)
+        olu_x, olu_y = self._olu_bolge_px(hedef_yukseklik, w, h, olu_orani)
         self.son_hata_px = (px, py)      # teshis (bkz. __init__)
         self.son_olu_px = (olu_x, olu_y)
         if abs(px) <= olu_x and abs(py) <= olu_y:
@@ -344,6 +347,17 @@ if __name__ == "__main__":
     # 6d. Cok kucuk kutuda taban devreye girer (sonsuz arayis olmasin).
     kucucuk, _ = n2._olu_bolge_px(5.0, 1920, 1080)
     assert kucucuk == TABAN_OLU_BOLGE_PX
+
+    # 6d'. Kutu BALONUN KENDISIYSE (balon_takip) olu bolge kendi oraniyla: 40 px balonda
+    #      0.25 -> 10 px (yaricapin yarisi); arac orani (0.12) 4.8 px'e daraltirdi.
+    balon_r, _ = n2._olu_bolge_px(40.0, 1920, 1080, olu_orani=0.25)
+    assert balon_r == 10.0, balon_r
+    n2.sifirla()
+    assert n2.adim((1920 * 0.5 + 8.0, 1080 * 0.5), (1920, 1080), simdi=1.0,
+                   hedef_yukseklik=40.0, olu_orani=0.25) == (None, None)
+    n2.sifirla()
+    assert n2.adim((1920 * 0.5 + 8.0, 1080 * 0.5), (1920, 1080), simdi=1.0,
+                   hedef_yukseklik=40.0)[0] is not None, "kurulum: arac oraninda 8 px disarida"
 
     # 6e. Uctan uca: ayni piksel hatasi, YAKIN hedefte "yerlesti" sayilirken
     #     UZAK hedefte sayilmamali (daha hassas nisan istenir).

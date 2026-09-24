@@ -51,6 +51,17 @@ python keyboard_control.py --port COM3
 Tek port varsa `python keyboard_control.py` veya `BASLAT.cmd` yeterlidir.
 V3 arayüz ve v3 firmware birlikte kullanılmalı; eski STATE protokolü reddedilir.
 
+### Karta yükleme (arduino-cli)
+
+⚠ **Yüklemeden ÖNCE iki ekseni 0'a götür** (`E`, `P0`, `G0`, bekle): yükleme kartı resetler,
+sayaçlar 0 olur. **`EraseFlash=none` şart** — yoksa NVS'deki kalibrasyon silinir.
+Önce `run_cpp_tests.cmd` geçmeli.
+
+```text
+"C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" compile --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,USBMode=hwcdc" --output-dir "%TEMP%\ws_build" esp32_ws_test
+"C:\Program Files\Arduino IDE\resources\app\lib\backend\resources\arduino-cli.exe" upload -p COM3 --fqbn "esp32:esp32:esp32s3:CDCOnBoot=cdc,USBMode=hwcdc,EraseFlash=none" --input-dir "%TEMP%\ws_build" esp32_ws_test
+```
+
 ## İlk kalibrasyon
 
 1. Kol altta, darbe sayacı 0 iken “Kontrolü aç”, ardından “0 konumunda kalibrasyona başla”.

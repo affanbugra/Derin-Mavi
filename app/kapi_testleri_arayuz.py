@@ -166,6 +166,13 @@ class SahtePencere:
     _pan_goster = A.MainWindow._pan_goster         # azimut etiketi + ust gorunus ikonu tek kapi
     _tekrar_tik = A.MainWindow._tekrar_tik
     _tekrar_durdur = A.MainWindow._tekrar_durdur
+    _manuel_komut = A.MainWindow._manuel_komut     # basili tutma / cubuk: yorunge + fren
+    _manuel_fren = A.MainWindow._manuel_fren
+    _yorunge_var = A.MainWindow._yorunge_var
+    _fren_yolu = A.MainWindow._fren_yolu
+    _fren_tik = A.MainWindow._fren_tik
+    _fren_durdur = A.MainWindow._fren_durdur
+    FREN_S = A.MainWindow.FREN_S
     YON_TABLO = A.MainWindow.YON_TABLO
     _lazer_bilgi_yaz = A.MainWindow._lazer_bilgi_yaz
     _lazer_guc_degisti = A.MainWindow._lazer_guc_degisti
@@ -197,6 +204,9 @@ class SahtePencere:
         self._son_tekrar_t = 0.0
         self._tekrar_gecikme = SahteTimer()
         self._tekrar_timer = SahteTimer()
+        self._manuel_hiz, self._manuel_hiz_t, self._manuel_kaynak = None, 0.0, None
+        self._fren_hiz, self._fren_bitis = None, 0.0
+        self._fren_timer = SahteTimer()
         self._gp_ates_basili = False
         self._merkez_calisiyor = False
         self._merkez_son_t = time.time()

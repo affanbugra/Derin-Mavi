@@ -87,6 +87,10 @@ BAUD = 115200
 NOKTA_MAKS = 16                     # MotionCore::CAPACITY
 ZAMAN_ASIMI_MS = 350                # MotionCore::TIMEOUT_MS — bu sure sessizlikte kart kilitlenir
 CANLILIK_MS = 120                   # biz bu sikligda "H" yolluyoruz (asiminin ~1/3'u)
+YOKLAMA_MS = 40                     # arayuzun yokla() periyodu: H gercekten ~120 ms'de bir gitsin
+# (24.09 saha: periyot 100 ms iken H fiilen 200 ms'de bir gidiyordu -> 350 ms asimina yalniz
+# ~150 ms pay kaliyordu; acilistaki model yuklemesi arayuzu takinca kol yarida kilitlendi.)
+R_BEKLEME_S = 1.0                   # R'nin yaniti bu surede gelmezse eski duruma yeniden guvenilir
 JOG_HIZLAR = (100, 400, 800)
 
 # ---- HEDEF HAREKETI HIZ PROFILI (firmware "Z<hiz>,<ivme>" komutu) ----
@@ -322,6 +326,33 @@ CANLI = "H\n"       # heartbeat
 SORGU = "Q\n"       # yetenek sorgusu: OK,Q = hareket halinde durmadan yeniden planlar
 YORUNGE_SORGU = "YQ\n"   # yetenek sorgusu: OK,YQ = yorunge kipi (Y/PY) var
 YORUNGE_HIZ_SINIRI = 300.0  # derece/sn — firmware 400'u reddeder
+# LAZER + ACIL DURDURMA (24.09, tek kart: lazer GPIO 18, buton GPIO 15). Kurallar
+# firmware'de (esp32_ws_test.ino): L1 1 sn tazelenmezse kart lazeri kendi keser; kontrol
+# kapaninca (nabiz kaybi / D) lazer soner; STOP karti kilitler (hareket + L1 reddedilir),
+# kilidi PC'nin otomatik "E"si degil yalniz START kaldirir; buton basiliyken START ret.
+LAZER_AC = "L1\n"       # ac / tazele (arayuz 250 ms'de bir)
+LAZER_KES = "L0\n"      # kes — her porttan, her durumda kabul edilir
+ACIL_DUR = "STOP\n"
+ACIL_DEVAM = "START\n"
+LAZER_DURUM_ASIMI_S = 0.6     # LZR1 bu kadar gelmezse kartin lazer bilgisi bayat
+
+
+def lazer_guc(yuzde):
+    return f"LP{max(0, min(100, int(round(yuzde))))}\n"
+
+
+def lazer_durum_coz(satir):
+    """LZR1,<acik>,<guc>,<acil>,<buton>,<pwm> -> sozluk; bozuksa None."""
+    parts = satir.split(',')
+    if len(parts) != 6 or parts[0] != 'LZR1':
+        return None
+    try:
+        acik, guc, acil, buton, pwm = (int(p) for p in parts[1:])
+    except ValueError:
+        return None
+    if not 0 <= guc <= 100 or any(v not in (0, 1) for v in (acik, acil, buton, pwm)):
+        return None
+    return dict(acik=bool(acik), guc=guc, acil=bool(acil), buton=bool(buton), pwm=bool(pwm))
 
 
 def yorunge(derece, hiz):
@@ -416,6 +447,9 @@ HATALAR = {
     'OTHER_PORT_ACTIVE': 'Tilt kartı başka bir uygulamada açık (keyboard_control.py?). Onu kapat.',
     'PULSE_RANGE': 'Tilt darbe sayacı aralık dışına çıktı.',
     'UNKNOWN_COMMAND': 'Tilt kartı komutu tanımadı (firmware sürümü eski olabilir).',
+    'ESTOP': 'Kart ACİL DURDURMADA — hareket ve ateş reddedildi (DEVAM ET gerekir).',
+    'LASER_PWM': 'Kart lazer PWM\'ini kuramadı (GPIO 18) — lazer ÇALIŞMAZ.',
+    'BAD_POWER': 'Lazer gücü %0–100 arasında olmalı.',
 }
 
 
@@ -464,6 +498,14 @@ class MockTiltKart:
         self.son_canli = simdi if simdi is not None else time.time()
         self.t = self.son_canli
         self.kayit = []             # gonderilen komutlar (test icin)
+        # Lazer + acil (yeni firmware). lazer_destek=False eski firmware'i taklit eder.
+        self.lazer_destek = True
+        self.lazer_acik = False
+        self.lazer_guc = 40
+        self.son_ates = self.t
+        self.acil = False
+        self.buton = False
+        self.metin = []             # kartin kendiliginden yazdigi satirlar (ilerlet'te cikar)
 
     # --- kalibrasyon tablosu (dogrusal varsayim; mock icin yeterli) ---
     def _aci(self, darbe):
@@ -478,6 +520,10 @@ class MockTiltKart:
         s = satir.strip()
         self.kayit.append(s)
         self._watchdog(simdi)
+        if self.lazer_destek:
+            cevap = self._lazer_islet(s, simdi)
+            if cevap is not False:
+                return cevap
         if s == "YQ":
             return "OK,YQ" if self.yorunge_destek else "ERR,YQ,UNKNOWN_COMMAND"
         if s.startswith("Y") and self.yorunge_destek:
@@ -586,6 +632,73 @@ class MockTiltKart:
             return f"OK,{s}"
         return f"ERR,{s},UNKNOWN_COMMAND"
 
+    @staticmethod
+    def _hareket_komutu(s):
+        """Firmware hareketKomutu() ile ayni: acil kilitte reddedilenler."""
+        if s in ("W", "S", "K") or s[:1] in ("G", "C"):
+            return True
+        if s.startswith("Y"):
+            return s != "YQ"
+        return s.startswith("P") and len(s) > 1 and (s[1] in "Y-+." or s[1].isdigit())
+
+    def _lazer_islet(self, s, simdi):
+        """Lazer/acil komutlari. Doner: yanit (None = sessiz) ya da False (bizim degil)."""
+        if s == "STOP":
+            self._acil_durdur("(seri STOP)")
+            return None
+        if s == "START":
+            if self.buton:
+                self.metin.append("START REDDEDILDI - ACIL STOP BUTONU BASILI (SISTEM DURDURULDU)")
+            else:
+                self.acil = False
+                self.metin.append("SISTEM BASLATILDI")
+            return None
+        if s == "L0":
+            self.lazer_acik = False
+            return "OK,L0"
+        if s == "L1":
+            if self.acil:
+                return "ERR,L1,ESTOP"
+            if not self.acik:
+                return "ERR,L1,DISARMED"
+            ilk = not self.lazer_acik
+            self.lazer_acik, self.son_ates = True, simdi
+            return "OK,L1" if ilk else None
+        if s.startswith("LP"):
+            try:
+                y = int(s[2:])
+            except ValueError:
+                return f"ERR,{s},BAD_POWER"
+            if not 0 <= y <= 100:
+                return f"ERR,{s},BAD_POWER"
+            self.lazer_guc = y
+            return f"OK,{s}"
+        if self.acil and self._hareket_komutu(s):
+            return f"ERR,{s},ESTOP"
+        return False
+
+    def _acil_durdur(self, sebep):
+        self.lazer_acik = False
+        self.hedef, self.bekleyen = self.pos, None
+        self.pan_hedef = self.pan_pos
+        self.yor_tilt = self.yor_pan = None
+        self.acil = True
+        self.metin.append(f"SISTEM DURDURULDU {sebep}")
+
+    def buton_bas(self, basili):
+        """Donanim acil stop butonu (test icin). Firmware: basinca kilit; birakinca
+        kendiliginden KALKMAZ."""
+        if basili and not self.buton:
+            self.buton = True
+            self._acil_durdur("(ACIL STOP BUTONU)")
+        elif not basili and self.buton:
+            self.buton = False
+            self.metin.append("ACIL STOP BUTONU BIRAKILDI - devam icin START")
+
+    def lzr1(self):
+        return (f"LZR1,{int(self.lazer_acik)},{self.lazer_guc},{int(self.acil)},"
+                f"{int(self.buton)},1")
+
     def _pan_islet(self, s):
         """esp32_ws_test.ino:panCommand ile ayni kurallar."""
         if s == "PR":
@@ -630,6 +743,11 @@ class MockTiltKart:
             self.pan_hedef = self.pan_pos
             self.acik = False
             self.yor_tilt = self.yor_pan = None
+        if not self.acik:
+            self.lazer_acik = False                 # kilitli kart ates etmez
+        if self.lazer_acik and (simdi - self.son_ates) * 1000.0 > 1000.0:
+            self.lazer_acik = False                 # olu adam anahtari (1 sn)
+            self.metin.append("LAZER KESILDI - tazeleme durdu (olu adam anahtari)")
 
     @staticmethod
     def _yor_adim(yor, pos, t, azami, alt, ust):
@@ -676,6 +794,10 @@ class MockTiltKart:
             satirlar.append(self.state3())
             if self.pan_destek:
                 satirlar.append(self.pan1())
+            if self.lazer_destek:
+                satirlar.extend(self.metin)
+                self.metin.clear()
+                satirlar.append(self.lzr1())
         return satirlar
 
     def state3(self):
@@ -723,6 +845,8 @@ class TiltSurucu:
         self._son_canli_t = 0.0
         self._ac_denendi_t = 0.0
         self._son_pos = 0
+        self._r_t = None                # R gitti, R SONRASI ilk STATE3 henuz gelmedi
+        self._r_ok = False              # R'nin OK/ERR yaniti geldi mi
         self.hiz_seviye = HIZ_VARSAYILAN
         self._aci_gecmisi = []          # [(zaman, aci), ...] — her STATE3'te bir kayit
         self._gonderilen_hiz = None     # karta en son giden (hiz, ivme) — None = gonderilmedi
@@ -752,6 +876,11 @@ class TiltSurucu:
         self.yorunge_destekli = None
         self._yq_soruldu = False
         self._yor_kayit_sayac = 0
+        # LAZER (yeni firmware LZR1 yayinlar). Eski firmware'de hep None -> lazer yok.
+        self.lazer_durum = None
+        self.lazer_son_t = 0.0
+        self.lazer_guc_istek = 40
+        self._lazer_guc_gonderim_t = 0.0
 
         if self.kaynak.lower() == "off":
             return
@@ -861,8 +990,18 @@ class TiltSurucu:
 
     @property
     def hazir(self):
-        """Hareket komutu KABUL EDILIR mi? (bagli + taze durum + acik + kalibre)"""
-        return bool(self.bagli and self.taze and self.durum["acik"] and self.durum["kalibre"])
+        """Hareket komutu KABUL EDILIR mi? (bagli + taze durum + acik + kalibre)
+        R'den sonra, R SONRASI ilk STATE3 gelene kadar hazir DEGIL (bkz. sifirla)."""
+        return bool(self.bagli and self.taze and self.durum["acik"] and self.durum["kalibre"]
+                    and not self._r_bekleniyor())
+
+    def _r_bekleniyor(self):
+        if self._r_t is None:
+            return False
+        if self._saat() - self._r_t > R_BEKLEME_S:      # yanit hic gelmedi: kilitte kalma
+            self._r_t = None
+            return False
+        return True
 
     @property
     def aci(self):
@@ -1002,6 +1141,15 @@ class TiltSurucu:
         """t: satirin karttan GELDIGI tahmini an (verilmezse simdi)."""
         if t is None:
             t = self._saat()
+        if s.startswith("LZR1,"):
+            lz = lazer_durum_coz(s)
+            if lz is not None:
+                if self.lazer_durum is None or lz["acil"] != self.lazer_durum["acil"] \
+                        or lz["buton"] != self.lazer_durum["buton"]:
+                    self._kara_kutu_yaz("<<", s)
+                self.lazer_durum = lz
+                self.lazer_son_t = self._saat()
+            return
         if s.startswith("PAN1,"):
             p = pan_durum_coz(s)
             if p is not None:
@@ -1028,6 +1176,16 @@ class TiltSurucu:
                 self._kara_kutu_yaz("<<", s)
         else:
             self._kara_kutu_yaz("<<", s)
+        if self._r_t is not None:
+            if s == "OK,R" or s.startswith("ERR,R,"):
+                self._r_ok = True
+            elif s.startswith("STATE3,"):
+                if not self._r_ok:
+                    # R'den ONCE yazilmis durum (tamponda bekliyordu): ESKI sayac. Alinsaydi
+                    # hedef "zaten orada" diye atilir, sonraki 0 sayac da kart reseti sanilirdi.
+                    self.son_durum_t = t
+                    return
+                self._r_t = None
         d = durum_coz(s)
         if d is not None:
             # ⚠ KART RESET ATTI MI? Firmware her acilista darbe sayacini 0 kabul eder
@@ -1042,6 +1200,7 @@ class TiltSurucu:
             if d["pos"] == 0 and not d["acik"] and self._son_pos > 20:
                 self.kart_resetlendi = True
                 self._bekleyen_hedef = None     # eski hedef artik anlamsiz referansta
+                self._gonderilen_hedef = None   # ... kilit acilinca yeniden de gonderilmemeli
                 # Kart acilis degerlerine dondu: hiz profili yeniden bildirilmeli,
                 # yoksa kol sessizce firmware varsayilaninda kalir.
                 self._gonderilen_hiz = None
@@ -1153,6 +1312,13 @@ class TiltSurucu:
         if self.taze and not self.durum["acik"] and (simdi - self._ac_denendi_t) > 0.3:
             self._ac_denendi_t = simdi
             self._yaz(AC)
+            # Canlilik asimi hareketi YARIDA keser (kart hedefi o anki konuma ceker); arayuz
+            # hedefi gonderdi sanir, bir daha gondermez. 24.09 saha: acilis yukselisi 30
+            # yerine ~10 derecede kaldi. Son konum hedefi yeniden kuyruga (yorunge, dur() ve
+            # kart reseti onu zaten siler; kol oradaysa _bosalt gondermez).
+            if self._bekleyen_hedef is None and self._gonderilen_hedef is not None:
+                self._bekleyen_hedef = self._gonderilen_hedef
+                self._gonderilen_hedef = None
         if self.hazir and not self._yq_soruldu:
             self._yq_soruldu = True
             self._yaz(YORUNGE_SORGU)
@@ -1165,6 +1331,7 @@ class TiltSurucu:
         self._bosalt()
         self._pan_hiz_bosalt()
         self._pan_bosalt()
+        self._lazer_guc_bosalt()
         self._oku()
         self._kara_kutu_sessizlik()
         return self.ozet()
@@ -1241,6 +1408,11 @@ class TiltSurucu:
         self._gonderilen_hedef = None
         # Sayac 0'a donecek; bu bir KART RESETI degildir, reset dedektoru susturulur.
         self._son_pos = 0
+        # R SONRASI ilk STATE3'e kadar eldeki durum ESKIDIR (24.09 saha: kart 30 derecede
+        # kalmisti; R'nin ardindan G30 eski "30" durumuna bakip "zaten orada" diye atildi,
+        # kol hic kalkmadi). O zamana kadar hazir=False, hedef bekler.
+        self._r_t = self._saat()
+        self._r_ok = False
         return self._yaz("R\n")
 
     # ---- PAN (ayni kart) ----
@@ -1324,10 +1496,55 @@ class TiltSurucu:
         self._son_pan_pos = 0          # bu bir kart reseti degil
         return self._yaz("PR\n")
 
+    # ---- LAZER + ACIL (tek kart) ----
+    @property
+    def lazer_destekli(self):
+        """Kart lazer suruyor mu? (yeni firmware LZR1 yayini TAZE + PWM kurulmus)"""
+        return bool(self.bagli and self.lazer_durum is not None and self.lazer_durum["pwm"]
+                    and (self._saat() - self.lazer_son_t) <= LAZER_DURUM_ASIMI_S)
+
+    @property
+    def lazer_bilinen(self):
+        """Kart bu oturumda en az bir kez LZR1 yolladi mi (kesme komutu ona da gitsin)?"""
+        return self.bagli and self.lazer_durum is not None
+
+    def lazer(self, ac):
+        """L1 (ac / TAZELE) ya da L0 (kes). Kart kurallari firmware'dedir."""
+        if not self.bagli:
+            return False
+        return self._yaz(LAZER_AC if ac else LAZER_KES)
+
+    def lazer_guc_ayarla(self, yuzde):
+        """Istenen gucu saklar; kart LZR1'de farkli guc bildirdikce yeniden yollanir
+        (kart resetlenirse de kendiliginden duzelir)."""
+        self.lazer_guc_istek = max(0, min(100, int(round(yuzde))))
+        self._lazer_guc_gonderim_t = 0.0
+        self._lazer_guc_bosalt()
+
+    def _lazer_guc_bosalt(self):
+        if not self.lazer_destekli or self.lazer_durum["guc"] == self.lazer_guc_istek:
+            return
+        simdi = self._saat()
+        if simdi - self._lazer_guc_gonderim_t < 0.5:
+            return
+        self._lazer_guc_gonderim_t = simdi
+        self._yaz(lazer_guc(self.lazer_guc_istek))
+
+    def acil(self, aktif):
+        """STOP (kart kilitlenir) / START. Kartta lazer yoksa (eski firmware) gonderilmez:
+        STOP'u tanimaz ve hata yazardi; hareket orada X ile durdurulur."""
+        if not self.lazer_bilinen:
+            return False
+        if aktif:
+            self._bekleyen_hedef = None
+            self._pan_bekleyen = None
+        return self._yaz(ACIL_DUR if aktif else ACIL_DEVAM)
+
     def dur(self):
         """Hareketi kes ve bekleyen hedefi iptal et (E-Stop / hedef kaybi).
         Firmware'de X pan'i da durdurur."""
         self._bekleyen_hedef = None
+        self._gonderilen_hedef = None   # kesilen hedef kilit acilinca geri gelmesin
         self._pan_bekleyen = None
         if self.bagli:
             self._yaz(DUR)
@@ -1790,6 +2007,67 @@ if __name__ == "__main__":
     saat[0] += 0.1; rs.yokla()
     assert rs.kart_resetlendi
     assert not any(c.startswith("P") for c in eski.mock.kayit)
+
+    # ---- 24.09 saha: acilis yukselisi (R + G30) ----
+    def yeni_kart():
+        k = TiltSurucu("mock", _saat=lambda: saat[0])
+        k.mock.t = k.mock.son_canli = saat[0]
+        return k
+
+    def kos(k, sure, adim=YOKLAMA_MS / 1000.0):
+        for _ in range(int(round(sure / adim))):
+            saat[0] += adim
+            k.yokla()
+
+    # (a) Kart onceki oturumdan 30 derecede (operator 0). R + hemen G0: eski durum "zaten
+    # orada" dedirtip hedefi ATMAMALI — kol 0'dan 30 dereceye kalkmali.
+    r1 = yeni_kart(); kos(r1, 0.3)
+    r1.git(0.0); kos(r1, 2.0)
+    assert abs(r1.mock.pos - r1.mock._darbe(30.0)) <= 2, r1.mock.pos
+    r1.sifirla()
+    assert not r1.hazir, "R sonrasi ilk durumdan once hareket kabul edildi"
+    r1.git(0.0); kos(r1, 2.0)
+    assert abs(r1.mock.pos - r1.mock._darbe(30.0)) <= 2, \
+        f"R'den sonra G30 atildi, kol kalkmadi (pos {r1.mock.pos})"
+    # (b) R'den ONCE yazilmis STATE3 tamponda: eski sayac alinmamali (ne hedef atilir ne de
+    # sonraki 0 sayac "kart reseti" sanilir)
+    r1.sifirla(); r1._r_ok = False                     # OK,R henuz okunmadi
+    r1._kart_yaziyor("STATE3,3200,3200,6400,1,0,0,0,30.000,30.000,2,60.000,400")
+    assert r1._son_pos == 0 and not r1.kart_resetlendi
+    r1._kart_yaziyor("OK,R")
+    r1._kart_yaziyor("STATE3,0,0,6400,1,0,0,0,0.000,0.000,2,60.000,400")
+    assert not r1.kart_resetlendi and r1.durum["pos"] == 0 and r1._r_t is None
+    # (c) OK,R hic gelmezse surucu sonsuza dek kilitli kalmaz
+    r1.sifirla(); r1._r_ok = False
+    saat[0] += R_BEKLEME_S + 0.1
+    assert not r1._r_bekleniyor()
+
+    # (d) Yukselis sirasinda arayuz takildi (H yok) -> kart kilitlendi, kol yarida kaldi.
+    # Kilit acilinca ayni hedef yeniden gitmeli.
+    r2 = yeni_kart(); kos(r2, 0.3)
+    r2.git(0.0); kos(r2, 0.25)
+    yarim = r2.mock.pos
+    assert 0 < yarim < r2.mock._darbe(30.0) - 50, yarim
+    saat[0] += 0.8; r2._oku()                           # 0.8 sn donma
+    assert not r2.mock.acik
+    kos(r2, 3.0)
+    assert abs(r2.mock.pos - r2.mock._darbe(30.0)) <= 2, \
+        f"canlilik asiminden sonra hedef yeniden gitmedi (pos {r2.mock.pos})"
+    # ... ama dur() ile KESILEN hedef kilit acilinca geri gelmez
+    r2.git(-30.0); kos(r2, 0.25)
+    r2.dur(); kos(r2, 0.2)
+    durdu = r2.mock.pos
+    saat[0] += 0.8; r2._oku()
+    kos(r2, 2.0)
+    assert r2.mock.acik and r2.mock.pos == durdu, "dur() ile kesilen hedef geri geldi"
+
+    # (e) Arayuz zamanlayicisi YOKLAMA_MS iken H araligi asimin yarisindan kucuk
+    r3 = yeni_kart(); kos(r3, 0.3)
+    once = len([c for c in r3.mock.kayit if c == "H"])
+    kos(r3, 1.2)
+    h = len([c for c in r3.mock.kayit if c == "H"]) - once
+    assert h >= 8, f"1.2 sn'de yalniz {h} H (en fazla ~150 ms aralik bekleniyor)"
+    assert CANLILIK_MS + YOKLAMA_MS <= ZAMAN_ASIMI_MS / 2
 
     print("tilt_surucu testleri OK — G bicimi, STATE3 cozumu, en-taze-hedef kuyrugu, "
           "canlilik kilidi, kalibrasyon kapisi, kirpma, kart reset tespiti")

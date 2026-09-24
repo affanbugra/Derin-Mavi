@@ -85,17 +85,13 @@ def balon_sinifi_mi(ad):
     return k == BALON or k.endswith("balon") or k.endswith("balloon")
 
 
-def modelde_hedef_var(model):
-    return any(kanonik(a) in HEDEF_SINIFLARI
-               for a in getattr(model, "names", {}).values())
-
-
 def modelde_balon_var(model):
     return any(balon_sinifi_mi(a) for a in getattr(model, "names", {}).values())
 
 
 def _balon_arama_penceresi(box, kare_sekli):
-    """Bir hedefin govdesi ve hemen altindaki balon icin kirpilacak bolge."""
+    """Bir hedefin govdesi ve hemen altindaki balon icin kirpilacak bolge
+    (balon_takip: kilit yokken aracin altindaki kucuk balonu buyuterek arar)."""
     h, w = kare_sekli[:2]
     x1, y1, x2, y2 = box
     kw, kh = max(1, x2 - x1), max(1, y2 - y1)
@@ -103,68 +99,6 @@ def _balon_arama_penceresi(box, kare_sekli):
             max(0, int(y1 + 0.25 * kh)),
             min(w, int(x2 + 0.45 * kw)),
             min(h, int(y2 + 1.75 * kh)))
-
-
-def ek_balonlari_tespit_et(modeller, frame, hedefler):
-    """Balonu yalniz taninmis hedeflerin govde+alt bolgesinde arar.
-
-    Tam kare taranmaz. Once ana model F16/helikopter/drone/fuze tanir; sonra ek
-    balon modeli her gercek hedefin alt penceresinde calisir. Boylece sahnedeki
-    bagimsiz balonlar bu hedefe aitmis gibi gosterilmez.
-    """
-    # DOSTUN BALONU ARANMAZ (23.09, takim karari): dost vurmak -10 puan, o hedefe
-    # zaten ates edilmez -> balonunu bulmak hicbir ise yaramaz, ama bedava da
-    # degildir (ek model her hedef icin bir kez daha kosar, FPS dusurur).
-    # Asama 1-2'de taraf HIC okunmaz ve tip "Hedef"tir; oradaki her hedef aranir.
-    gercek_hedefler = [d for d in hedefler
-                       if d.get("cls") in HEDEF_SINIFLARI and not d.get("hayalet")
-                       and d.get("tip") != "Dost"]
-    if not modeller or not gercek_hedefler:
-        return []
-    a = ayar_al()
-    esik = float(a["gosterim"])
-    imgsz = int(a["cozunurluk"])
-    pencereler = [_balon_arama_penceresi(d["box"], frame.shape) for d in gercek_hedefler]
-    kirpintilar = [frame[y1:y2, x1:x2] for x1, y1, x2, y2 in pencereler]
-    gecerli = [(d, p, k) for d, p, k in zip(gercek_hedefler, pencereler, kirpintilar)
-               if k.size]
-    if not gecerli:
-        return []
-    gercek_hedefler, pencereler, kirpintilar = map(list, zip(*gecerli))
-    adaylar = []
-    for model in modeller:
-        try:
-            results = model.predict(kirpintilar, conf=esik, iou=float(a["iou"]),
-                                    max_det=int(a["maks_tespit"]), verbose=False,
-                                    imgsz=imgsz)
-        except Exception as e:
-            print(f"[UYARI] Ek balon modeli calistirilamadi: {e}")
-            continue
-        for hedef, pencere, r in zip(gercek_hedefler, pencereler, results or []):
-            ox, oy, _, _ = pencere
-            hx1, hy1, hx2, hy2 = hedef["box"]
-            hcx = (hx1 + hx2) * 0.5
-            hcy = (hy1 + hy2) * 0.5
-            hw = max(1, hx2 - hx1)
-            for b in (r.boxes if r.boxes is not None else []):
-                ham_ad = r.names[int(b.cls)]
-                if not balon_sinifi_mi(ham_ad):
-                    continue
-                conf = float(b.conf)
-                lx1, ly1, lx2, ly2 = [int(v) for v in b.xyxy[0].tolist()]
-                box = (lx1 + ox, ly1 + oy, lx2 + ox, ly2 + oy)
-                bcx = (box[0] + box[2]) * 0.5
-                bcy = (box[1] + box[3]) * 0.5
-                # Balon, taninan maketin yatay hizasinda ve govde merkezinin altinda.
-                if abs(bcx - hcx) <= 0.95 * hw and bcy >= hcy:
-                    adaylar.append((conf, box))
-
-    # Birden fazla balon modeli ayni nesneyi bulursa en guvenli kutuyu bir kez goster.
-    kalan = []
-    for conf, box in sorted(adaylar, reverse=True):
-        if not any(_ortusme(box, eski) >= 0.70 for eski in kalan):
-            kalan.append(box)
-    return kalan
 
 
 def _model_listesi(model_veya_modeller):
@@ -299,6 +233,20 @@ VARSAYILAN_AYAR = {
     # ZOR ORNEK TOPLAMA: modelin zorlandigi kareler app/veri_toplama/'ya yazilir
     # (sonraki egitim icin). 1 sn'de en fazla 1, oturumda en fazla 300 kare.
     "zor_ornek": 1,
+    # BALON TAKIBI (balon_takip.py, 24.09): models/ icinde balon modeli varsa A2/A3'te
+    # kilit ve nisan BALONA kurulur, arac yalniz kimlik kanitidir. 0 = eski yol (arac
+    # kilidi + govdeden balon kestirimi) — balon modeli sahada saparsa kacis kapisi.
+    "balon_takip": 1,
+    # Balon modelinin aday esigi. Iz ONAY_KARE karede gorulmeden kilitlenmez; tek
+    # karelik dusuk guvenli kutu bu yuzden zararsizdir.
+    "balon_esik": 0.30,
+    # A3 MENZIL: balonun olculen CAPI (cm). Sartname balon boyu vermiyor — sahada cetvelle
+    # olcun, girin; balon etiketinde mesafe gorunur (10 m'ye koyup dogrulayin). 0 = bilinmiyor:
+    # mesafe hesaplanmaz, menzil kontrolu yapilmaz.
+    "balon_cap_cm": 0,
+    # 1: A3'te balon tipinin imha bandi disindaysa ates yok (F16 10-15 / Heli-Fuze 5-15 /
+    # IHA 0-15 m; tip bilinmiyorsa 10-15). Yalniz balon_cap_cm girildiyse etkili.
+    "menzil_kontrol": 1,
     # Olu bolge (ates hassasiyeti) HEDEF KUTUSUNUN YUKSEKLIGININ orani olarak.
     # Sartname (s.19): "kesit alanina gore belli bir buyuklukte balon" -> balonun
     # boyu hedefin boyuyla ORANTILI, sabit degil. Dolayisiyla "lazer balonun icinde
@@ -344,6 +292,8 @@ AYAR_SINIR = {
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),
     "arama_cozunurluk": (320, 1920), "uzak_tarama": (0, 1), "uzak_tarama_periyot": (1, 30), "uzak_kirmizi": (0, 1), "zor_ornek": (0, 1),
     "uzak_onay_esigi": (0.10, 0.99), "renk_takip": (0, 1),
+    "balon_takip": (0, 1), "balon_esik": (0.05, 0.95),
+    "balon_cap_cm": (0, 100), "menzil_kontrol": (0, 1),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
     "kamera_fps": (5, 120),
     "kamera_pozlama": (-13, 0),
@@ -425,8 +375,6 @@ RED = (32, 32, 191)      # dusman (yalniz A3)
 BLUE = (168, 88, 18)     # dost (yalniz A3) / belirsiz
 HEDEF = (0, 170, 255)    # A1/A2: taraf ayrimi yok, hepsi hedef
 YELLOW = (60, 200, 235)  # balon (nisan noktasi) / orta guven
-ORANGE = (0, 165, 255)   # belirsiz / onay bekliyor
-GREEN = (40, 200, 40)    # yuksek guven
 
 CAM_SOURCE = os.environ.get("DERINMAVI_CAM", "").strip()
 
@@ -539,13 +487,6 @@ class KameraOkuyucu:
         degiskendir ve olcum hatasina donusur."""
         with self._kilit:
             return self._kare_t
-
-    def cap_degistir(self, yeni_cap):
-        """Kamera degisiminde (arayuzden secim) okuyucuyu yeni cap'e baglar."""
-        with self._kilit:
-            self._kare = None
-        self.cap = yeni_cap
-        self.hata_sayaci = 0
 
     def kapat(self):
         self._calis = False
@@ -731,29 +672,6 @@ def kameralari_listele_qt():
         return sonuc
     except Exception:
         return []
-
-
-def kameralari_listele(max_idx=5):
-    """Eski OpenCV index taramasi (fallback). Yeni kod kameralari_listele_qt() kullanir."""
-    bulunan = []
-    for i in range(max_idx):
-        for backend, _ in _BACKENDS:
-            cap = cv2.VideoCapture(i, backend)
-            ok = cap.isOpened()
-            cap.release()
-            if ok:
-                bulunan.append(i)
-                break
-    return bulunan
-
-
-def ac_kaynak(idx):
-    """Belirli bir kamera index'ini acar (arayuzden secim icin) ve hatirlar."""
-    global _cached_open
-    cap = _ac_index(idx)
-    if cap is not None:
-        _cached_open = idx
-    return cap
 
 
 def _aday_indexler():
@@ -1869,19 +1787,24 @@ def _analiz_sahi(model, frame, a, gosterim, estop=False, asama=None):
 
 
 # ---------------- Tespit + karar ----------------
-def analiz_et(model, frame, estop=False, asama=None):
+def analiz_et(model, frame, estop=False, asama=None, kilit=True):
     """Bir kareyi analiz eder. Doner: (dets, balonlar, active_idx).
 
     asama (sartname davranisi):
       1   : tanima/manuel secim; tum tespitler gosterilir
       2-3 : otonom ilk kilit icin anlik kirmizi kaniti gerekir; A3'te ayrica
             yalniz "Dusman" kilitlenir. Kutular renk kaniti olmasa da gosterilir.
+    kilit=False : ARAC KILIDI YOK (balon_takip kilidi devraldi). Tespit, sinif onayi ve
+            A3 rengi aynen uretilir; kilit, kilit penceresi, uzak tarama ve hayalet
+            calismaz — E-Stop'taki kilitsiz davranisin aynisi.
 
     dets        : [{cls, ham, ad, tip, conf, box, id}, ...]
     balonlar    : [(x1,y1,x2,y2), ...] — nisan noktalari
     active_idx  : kilitli hedefin index'i; estop veya hedef yoksa -1
     """
     global _kilitli_track_id, _kilit_kayip_kare, _arama_kare
+    if not kilit:
+        estop = True          # asagida estop YALNIZ kilitle ilgili bloklari kapatir
     a = ayar_al()
     gosterim = float(a["gosterim"])
 
@@ -2307,6 +2230,16 @@ def nisan_noktasi(box, balonlar=()):
 
     oran = float(AYAR.get("balon_ofset", VARSAYILAN_AYAR["balon_ofset"]))
     return (hx, y2 + (y2 - y1) * oran)
+
+
+def det_nisan_noktasi(d, balonlar=()):
+    """Bir TESPITIN nisan noktasi — PD, arayuz nisangahi ve takip kaydi buradan beslenir.
+    Balon takibinin tespiti (`balon`=True) zaten balondur: kendi merkezi. Arac tespiti
+    eski yoldan (nisan_noktasi: altindaki balon ya da govdeden kestirim)."""
+    if d.get("balon"):
+        x1, y1, x2, y2 = d["box"]
+        return ((x1 + x2) * 0.5, (y1 + y2) * 0.5)
+    return nisan_noktasi(d["box"], balonlar)
 
 
 def draw_overlay(frame, dets, active_idx, balonlar=(), estop=False):
@@ -2878,51 +2811,32 @@ if __name__ == "__main__":
         ZOR_ORNEK_DIZIN = _eski_dizin
         _zor.update(son_t=0.0, son_bakis=0.0, sayi=0, oturum=None)
 
-    # ---- EK BALON MODELI: DUSMANIN balonu bulunur, DOST'unki ARANMAZ ----
-    # Nisan noktasi BALONDUR (imha kaniti balonun patlamasi). Ek model yalniz
-    # taninmis hedefin ALT PENCERESINDE kosar; dost hedefe hic ates edilmedigi
-    # icin onun penceresi hic taranmaz.
-    class _BalonModel:
-        """Kirpinti basina sabit bir balon kutusu dondurur (kirpinti koordinatinda)."""
-        names = {0: "balloon"}
-        def __init__(self, kutular):
-            self.kutular, self.cagri = kutular, 0
-        def predict(self, girdiler, **kw):
-            self.cagri += 1
-            return [_SahteSonuc([_SahteKutu(0, 0.9, k, None) for k in self.kutular],
-                                self.names) for _ in girdiler]
-
+    # ---- BALON NISANI (asil balon takibi balon_takip.py'de, kendi testleriyle) ----
     kare_b = _np.zeros((480, 640, 3), _np.uint8)
     hedef_kutu = (200, 150, 300, 230)                 # kw=100, kh=80
-    pencere = _balon_arama_penceresi(hedef_kutu, kare_b.shape)
-    assert pencere == (155, 170, 345, 370), pencere
-    ox, oy = pencere[0], pencere[1]
-    # Kirpinti koordinati -> kare koordinati: yakin balon (262,265), uzak (255,345)
+    # Aracin alt penceresi (balon_takip kilit yokken kucuk balonu burada buyutur).
+    assert _balon_arama_penceresi(hedef_kutu, kare_b.shape) == (155, 170, 345, 370)
+    # Ana model balon da taniyorsa (ileride 5. sinif) nisan EN YAKIN balonun MERKEZI:
+    # (a) listede once gelen degil asilma noktasina en yakin olan; (b) balonun kendi
+    # merkezi, kutunun orta ekseni degil (lazer balonun yanina giderse balon patlamaz).
     yakin_kare, uzak_kare = (247, 250, 277, 280), (240, 330, 270, 360)
-    kirp = lambda k: (k[0] - ox, k[1] - oy, k[2] - ox, k[3] - oy)
+    assert nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare]) == (262.0, 265.0),         nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare])
+    assert nisan_noktasi(hedef_kutu, []) != (262.0, 265.0)      # yoksa geometrik kestirim
+    # Balon takibinin tespiti KENDI kutusunun merkezine nisan alir; arac tespiti eski yoldan.
+    assert det_nisan_noktasi({"box": (100, 100, 140, 150), "balon": True}) == (120.0, 125.0)
+    assert det_nisan_noktasi({"box": hedef_kutu}, [yakin_kare]) == (262.0, 265.0)
 
-    bmodel = _BalonModel([kirp(uzak_kare), kirp(yakin_kare)])
-    dusman = [{"cls": "f16", "box": hedef_kutu, "tip": "Düşman"}]
-    ek = ek_balonlari_tespit_et([bmodel], kare_b, dusman)
-    assert len(ek) == 2 and yakin_kare in ek and uzak_kare in ek, ek
-
-    # Nisan noktasi: EN YAKIN balonun MERKEZI. Iki sey birden korunur —
-    # (a) listede ONCE gelen degil, asilma noktasina en yakin olan secilir;
-    # (b) nisan balonun kendi merkezine gider, hedef kutusunun orta eksenine DEGIL
-    #     (lazer balonun yanina giderse balon patlamaz, imha sayilmaz).
-    assert nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare]) == (262.0, 265.0), \
-        nisan_noktasi(hedef_kutu, [uzak_kare, yakin_kare])
-    # Balon hic bulunamazsa geometrik kestirime duser (kutunun altina balon_ofset).
-    assert nisan_noktasi(hedef_kutu, []) != (262.0, 265.0)
-
-    dost = [{"cls": "f16", "box": hedef_kutu, "tip": "Dost"}]
-    bmodel.cagri = 0
-    assert ek_balonlari_tespit_et([bmodel], kare_b, dost) == [], "dostun balonu arandi"
-    assert bmodel.cagri == 0, "dost hedef icin ek balon modeli bosuna kosturuldu"
-
-    # Hayalet hedefin (tespit edilemeyen kare) altinda da aranmaz: kutu donmustur.
-    hayalet_h = [{"cls": "f16", "box": hedef_kutu, "tip": "Düşman", "hayalet": True}]
-    assert ek_balonlari_tespit_et([bmodel], kare_b, hayalet_h) == []
+    # analiz_et(kilit=False): balon takibi kilidi devraldiginda arac yolu tespit + renk
+    # uretir ama KILIT KURMAZ (yoksa pahali kilit penceresi/uzak tarama da calisirdi).
+    takip_sifirla()
+    s_kilitsiz = _SahteModel()
+    for _ in range(6):
+        dets, _b, aktif = analiz_et(s_kilitsiz, kare_b, asama=1, kilit=False)
+    assert len(dets) == 1 and aktif == -1 and _kilitli_track_id is None, (dets, aktif)
+    for _ in range(4):
+        dets, _b, aktif = analiz_et(s_kilitsiz, kare_b, asama=1)
+    assert aktif == 0 and _kilitli_track_id == 1, "kurulum: kilit=True iken kilit kurulmadi"
+    takip_sifirla()
 
     # ---- RENKLE KILIT SURDURME (23.09 saha, 10 m: model karelerin ~%40'inda kaciriyordu) ----
     takip_sifirla()
@@ -3086,5 +3000,5 @@ if __name__ == "__main__":
           "kesin tanima (histerezis/coklu hedef/onay bozulma), cakisan kutu temizligi, "
           "hayalet/dost kilidi korumasi + yuksek-cozunurluk yeniden bulma, "
           "kirmizi oneri (uzak tarama penceresi), kacirilan kare kaydi, "
-          "dusmanin balonu (dost aranmaz, en yakin balon nisan noktasi), "
+          "balon nisani (en yakin balon / balon tespitinin kendi merkezi), kilitsiz analiz, "
           "renkle kilit surdurme, uzak kirmizi aday onayi")

@@ -18,6 +18,8 @@ env/
 *.engine
 *_openvino_model/
 !models/best.pt
+# Balon modeli (balon_takip.py, 24.09) — ekipte ayni ad: models/bestb2.pt (5 MB)
+!models/bestb2.pt
 # models/ klasörü YAPISI repoda kalır (README.md + .gitkeep hariç tutulur):
 !models/README.md
 !models/.gitkeep
@@ -60,3 +62,7 @@ Desktop.ini
 app/ayarlar.json.yedek
 app/tilt_stres_*.log
 app/loglar/
+
+# ws_motor_test C++ test derleme ciktilari
+ws_motor_test/tests/*.exe
+ws_motor_test/tests/*.obj

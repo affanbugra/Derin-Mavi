@@ -66,6 +66,9 @@ class Kontrol:
         self.pan_hedef = 0.0
         self.tilt_hedef = 0.0
         self.lazer_acik = False
+        self._lazer_acilis_t = 0.0
+        self._son_tazele_t = 0.0
+        self._acil_birakma_t = -1e9
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
         self.estop_aktif = False
         # Kart beklenmedik sekilde yeniden basladiysa arayuz bunu gorup uyarir ve
@@ -113,10 +116,18 @@ class Kontrol:
         return self.mock is not None
 
     @property
+    def lazer_tek_kart(self):
+        """Lazer ESP32-S3 (tilt+pan) kartinda mi suruluyor? (24.09 tek kart, GPIO 18)
+
+        Kosul: eski kart GERCEK degil (seri yok) ve S3 lazer yayini (LZR1) taze. Eski
+        kart gercek bir porttaysa lazer orada kalir: iki kart ayni lazeri surmesin."""
+        return self.seri is None and self.tilt.bagli and self.tilt.lazer_destekli
+
+    @property
     def lazer_gercek(self):
-        """Lazer GERCEK bir karta (seri port) mi bagli? Sahte/kapaliysa ates hicbir
-        lazere ulasmaz — o zaman hedef "vuruldu" SAYILMAMALI (bkz. arayuz otonom ates)."""
-        return self.seri is not None
+        """Lazer GERCEK bir karta mi bagli? Sahte/kapaliysa ates hicbir lazere ulasmaz —
+        o zaman hedef "vuruldu" SAYILMAMALI (bkz. arayuz otonom ates)."""
+        return self.seri is not None or (self.lazer_tek_kart and not self.tilt.mock_mu)
 
     @property
     def tilt_ayri(self):
@@ -226,7 +237,12 @@ class Kontrol:
         self.satirlar.append(s)
         self._yeni.append(s)
         del self.satirlar[:-20]             # yalniz son 20 satir tutulur
-        if P.satir_estop_mu(s):             # kart durdugunu bildirdi
+        # Tek kart (S3) KENDI seri STOP'umuzun yankisini yazar: o yeni bir durdurma degildir
+        # (estop() zaten kurdu). Yanki DEVAM'dan SONRA okunursa acil durdurmayi geri kurardi.
+        # Kartin kendi baslattigi durdurmalar (buton, reddedilen START) aynen islenir;
+        # baska porttan gelen STOP'u surekli LZR1 yayini yakalar (bkz. oku).
+        tilt_yanki = s.startswith("TILT: ") and "(SERI STOP)" in s.upper()
+        if P.satir_estop_mu(s) and not tilt_yanki:    # kart durdugunu bildirdi
             self.estop_aktif = True
             self.lazer_acik = False
             # Kart durdugu KONUMU bildirir; hedefimizi ona cekeriz. Motor hedefe
@@ -314,6 +330,19 @@ class Kontrol:
                 self.tilt.kart_resetlendi = False
                 self.kart_resetlendi = True
                 self.tilt_hedef = self.tilt.aci or 0.0
+            # TEK KART ACIL/LAZER GERCEGI: kart kendi basina kilitlendiyse (donanim
+            # butonu) metin satiri kacmis olsa bile surekli yayin (LZR1) soyler. Kart
+            # lazeri kendi kestiyse (olu adam anahtari) ozet "ATES" demeye devam etmesin.
+            lz = self.tilt.lazer_durum if self.tilt.lazer_destekli else None
+            if lz is not None:
+                # DEVAM'dan hemen sonra tampondaki eski (kilitli) yayin E-Stop'u geri kurmasin.
+                if (lz["acil"] and not self.estop_aktif
+                        and self.tilt._saat() - self._acil_birakma_t > 0.3):
+                    self.estop_aktif = True
+                    self.lazer_acik = False
+                if self.lazer_tek_kart and self.lazer_acik and not lz["acik"] \
+                        and self.tilt._saat() - self._lazer_acilis_t > 0.5:
+                    self.lazer_acik = False
         if self.seri is not None:
             try:
                 while self.seri.in_waiting:
@@ -387,27 +416,21 @@ class Kontrol:
         self.pan_hedef, self.tilt_hedef = pan, tilt
         return pan, tilt
 
-    def tilt_dur(self):
-        """Dikey ekseni OLDUGU YERDE durdurur ve hedefi gercege geri ceker.
-
-        Basili-tutma birakildiginda cagrilir. Surekli hareket, karta "sinira kadar
-        git" diye TEK bir uzak hedef verir; tus birakildiginda kol yolun ortasinda
-        durur. `tilt_hedef` o uzak degerde kalirsa arayuz kolun gercekte olmadigi
-        bir aciyi gosterir ve bir sonraki manuel dokunus oradan hesaplanir —
-        yani her basili-tutma ekrani gercekten biraz daha koparirdi."""
-        if not self.tilt_ayri:
-            return self.durum
-        self.tilt.dur()
-        olculen = self.tilt.aci
-        if olculen is not None:
-            self.tilt_hedef = olculen
-        return self.durum
-
     def ates(self, ac: bool):
         # NOT: eskiden bir `mod` (Manuel/Otonom) argumani vardi — karttaki kod mod
         # kavramini bilmiyor, komutlar her iki modda birebir ayni. Olu parametre silindi.
         self.lazer_acik = bool(ac)
-        return self._gonder(P.lazer(ac))
+        if ac:
+            self._lazer_acilis_t = self._son_tazele_t = self.tilt._saat()
+            if self.lazer_tek_kart:
+                self.tilt.lazer(True)
+                return self.durum
+            return self._gonder(P.lazer(True))
+        # KESMEK HER YERE: lazer hangi kartta olursa olsun "kes" hepsine gider. Ates
+        # surerken yonlendirme degisse (LZR1 bir an bayatlasa) bile yanik lazer kalmaz.
+        if self.tilt.lazer_bilinen:
+            self.tilt.lazer(False)
+        return self._gonder(P.lazer(False))
 
     def ates_tazele(self):
         """Lazer ACIKKEN periyodik cagrilir — kartin olu adam anahtarini besler.
@@ -416,10 +439,26 @@ class Kontrol:
         Ates kapaliyken hicbir sey gondermez: hat bos kalsin."""
         if not self.lazer_acik or self.estop_aktif:
             return None
+        simdi = self.tilt._saat()
+        if simdi - self._son_tazele_t > P.ATES_ZAMAN_ASIMI_MS / 1000.0:
+            # Tazeleme bu kadar kesildiyse (arayuz dondu) kart lazeri ZATEN kesti. Arayuz
+            # geri gelince lazeri KENDILIGINDEN yeniden yakmak yok: namlu o arada baska
+            # yere donmus olabilir. Ates kapali sayilir; operator bilincli yeniden basar.
+            self.lazer_acik = False
+            return self.durum
+        self._son_tazele_t = simdi
+        if self.lazer_tek_kart:
+            self.tilt.lazer(True)
+            return self.durum
         return self._gonder(P.lazer(True))
 
-    def estop(self, aktif: bool):
+    def estop(self, aktif: bool, kart_kilidi=True):
         """Acil durdur / devam.
+
+        kart_kilidi=False YALNIZ uygulama kapanisi icin: lazer soner, eksenler durur ama
+        S3 KILITLENMEZ (STOP gitmez). 24.09 saha: kapanista giden STOP kart USB'den
+        beslendikce surdu; sonraki acilis ACIL DURDUR'da basladi, 30 derece acilis sorusu
+        hic gelmedi (R gitmedi) ve kart kolu onceki oturumun acisinda sandi.
 
         ACIL DURDURMADA kart: lazeri keser, PAN'i oldugu yerde kilitler, TILT'i 0° park
         konumuna indirir, komutlari reddeder. Surucu ENABLE **kesilmez** (motorlar tutar),
@@ -453,6 +492,14 @@ class Kontrol:
                 # konumundan KOPUYORDU. Sartname Yetenek 3 de "sistem durur" diyor;
                 # park etmek bir HAREKETTIR. Yeni tilt karti da zaten donduruyor.
                 pass
+        # Tek kartta acil durdurma KARTTA da kilitlenir (lazer + iki eksen; donanim
+        # butonuyla ayni yol). Eski kart da (varsa) ayni komutu alir.
+        if not aktif:
+            self._acil_birakma_t = self.tilt._saat()
+        if kart_kilidi or not aktif:
+            self.tilt.acil(aktif)
+        elif self.tilt.lazer_bilinen:
+            self.tilt.lazer(False)         # kilitsiz kapanista lazeri ACIKCA kes
         return self._gonder(P.DUR if aktif else P.DEVAM)
 
     def home(self):
@@ -474,6 +521,7 @@ class Kontrol:
         Tam guc kullanilmiyor (varsayilan %40). ⚠ Dusuk guc dwell suresini uzatir —
         gercek patlama suresi olculup bu deger yeniden degerlendirilmelidir."""
         self.lazer_guc = P.guc_kirp(yuzde)
+        self.tilt.lazer_guc_ayarla(self.lazer_guc)     # S3 lazeri (varsa) ayni guce esitlenir
         return self._gonder(P.lazer_guc(self.lazer_guc))
 
     def hiz_ayarla(self, seviye):

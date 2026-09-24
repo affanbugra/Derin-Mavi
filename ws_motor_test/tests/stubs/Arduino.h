@@ -15,7 +15,15 @@ inline uint32_t micros(){return fakeUs;}
 inline uint32_t millis(){return fakeUs/1000;}
 inline void delayMicroseconds(uint32_t us){fakeUs+=us;}
 inline void pinMode(int,int){}
-inline void digitalWrite(int pin,int level){if(pin==4 && level==HIGH)++physicalPulses;if(pin==10 && level==HIGH)++panPulses;if(pin==11)panDirLevel=level;if(pin==16)panEnLevel=level;}
+#define INPUT_PULLUP 2
+// Lazer (GPIO 18) ve acil stop butonu (GPIO 15) taklidi: lazerCikis = pine giden son
+// seviye/duty (0 = sonuk), estopSeviye = butonun okunan seviyesi (HIGH = basili degil).
+extern int lazerCikis,estopSeviye;
+extern bool ledcBasarili;
+inline void digitalWrite(int pin,int level){if(pin==4 && level==HIGH)++physicalPulses;if(pin==10 && level==HIGH)++panPulses;if(pin==11)panDirLevel=level;if(pin==16)panEnLevel=level;if(pin==18)lazerCikis=level?256:0;}
+inline int digitalRead(int pin){return pin==15?estopSeviye:LOW;}
+inline bool ledcAttach(int,int,int){return ledcBasarili;}
+inline void ledcWrite(int pin,int duty){if(pin==18)lazerCikis=duty;}
 class Stream {
  public:
   std::string incoming,out;

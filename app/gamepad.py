@@ -5,9 +5,11 @@ Sartname Yetenek 1 kullanici komut arayuzlerini "UI/joystick/klavye" diye sayar;
 video icin dogrudan puandir (CLAUDE.md §2).
 
 DUZEN (takim karari 22.09): SOL cubuk = yatay, SAG cubuk = dikey, D-pad = iki
-eksen · L2+R2 birlikte 2 sn = ATES ac (tekrar basinca kes) · L1/R1 2 sn = merkeze
-al (kademeli) · Options = ACIL DURDUR / DEVAM. Tek tusla ates
-YOKTUR — klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
+eksen · L2+R2 birlikte = ATES ac (tekrar basinca kes) · L1/R1 = merkeze
+al (kademeli) · Options VEYA Daire (Xbox: B) = ACIL DURDUR. Tek tusla ates YOKTUR.
+ACIL DURDUR koldan yalniz KURULUR, asla KALDIRILMAZ (24.09): eskiden Options ikinci
+basista DEVAM ediyordu — yanlislikla iki kez basmak acil durdurmayi kaldiriyordu.
+Devam yalniz arayuzdeki "DEVAM ET" butonuyla, bilincli bir eylemle olur.
 
 ⚠ BU MODUL KOMUT URETMEZ, YALNIZCA OKUR. Arayuz okunan durumu kendi guvenlik kapilarindan
   gecirir (`_aci_hareket`, `_ates_bas`, `_estop_bas`). Gamepad'in kendi yolu OLMAMALIDIR:
@@ -62,7 +64,10 @@ if PYGAME_VAR:
     # istemiyoruz, klavyedeki "Space+B 2 sn" kuralinin kol karsiligi budur.
     CB_MERKEZ = (pygame.CONTROLLER_BUTTON_LEFTSHOULDER,     # L1 / R1: merkeze al
                  pygame.CONTROLLER_BUTTON_RIGHTSHOULDER)
-    CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # Options: ACIL DURDUR / DEVAM
+    CB_ESTOP = pygame.CONTROLLER_BUTTON_START           # Options: ACIL DURDUR
+    # Daire (PS) / B (Xbox): ikinci, BUYUK acil durdur tusu — panikte Options'i aramak
+    # gerekmesin. Standart haritada her padde ayni fiziksel tus (sag yuzdeki "dogu" tus).
+    CB_ESTOP_2 = pygame.CONTROLLER_BUTTON_B
     CB_TETIK = (pygame.CONTROLLER_AXIS_TRIGGERLEFT,     # L2 / R2 (analog)
                 pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
     # Takim karari 22.09: SOL cubuk yalniz YATAY (pan), SAG cubuk yalniz DIKEY (tilt).
@@ -87,6 +92,8 @@ TETIK_ESIK = 0.5
 BTN_L1, BTN_R1 = 4, 5     # omuz dugmeleri
 BTN_L2, BTN_R2 = 6, 7     # DualSense'te tetikler dugme olarak da gorunur
 BTN_ESTOP = 9             # Options/Start (ham duzende cogu padde 9)
+# ⚠ Daire/B ham duzende EKLENMEZ: numarasi padden pade degisir (XInput'ta 1, DualSense
+#   DirectInput'ta 2 = Daire, 1 = Capraz). Yanlis numara, acil durdurmayi baska tusa baglar.
 EKSEN_L2, EKSEN_R2 = 4, 5       # tetikler eksen olarak gelirse
 
 # Analog cubuklar (ham yol): SOL X = pan, SAG Y = tilt. Y ekseni SDL'de yukari =
@@ -132,17 +139,13 @@ class Durum:
 
     @property
     def estop(self):
-        return "start" in self.kenar
+        """Options ya da Daire/B BU yoklamada basildi mi (ACIL DURDUR — yalniz kurar)."""
+        return bool({"start", "daire"} & self.kenar)
 
     @property
     def merkez(self):
         """L1/R1 BU yoklamada basildi mi (kurma sayacini baslatmak icin)."""
         return bool({"l1", "r1"} & self.kenar)
-
-    @property
-    def merkez_basili(self):
-        """L1/R1 hala basili mi (2 sn kuralini surdurmek icin)."""
-        return bool({"l1", "r1"} & self.basili)
 
     @property
     def ates_basili(self):
@@ -273,7 +276,8 @@ class Gamepad:
             else:
                 self._koy(d, ad, False)
 
-        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP)):
+        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP),
+                        ("daire", CB_ESTOP_2)):
             self._koy(d, ad, bool(c.get_button(btn)))
         for ad, eksen in (("l2", CB_TETIK[0]), ("r2", CB_TETIK[1])):
             self._koy(d, ad, c.get_axis(eksen) / CB_EKSEN_OLCEK > TETIK_ESIK)
@@ -340,6 +344,10 @@ if __name__ == "__main__":
     assert d.merkez and not d.estop
     d.basili, d.kenar = {"start"}, {"start"}
     assert d.estop and not d.merkez
+    d.basili, d.kenar = {"daire"}, {"daire"}
+    assert d.estop, "Daire/B acil durdurmadi"
+    d.kenar = set()
+    assert not d.estop, "basili tutmak acil durdurmayi tekrar tetikledi"
     print("olu bolge testleri OK")
 
     if not g.bagli:
@@ -357,7 +365,7 @@ if __name__ == "__main__":
         print("       Yanlis tusa dusuyorsa gamepad.py'deki BTN_* numaralarini asagidaki")
         print("       'basili' ciktisina bakarak duzeltin.")
     print("\nDuzen: sol cubuk=yatay, sag cubuk=dikey, D-pad=yon · L2+R2 (2 sn)=ates"
-          " · L1/R1 (2 sn)=merkez · Options=E-STOP")
+          " · L1/R1=merkez · Options veya Daire/B=ACIL DURDUR (yalniz kurar)")
     print("Cubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
     try:
         while True:

@@ -28,12 +28,13 @@ from PySide6.QtGui import (QImage, QPixmap, QFont, QColor, QPainter, QPen, QLine
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
-    QSizePolicy, QButtonGroup,
+    QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QCheckBox, QSpinBox, QScrollArea, QMessageBox,
+    QSlider, QSpinBox, QScrollArea, QMessageBox,
 )
 
 import algi
+import balon_takip             # A2/A3: kilit ve nisan BALONA (arac = kimlik kaniti)
 import kamera as kamera_mod   # YALNIZ harici (USB-C) kamera — bkz. kamera.py
 import nisan
 import tasarim as T          # Apple tasarim katmani — renk/olcu/stil TEK KAYNAK
@@ -102,10 +103,9 @@ def _model_bul():
 # tasarim.py'deki Apple degerlerine isaret ediyor. Yeni kod dogrudan `T.` kullanir.
 BG   = T.PENCERE      # pencere zemini (Window Backgrounds/Dark)
 BD2  = T.AYRAC        # ince ayrac / pasif gosterge rengi
-TXT  = T.L1           # Labels/Dark 1 Primary
 TXT2 = T.L2           # 2 Secondary
 TXT3 = T.L3           # 3 Tertiary
-MAVI = MAVI_ACIK = BLUE = T.AKSAN                 # System Colors/Dark 8 Blue
+MAVI = BLUE = T.AKSAN                 # System Colors/Dark 8 Blue
 RED  = T.KIRMIZI; GRN = T.YESIL; AMB = T.SARI     # 1 Red / 4 Green / 3 Yellow
 F    = T.F
 
@@ -586,7 +586,6 @@ COZUNURLUK_SECENEK = [416, 512, 640, 960, 1280]
 # Govde olculeri (oluk 6px, tutamac 20px beyaz daire) Apple kitinden gelir.
 SLIDER_ONERI   = T.slider_stil(vurgu=T.YESIL)
 SLIDER_DEGISIK = T.slider_stil(vurgu=T.AKSAN)
-SLIDER_LAZER   = T.slider_stil("lazersl", vurgu=T.AKSAN)
 
 ETIKET_ONERI   = T.deger_etiketi(T.YESIL)
 ETIKET_DEGISIK = T.deger_etiketi(T.AKSAN)
@@ -678,6 +677,32 @@ AYAR_TANIM_TESPIT = [
     ("kamera_fps", "Kamera FPS", "sayi", 5, 120,
      "Kameradan alınması istenen kare hızı (FPS).\n\n"
      "NOT: Değişikliğin etkili olması için yukarıdan kamerayı tekrar seçmelisiniz."),
+    ("balon_takip", "Balon takibi", "anahtar", 0, 1,
+     "AÇIK (önerilen): models/ içinde balon modeli varsa Aşama 2/3'te kilit ve nişan "
+     "BALONA kurulur. Araç (F-16/Heli/Füze/İHA) yalnız balonun kimliğini söyler: araç "
+     "görüldüğü karelerde balonun kartına taraf (renk) ve tip yazılır; kart bir kez "
+     "kesinleşince araç görünmese de geçerlidir.\n\n"
+     "Aşama 2: her balon hedeftir. Aşama 3: yalnız kartı 'Düşman' olan balona ateş — "
+     "aracı hiç okunmamış balona ATEŞ YOK. Ateş edilen balon kaybolursa imha sayılır.\n\n"
+     "KAPALI: eski yol — araca kilitlenilir, balon gövdeden kestirilir (balon_ofset). "
+     "Balon modeli sahada yanlış çalışırsa kaçış kapısı."),
+    ("balon_esik", "Balon güven eşiği", "yuzde", 5, 95,
+     "Balon modelinin bir kutuyu 'balon adayı' sayması için gereken güven.\n\n"
+     "Aday kilitlenmeden önce 3 karede görülmek zorunda; tek karelik zayıf kutu zararsızdır.\n\n"
+     "↑ ARTTIRIRSAN: kırmızı gövde/tişört gibi yanlış balon azalır — ama uzak balon geç bulunur.\n"
+     "↓ AZALTIRSAN: uzak/küçük balon çabuk bulunur — ama yanlış aday artar."),
+    ("balon_cap_cm", "Balon çapı (cm)", "sayi", 0, 60,
+     "Yarışma balonunun GERÇEK çapı — mesafe buradan hesaplanır (şartname balon boyu "
+     "vermiyor). Sahada cetvelle ölçüp girin.\n\n"
+     "DOĞRULAMA: balonu 10 m'ye koyun; balon etiketinde yaklaşık '10.0m' yazmalı. Fazla "
+     "gösteriyorsa çapı AZALTIN, az gösteriyorsa ARTIRIN.\n\n"
+     "0 = bilinmiyor: mesafe hesaplanmaz, Aşama 3 menzil kontrolü yapılmaz."),
+    ("menzil_kontrol", "A3 menzil kontrolü", "anahtar", 0, 1,
+     "AÇIK: Aşama 3'te balon, aracın tipine uygun imha bandında değilse ateş edilmez "
+     "(F-16 10–15 m · Helikopter/Füze 5–15 m · İHA 0–15 m; tip okunmadıysa 10–15 m). "
+     "Bant dışı imha puan almaz. Kilit ve takip sürer; hedef banda girince ateş açılır.\n\n"
+     "Yalnız 'Balon çapı' girildiyse çalışır. Çap yanlışsa sistem hiç ateş etmeyebilir — "
+     "önce 10 m'de doğrulayın."),
 ]
 
 # SAHI (Slicing Aided Hyper Inference) — uzak/kucuk nesneleri tespit icin dilimli cikarim.
@@ -753,8 +778,9 @@ AYAR_TANIM_NISAN = [
      "Nişan noktası, hedef kutusunun ALT KENARINDAN ne kadar aşağıya konsun. "
      "Birim: hedef kutusunun YÜKSEKLİĞİ (%100 = bir maket boyu aşağı).\n\n"
      "İMHA KANITI BALONUN PATLAMASIDIR ve balon maketin ALTINDADIR — lazer gövdeye "
-     "değil balona nişan almalı. Model şu an balonu göremediği için (best.pt 4 sınıf, "
-     "balon yok) balonun yeri maketten geometrik olarak kestirilir.\n\n"
+     "değil balona nişan almalı. Bu ayar YALNIZ balon modeli yokken (ya da 'Balon "
+     "takibi' kapalıyken) kullanılır: balonun yeri maketten geometrik olarak kestirilir. "
+     "Balon takibi açıkken nişan doğrudan tespit edilen balonun merkezine gider.\n\n"
      "Oransal olması kasıtlı: balon maketin altında sabit bir FİZİKSEL mesafede durur, "
      "açısal karşılığı mesafeyle değişir. Kutu yüksekliği de aynı oranda küçüldüğü için "
      "bu ayar 5/10/15 m'de kendiliğinden doğru kalır.\n\n"
@@ -783,7 +809,6 @@ class OrtakVeri:
         self.kare_t = 0.0
         self.dets = []
         self.balonlar = []
-        self.ek_balonlar = []
         self.active_idx = -1
         self.fps = 0.0          # YOLO inference FPS
         self.kamera_fps = 0.0   # Kamera okuma FPS
@@ -811,6 +836,7 @@ class InferenceThread(QThread):
         self.kamera_acisi_fn = None
         self._onceki_kamera_acisi = None
         self.nisanci = nisan.PDNisanci()
+        self.balon_kilidi = False           # bu karede kilidi balon_takip mi kurdu
 
     def _kamera_kaymasi(self, kare_t, genislik):
         fn = self.kamera_acisi_fn
@@ -826,8 +852,31 @@ class InferenceThread(QThread):
         onceki, self._onceki_kamera_acisi = self._onceki_kamera_acisi, aci
         if onceki is not None:
             ppd = float(algi.AYAR.get("takip_ppd_pan", 18.7)) * genislik / 1280.0
-            algi.kamera_kaymasi_bildir(-(aci[0] - onceki[0]) * ppd,
-                                       (aci[1] - onceki[1]) * ppd)
+            dx, dy = -(aci[0] - onceki[0]) * ppd, (aci[1] - onceki[1]) * ppd
+            algi.kamera_kaymasi_bildir(dx, dy)
+            balon_takip.kamera_kaymasi_bildir(dx, dy)
+
+    def _algila(self, frame):
+        """Bir karenin tespitleri. Doner: (dets, balonlar, active_idx).
+
+        Balon modeli yukluyse (ve "balon_takip" acik) balonlar arac tespitlerinin
+        ARKASINA eklenir; A2/A3'te kilit ve nisan BALONA kurulur, arac yolu yalniz tespit
+        + kimlik (sinif, A3 rengi) uretir (algi.analiz_et kilit=False). Bkz. balon_takip."""
+        balon_modu = bool(self.balon_modelleri) and int(algi.AYAR.get("balon_takip", 1))
+        self.balon_kilidi = balon_modu and self.asama in (2, 3)
+        dets, balonlar, active_idx = algi.analiz_et(self.model, frame, self.estop, self.asama,
+                                                    kilit=not self.balon_kilidi)
+        if balon_modu:
+            try:
+                b_dets, b_idx = balon_takip.guncelle(self.balon_modelleri[0], frame, dets,
+                                                     self.asama, self.estop)
+            except Exception as e:
+                print(f"[UYARI] Balon takibi calismadi: {e}")
+                b_dets, b_idx = [], -1
+            if self.balon_kilidi:
+                active_idx = len(dets) + b_idx if b_idx >= 0 else -1
+            dets = dets + b_dets
+        return dets, balonlar, active_idx
 
     def run(self):
         # Ana hedef modeli: mevcut oncelik sirasinda ilk yuklenen agirlik.
@@ -889,8 +938,7 @@ class InferenceThread(QThread):
                 frame = kare.copy()
 
                 self._kamera_kaymasi(kare_t, frame.shape[1])
-                dets, balonlar, active_idx = algi.analiz_et(self.model, frame, self.estop, self.asama)
-                ek_balonlar = algi.ek_balonlari_tespit_et(self.balon_modelleri, frame, dets)
+                dets, balonlar, active_idx = self._algila(frame)
 
                 merkezde = False
                 aktif_det = dets[active_idx] if 0 <= active_idx < len(dets) else None
@@ -915,24 +963,27 @@ class InferenceThread(QThread):
                     else:
                         h, w = frame.shape[:2]
                         kutu = aktif_det["box"]
-                        # Ek balon modelinin (hedefin altinda arayan) bulduklari da
-                        # nisana GIRER: yoksa model balonu gorur, ekranda cizilir,
-                        # ama lazer yine govdeden kestirilen noktaya giderdi.
-                        hedef_xy = nisan.nisan_noktasi(kutu, balonlar + ek_balonlar)
+                        # Balon takibinin tespiti balonun KENDISIDIR: nisan merkezine
+                        # gider. Arac tespitinde altindaki balon / govdeden kestirim.
+                        hedef_xy = algi.det_nisan_noktasi(aktif_det, balonlar)
                         # Kutu yuksekligi olu bolgeyi olcekler: balon hedefle birlikte
                         # kuculdugu icin isabet olcutu de kutuya oranli olmali (sartname
                         # s.19 "kesit alanina gore belli bir buyuklukte balon").
                         d_yaw, d_pitch = self.nisanci.adim(
-                            hedef_xy, (w, h), hedef_yukseklik=abs(kutu[3] - kutu[1]))
+                            hedef_xy, (w, h), hedef_yukseklik=abs(kutu[3] - kutu[1]),
+                            olu_orani=balon_takip.OLU_ORANI if aktif_det.get("balon") else None)
                         if d_yaw is not None:
                             self.nisan_komut.emit(d_yaw, d_pitch)
                         else:
-                            merkezde = True
+                            # A3: lazerin yolunda dost varsa "nisanda" SAYILMAZ -> ates yok.
+                            merkezde = not aktif_det.get("engel")
                         (ex, ey), (olu_x, olu_y) = self.nisanci.son_hata_px, self.nisanci.son_olu_px
                         self.takip_olcum.emit({"var": True, "t": kare_t, "ex": ex, "ey": ey,
                                                "olu_x": olu_x, "olu_y": olu_y, "w": w,
                                                # teshis (takip kara kutusu): olcum kaynagi
-                                               "kaynak": ("renk" if aktif_det.get("renk") else
+                                               "kaynak": ("balon_" + aktif_det.get("kaynak", "")
+                                                          if aktif_det.get("balon") else
+                                                          "renk" if aktif_det.get("renk") else
                                                           "roi" if aktif_det.get("roi") else "model"),
                                                "id": aktif_det.get("id"), "cls": aktif_det.get("cls"),
                                                "conf": aktif_det.get("conf"), "box": kutu,
@@ -951,7 +1002,9 @@ class InferenceThread(QThread):
                         "id": iyi and iyi.get("id"), "box": iyi and iyi.get("box"),
                         "onayli": iyi is not None and algi._onayli_mi(iyi.get("id")),
                         "kirmizi": iyi and iyi.get("anlik_kirmizi"),
-                        "kilit": algi.kilitli_hedef(), "vurulan": len(algi._vurulanlar),
+                        "kilit": (balon_takip.kilitli() if self.balon_kilidi
+                                  else algi.kilitli_hedef()),
+                        "vurulan": len(algi._vurulanlar),
                         "yasak": round(max(0.0, algi._kilitleme_yasagi_t - time.time()), 2),
                         "t_gonder": time.time()})
 
@@ -964,7 +1017,6 @@ class InferenceThread(QThread):
                 with self.veri.kilit:
                     self.veri.dets = dets
                     self.veri.balonlar = balonlar
-                    self.veri.ek_balonlar = ek_balonlar
                     self.veri.active_idx = active_idx
                     self.veri.fps = fps
                     self.veri.merkezde = merkezde
@@ -1043,12 +1095,12 @@ class VideoThread(QThread):
                         kare_vardi = False
                         son_sira = None
                         algi.takip_sifirla()
+                        balon_takip.sifirla()
                         self.inference_thread.nisanci.sifirla()
                         with self.veri.kilit:
                             self.veri.kare = None
                             self.veri.dets = []
                             self.veri.balonlar = []
-                            self.veri.ek_balonlar = []
                             self.veri.active_idx = -1
                     self.msleep(50)
                     continue
@@ -1084,17 +1136,16 @@ class VideoThread(QThread):
                     self.veri.kamera_fps = kamera_fps
                     dets = list(self.veri.dets)
                     balonlar = list(self.veri.balonlar)
-                    ek_balonlar = list(self.veri.ek_balonlar)
                     active_idx = self.veri.active_idx
                     fps = self.veri.fps
                     k_fps = self.veri.kamera_fps
 
                 data = self._panel_verisi(dets, active_idx, fps, k_fps)
                 data["dets"] = dets
-                data["balonlar"] = balonlar + ek_balonlar
+                data["balonlar"] = balonlar
                 # Ekrandaki nisangah, PD'nin kullandigi listeyle AYNI olmali —
                 # ayrilsaydi operator lazerin gittigi yerden baska nokta gorurdu.
-                data["nisan_balonlar"] = balonlar + ek_balonlar
+                data["nisan_balonlar"] = balonlar
                 data["active_idx"] = active_idx
                 aktif = dets[active_idx] if 0 <= active_idx < len(dets) else None
                 data["kirmizi_kaniti"] = bool(aktif and not aktif.get("hayalet")
@@ -1150,11 +1201,18 @@ class VideoThread(QThread):
         if active_idx >= 0 and not self.estop:
             try:
                 d = dets[active_idx]
-                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"]}
+                # hayalet: ates kapisi gorunmeyen hedefe ates etmez / atesi keser (bu anahtar
+                # eskiden buraya hic yazilmiyordu — kapi yalniz testte calisiyordu).
+                active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"],
+                          "hayalet": bool(d.get("hayalet")), "balon": bool(d.get("balon")),
+                          "engel": d.get("engel")}
             except IndexError:
                 pass
+        imha = balon_takip.son_imha()
         if self.estop:
             mesaj = "ACİL DURDURULDU — ateş ve kilit kesildi"
+        elif imha["sayi"] and simdi - imha["t"] < 3.0:
+            mesaj = f"Balon patladı — imha #{imha['sayi']}"
         elif time.time() < algi._kilitleme_yasagi_t:
             kalan = int(algi._kilitleme_yasagi_t - time.time())
             mesaj = f"İmha tamamlandı. Jüri onayı bekleniyor... ({kalan} sn)"
@@ -1406,7 +1464,7 @@ class MainWindow(QMainWindow):
             if self.kontrol.tilt_ayri:
                 self.tilt_timer = QTimer(self)
                 self.tilt_timer.timeout.connect(self.kontrol.tilt.yokla)
-                self.tilt_timer.start(100)
+                self.tilt_timer.start(TS.YOKLAMA_MS)
         elif self.kontrol.hata:
             self._ci("ESP32", BD2, "· hata")
 
@@ -1564,6 +1622,11 @@ class MainWindow(QMainWindow):
         self.estop_btn = QPushButton("⏻ ACİL DURDUR")
         self.estop_btn.setObjectName("estop")
         self.estop_btn.setCheckable(True)
+        self.estop_btn.setToolTip(
+            "ACİL DURDUR: lazer kesilir, iki eksen olduğu yerde durur, kart kilitlenir.\n"
+            "Kısayol: klavyede [Backspace] · kolda [Options] veya [Daire / B].\n"
+            "Kısayollar YALNIZ DURDURUR — devam için bu butona (DEVAM ET) tıklayın.\n"
+            "Donanım butonu (kart GPIO 15) basılıyken devam edilemez.")
         self.estop_btn.clicked.connect(self._estop_bas)
         ekle(self.estop_btn)
         return bar
@@ -2097,7 +2160,13 @@ class MainWindow(QMainWindow):
     def _hedef_secildi(self, track_id):
         if track_id is None:
             return
-        algi.hedef_sec(None if algi.kilitli_hedef() == track_id else track_id)
+        if balon_takip.balon_id_mi(track_id):
+            balon_takip.hedef_sec(None if balon_takip.kilitli() == track_id else track_id)
+        elif getattr(self.inference_thread, "balon_kilidi", False):
+            # Kilit balonda: listeden secilen ARACIN (kartla bagli) balonu kilitlenir.
+            balon_takip.araca_gore_sec(track_id)
+        else:
+            algi.hedef_sec(None if algi.kilitli_hedef() == track_id else track_id)
 
     def _otonom_kontrol_panel(self):
         """Otonom mod paneli — takip durumu, aktif hedef bilgisi ve nisan durumu."""
@@ -2343,6 +2412,12 @@ class MainWindow(QMainWindow):
         self._tekrar_timer = QTimer(self)
         self._tekrar_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._tekrar_timer.timeout.connect(self._tekrar_tik)
+        # manuel yorunge: son gonderilen hiz (pan, tilt; None = o eksen surulmuyor)
+        self._manuel_hiz, self._manuel_hiz_t, self._manuel_kaynak = None, 0.0, None
+        self._fren_hiz, self._fren_bitis = None, 0.0
+        self._fren_timer = QTimer(self)
+        self._fren_timer.setInterval(self.TEKRAR_PERIYOT_MS)
+        self._fren_timer.timeout.connect(self._fren_tik)
 
         # Klavyeden ATES: [Space] ya da [B] -> ac/kes (bekleme yok). Kaza
         # ile tek tusa basmak lazeri acmasin diye kasitli olarak zor bir hareket.
@@ -2643,6 +2718,14 @@ class MainWindow(QMainWindow):
     # harekete gecilir.
     TEKRAR_GECIKME_MS = 300
     TEKRAR_PERIYOT_MS = 50
+    # BASILI TUTMA / KOL CUBUGU = YORUNGE (24.09): karta 50 ms'de bir yeni KONUM hedefi
+    # gidiyordu; hedef kartin fren mesafesinin (40 der/sn, 400 der/sn^2'de ~2 der) altina
+    # dustukce motor frenleyip yeniden hizlaniyordu — testere disi, "sert" manuel hareket.
+    # Artik (konum, hiz) gider, kart sabit hizla AKAR (otonom takiple ayni yol). Birakinca
+    # FREN: hiz 0 ve hedef = kartin ZIPLAMADAN durabilecegi nokta (v^2/2a ileri); FREN_S
+    # boyunca tazelenir (kart 150 ms komutsuz kalirsa oturmadan dururdu). Kart yorunge
+    # bilmiyorsa (eski firmware) `_aci_hareket` eskisi gibi konum komutu yollar.
+    FREN_S = 0.4
     CAM_KUTU_EN = 300           # yasak alan / lazer cam kutucuk genisligi
 
     # ---- kol gostergesi (hangi tusa basildi) -------------------------------
@@ -2683,6 +2766,7 @@ class MainWindow(QMainWindow):
         ad, kpan, ktilt = self.YON_TABLO[direction]
         getattr(self, ad).setStyleSheet(self._key_active_style)
         self._kol_isik(direction, True)
+        self._fren_durdur()
         self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)   # tek dokunus
         self._basili_yonler.add(direction)
         if not self._tekrar_timer.isActive():
@@ -2754,8 +2838,7 @@ class MainWindow(QMainWindow):
         self._gp_ates_basili = d.ates_basili
 
         if d.estop:
-            self.estop_btn.setChecked(not self.estop_btn.isChecked())
-            self._estop_bas()
+            self._estop_kisayolu()                  # YALNIZ kurar; devam arayuz butonundan
             return                                  # ayni tikta baska komut isleme
 
         # ATES: L2 + R2 birlikte -> AC/KES (tek dokunus, bekleme yok).
@@ -2771,8 +2854,11 @@ class MainWindow(QMainWindow):
         # gonderilseydi hedef motorun onune gecer, cubuk birakildiginda gimbal
         # yetismek icin donmeye devam ederdi.
         if d.hareket_var:
-            adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt
-            self._aci_hareket(d.pan * adim, d.tilt * adim)
+            v = P.HIZ_TABLO[self.hiz_seviye][0]
+            self._fren_durdur()
+            self._manuel_komut(d.pan * v, d.tilt * v, dt, simdi, "kol")
+        elif self._manuel_kaynak == "kol":
+            self._manuel_fren()                     # cubuk birakildi: yumusak dur
 
     def _tekrar_baslat(self):
         if self._basili_yonler:
@@ -2793,19 +2879,87 @@ class MainWindow(QMainWindow):
         simdi = time.time()
         dt = min(0.2, simdi - self._son_tekrar_t)      # takilma sonrasi sicrama olmasin
         self._son_tekrar_t = simdi
-        adim = P.HIZ_TABLO[self.hiz_seviye][0] * dt    # derece/sn x sn
+        v = P.HIZ_TABLO[self.hiz_seviye][0]            # derece/sn
         kpan = ktilt = 0.0
         for yon in self._basili_yonler:                # W+D gibi capraz kombinasyonlar
             _, p, t = self.YON_TABLO[yon]
             kpan += p
             ktilt += t
-        if (kpan or ktilt) and not self._aci_hareket(kpan * adim, ktilt * adim):
+        # kpan = 0 (sag+sol birlikte) da gonderilir: az once akan eksen frenlensin
+        if not self._manuel_komut(kpan * v, ktilt * v, dt, simdi, "tus"):
             self._tekrar_durdur()                      # E-Stop / yasak alan: tekrari kes
 
     def _tekrar_durdur(self):
         self._tekrar_gecikme.stop()
         self._tekrar_timer.stop()
         self._basili_yonler.clear()
+        if self._manuel_kaynak == "tus":
+            self._manuel_fren()
+
+    def _yorunge_var(self):
+        k = getattr(self, "kontrol", None)
+        return bool(k and k.bagli and getattr(k, "yorunge_destekli", False))
+
+    def _fren_yolu(self, v, ivme, gecen):
+        """v hizla akan eksenin durabilecegi yere kalan yol: son komuttan beri alinan yol
+        (kart referansi kendisi ilerletir) + fren mesafesi v^2/2a."""
+        return 0.0 if not v else v * gecen + math.copysign(v * v / (2.0 * ivme), v)
+
+    def _manuel_komut(self, pan_v, tilt_v, dt, simdi, kaynak):
+        """Manuel akis (der/sn; 0 = o eksen surulmuyor) — tek kapi `_aci_hareket`.
+
+        Kart yorunge biliyorsa (konum, hiz) gider. Az once akan ama artik surulmeyen eksen
+        FRENLENIR: capraz W+D'de D birakilinca pan yoksa kartta 150 ms daha akip ~7 der
+        kacar, ekrandaki aci gercekten koparirdi. Kart yorunge bilmiyorsa eski yol: konum."""
+        if not self._yorunge_var():
+            return self._aci_hareket(pan_v * dt, tilt_v * dt)
+        onceki = self._manuel_hiz or (None, None)
+        (_, pan_ivme), (_, tilt_ivme) = self.kontrol.hiz_profilleri()
+        gecen = min(0.2, max(0.0, simdi - self._manuel_hiz_t))
+        d, hiz = [], []
+        for v, v_once, ivme in ((pan_v, onceki[0], pan_ivme), (tilt_v, onceki[1], tilt_ivme)):
+            if v:
+                d.append(v * dt); hiz.append(v)
+            elif v_once:                               # birakildi: durabilecegi yere hiz 0
+                d.append(self._fren_yolu(v_once, ivme, gecen)); hiz.append(0.0)
+            elif v_once == 0.0:                        # frenleniyor: hedefte tut
+                d.append(0.0); hiz.append(0.0)
+            else:
+                d.append(0.0); hiz.append(None)
+        hiz = tuple(hiz)
+        if hiz == (None, None):
+            return True
+        if not self._aci_hareket(d[0], d[1], hiz=hiz):
+            return False
+        self._manuel_hiz, self._manuel_hiz_t, self._manuel_kaynak = hiz, simdi, kaynak
+        return True
+
+    def _manuel_fren(self):
+        """Basili tutma / cubuk BIRAKILDI: kart yorungede v hizla akiyor. Hiz 0 yorungesi,
+        kartin ivmesiyle ZIPLAMADAN durabilecegi noktaya (su anki referans + v^2/2a) verilir
+        ve FREN_S boyunca tazelenir. Hedef hareket kapisindan (`_aci_hareket`) gecer: E-Stop,
+        pencere ve mekanik sinir burada da uygulanir."""
+        hiz, self._manuel_hiz, self._manuel_kaynak = self._manuel_hiz, None, None
+        if not hiz or not self._yorunge_var() or self._hareket_kilitli():
+            return
+        (_, pan_ivme), (_, tilt_ivme) = self.kontrol.hiz_profilleri()
+        gecen = min(0.2, max(0.0, time.time() - self._manuel_hiz_t))   # son komuttan beri
+        fren = (0.0 if hiz[0] is not None else None, 0.0 if hiz[1] is not None else None)
+        if self._aci_hareket(self._fren_yolu(hiz[0], pan_ivme, gecen),
+                             self._fren_yolu(hiz[1], tilt_ivme, gecen), hiz=fren):
+            self._fren_hiz, self._fren_bitis = fren, time.time() + self.FREN_S
+            self._fren_timer.start()
+
+    def _fren_tik(self):
+        """Fren hedefini (hiz 0) tazeler; sure dolunca ya da kapi reddedince biter."""
+        if (self._fren_hiz is None or time.time() >= self._fren_bitis or self.mod == "Otonom"
+                or not self._aci_hareket(0.0, 0.0, hiz=self._fren_hiz)):
+            self._fren_durdur()
+
+    def _fren_durdur(self):
+        self._fren_hiz = None
+        if getattr(self, "_fren_timer", None) is not None:
+            self._fren_timer.stop()
 
     def _tuslari_birak(self):
         """Tum yon tuslarini birakilmis say (tekrari kes + basili stilleri sifirla)."""
@@ -2897,6 +3051,8 @@ class MainWindow(QMainWindow):
                 return
             self.tilt_aci = TS.ACI_MIN
             self._tilt_goster()
+            if not self.kontrol.tilt.hazir:
+                return                  # R sonrasi ilk durum gelince (sonraki yoklamada)
         if abs(self.tilt_aci) <= 0.2:
             self._acilis_yukselisi_bekliyor = False
             return
@@ -3334,6 +3490,7 @@ class MainWindow(QMainWindow):
         adim adim yapilir; yolda operator yon verirse ya da E-Stop gelirse durur."""
         if self._hareket_kilitli():
             return False
+        self._fren_durdur()
         self._merkez_son_t = time.time()
         self._merkez_timer.start(self.TEKRAR_PERIYOT_MS)
         self.sb_msg.setText(f'<span style="color:{BLUE}">●</span>&nbsp;Merkeze alınıyor…')
@@ -3608,12 +3765,28 @@ class MainWindow(QMainWindow):
         self._ates_kisayolu()                 # -> _ates_bas (tek kapi)
         return True
 
+    def _estop_kisayolu(self):
+        """Klavye [Backspace] / kol [Options], [Daire/B]: ACIL DURDURU KURAR, asla kaldirmaz.
+
+        Kaldirma (DEVAM) yalniz arayuz butonundan: panikte iki kez basmak ya da tusa
+        takili kalmak acil durdurmayi sessizce kaldirmamali (eski kol yolu bunu yapiyordu).
+        Kurmak `_estop_bas` uzerinden gider — butonla ayni tek kapi."""
+        btn = getattr(self, "estop_btn", None)
+        if btn is None or btn.isChecked():
+            return
+        btn.setChecked(True)
+        self._estop_bas()
+
     def _tus_bas(self, event):
         """Klavyenin TEK kapisi (basma). Doner: tus bizimse True.
         Hareket `_dpad_press` -> `_aci_hareket` ile gider: ekran + KART (motor) birlikte."""
         # [Esc] = ateşi kes. Her modda ve her durumda; kesmek her zaman guvenlidir.
         if event.key() == Qt.Key_Escape:
             self._ates_kes("ESC")
+            return True
+        # [Backspace] = ACIL DURDUR (yalniz kurar). Tekrar/basili tutma zararsiz.
+        if event.key() == Qt.Key_Backspace:
+            self._estop_kisayolu()
             return True
         if self._ates_tusu(event, basildi=True):
             return True
@@ -3624,7 +3797,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _tus_birak(self, event):
-        if event.key() == Qt.Key_Escape:
+        if event.key() in (Qt.Key_Escape, Qt.Key_Backspace):
             return True
         if self._ates_tusu(event, basildi=False):
             return True
@@ -3662,6 +3835,7 @@ class MainWindow(QMainWindow):
         
         # Asama (gorev) degistiginde eski hedefe kilitli kalmamak icin kilidi sifirla
         algi.hedefi_birak_ve_bekle(0.0)
+        balon_takip.kilidi_birak()
 
         if self.asama:
             self.asama_pill.setText(self.asama)
@@ -3700,14 +3874,19 @@ class MainWindow(QMainWindow):
         ediyor" gibi gorunur). Artik hareket kapisi da E-Stop'ta kapaniyor.
         """
         aktif = self.estop_btn.isChecked()
-        self._kol_isik("start", aktif)      # koldaki Options: E-Stop suresince yanar
+        self._kol_isik("start", aktif)      # koldaki Options/Daire: E-Stop suresince yanar
+        self._kol_isik("daire", aktif)
         self.thread.estop = aktif
         self.inference_thread.estop = aktif
         self.estop_btn.setText("▶ DEVAM ET" if aktif else "⏻ ACİL DURDUR")
         # 1. ATES kapisi (Yetenek 4) — kesme islemi tek yoldan (_ates_kes) gecer.
         if aktif:
-            # DEVAM'da gecikmis bir acilis hareketi kendiliginden baslamasin.
-            self._acilis_yukselisi_bekliyor = False
+            # DEVAM'da ONAYLANMIS ama yarim kalmis bir acilis hareketi kendiliginden
+            # baslamasin. Soru HENUZ sorulmadiysa bekleme surer: DEVAM'dan sonra soru gelir
+            # ve hareket yine operatorun EVET'iyle olur. (24.09: kart kilitli acilinca soru
+            # hic gelmiyordu; sayac onceki oturumun acisinda kaliyordu.)
+            if getattr(self, "_acilis_sifir_soruldu", False):
+                self._acilis_yukselisi_bekliyor = False
             self._ates_kes("ACİL DURDUR")
         self.fire_btn.setEnabled(not aktif)
         # 2. HAREKET kapisi (Yetenek 3): manuel yon kontrolleri kilitlenir.
@@ -3845,6 +4024,11 @@ class MainWindow(QMainWindow):
             if btn is not None and not btn.isChecked():
                 btn.setChecked(True)
                 self._estop_bas()
+        elif (getattr(self, "fire_btn", None) is not None and self.fire_btn.isChecked()
+              and not d["lazer"]):
+            # Kart lazeri KENDISI kesti (olu adam anahtari / kontrol kapandi): ATES butonu
+            # "yaniyor" gostermeye devam etmesin; operator yeniden bilincli ates etmeli.
+            self._ates_kes("Kart lazeri kesti")
 
     def _esp_yokla(self):
         """Karttan gelen metinleri periyodik olarak alir (250 ms) ve ATESI TAZELER.
@@ -4043,11 +4227,6 @@ class MainWindow(QMainWindow):
         base = ad
         lbl.setText(f'{base}<small style="color:{TXT3}">&nbsp;{alt}</small>')
 
-    def _badge_stil(self, badge, tip):
-        """Dost/düşman rozeti — Apple'ın tonlanmış (tinted) kapsül dili."""
-        renk = {"Düşman": T.KIRMIZI, "Dost": T.AKSAN}.get(tip, T.L3)
-        badge.setStyleSheet(T.rozet(renk))
-
     def _saat_guncelle(self):
         self.clk.setText(time.strftime("%H:%M:%S"))
 
@@ -4133,7 +4312,7 @@ class MainWindow(QMainWindow):
                     # bu cizimi besler — ikisi ayri hesaplansaydi ekran lazerin gittigi
                     # yeri YANLIS gosterirdi ve operator kalibrasyonu (balon_ofset)
                     # neye gore cevirecegini goremezdi.
-                    hx, hy = nisan.nisan_noktasi(d["box"], data.get("nisan_balonlar", []))
+                    hx, hy = algi.det_nisan_noktasi(d, data.get("nisan_balonlar", []))
                     cx, cy = hx * scale_x, hy * scale_y
                     pen.setColor(color)
                     painter.setPen(pen)
@@ -4256,7 +4435,19 @@ class MainWindow(QMainWindow):
                     self.fire_btn.setChecked(False)
                     self._ates_kes("Hedef kayboldu")
             return
-        
+        # A3 DOST ONUNDE (balon_takip._dost_engeli): lazerin yolunda dost arac/balon var.
+        # Dwell baslamaz, suren ates kesilir — dost vurmak -10 puan.
+        if a and a.get("engel"):
+            self._otonom_hedef_merkezde_t = None
+            self._ates_kapi_yaz("Ateş engelli", a["engel"], AMB)
+            if self._otonom_ates_aktif:
+                self._otonom_ates_aktif = False
+                if self.fire_btn.isChecked():
+                    self.fire_btn.setChecked(False)
+                    self._ates_kes(a["engel"])
+            return
+        lazer_gercek = getattr(self.kontrol, "lazer_gercek", False)
+
         # Hedef merkezde ise zamani tut (Dwell Time tetikleyicisi)
         if a and data.get("merkezde", False):
             if self._otonom_hedef_merkezde_t is None:
@@ -4269,6 +4460,9 @@ class MainWindow(QMainWindow):
                 if not self.fire_btn.isChecked():
                     self.fire_btn.setChecked(True)
                     self._ates_bas()
+                if a.get("balon"):
+                    # Imha dogrulamasi: bu andan sonra kaybolan balon = patladi.
+                    balon_takip.ates_basladi(lazer_gercek)
             elif not self._otonom_ates_aktif:
                 self._ates_kapi_yaz("Nişanda — bekleniyor",
                                     f"dwell {gecen:.1f} / {OTONOM_DWELL_SURE:.1f} sn", BLUE)
@@ -4295,9 +4489,14 @@ class MainWindow(QMainWindow):
                 # Baslat.bat'ta port bos gecilince) ates hicbir yere gitmez. 23.09 saha:
                 # her kilitten 1.5 sn sonra hedef "vuruldu" sayilip 10 sn secilmedi —
                 # "hedefi goruyor ama + cikmiyor, yonelmiyor" sikayeti buydu.
+                # BALON: "vuruldu" yasagi YOK — patlayan balon kaybolur (imha, balon_takip
+                # siradakine gecer); patlamayan balona AZAMI_ATES tur sonra birakilir.
                 if a and simdi >= self._otonom_ates_bitis_t:
-                    if getattr(self.kontrol, "lazer_gercek", False):
-                        algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
+                    if a.get("balon"):
+                        balon_takip.ates_tamamlandi(lazer_gercek)
+                    if lazer_gercek:
+                        if not a.get("balon"):
+                            algi.hedef_vuruldu(OTONOM_BEKLEME_SURE)
                     else:
                         self.sb_msg.setText(
                             f'<span style="color:{AMB}">●</span>&nbsp;Lazer kartı bağlı değil '
@@ -4412,7 +4611,10 @@ class MainWindow(QMainWindow):
             self.gp_timer.stop()
             self.gamepad.kapat()
         if self.kontrol.bagli:
-            self.kontrol.estop(True)   # kapanista guvenli duruma al
+            # Kapanista guvenli dur: lazer soner, eksenler durur, kart kontrolu kapanir (D).
+            # Kart KILITLENMEZ — kilit USB'den beslenen kartta sonraki acilisa tasiniyor,
+            # acilis 30 derece sorusunu yutuyordu (24.09, bkz. Kontrol.estop).
+            self.kontrol.estop(True, kart_kilidi=False)
             self.kontrol.kapat()
         e.accept()
 

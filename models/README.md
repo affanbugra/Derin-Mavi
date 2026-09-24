@@ -1,14 +1,15 @@
 # models/ — Görüntü işleme modeli
 
-Takımın ortak hedef ağırlığı **`models/best.pt`** olarak repoda durur. Ayrı bir balon
-ağırlığı da aynı klasöre konabilir (ör. **`models/bestb2.pt`**); uygulama sınıf adlarına
-bakarak iki modeli aynı kamera karesinde otomatik çalıştırır.
+Takımın ortak hedef ağırlığı **`models/best.pt`**, balon ağırlığı **`models/bestb2.pt`**
+olarak repoda durur. Uygulama sınıf adlarına bakarak iki modeli aynı kamera karesinde
+otomatik çalıştırır.
 
 ## Repoda ne var, ne yok
 
 | Dosya | Repoda? | Neden |
 |---|---|---|
 | `best.pt` | ✅ **var** | Ortak ağırlık. 18 MB, taşınabilir; her makinede aynı. |
+| `bestb2.pt` | ✅ **var** | Balon modeli (YOLO11n, 5 MB, 640). Aşama 2/3'te kilit ve nişan buna dayanır. |
 | `best.onnx` / `best_openvino_model/` | ❌ yok | `best.pt`'den üretilir, repoda tutmak tekrar olur. |
 | `best.engine` | ❌ yok | **TensorRT çıktısı GPU modeline, TensorRT sürümüne ve sürücüye bağlıdır — başka makinede açılmaz bile.** Herkes kendisi üretmeli. |
 
@@ -37,17 +38,19 @@ yolo export model=models/best.pt format=openvino
 4. Ana model balon sınıfı içermiyorsa diğer ağırlıklar taranır; `balon`, `balloon`,
    `green-balloon`, `red-balloon` benzeri sınıfları içeren modeller ek balon modeli olur.
 
-Ek balon modeli tam kareyi tek başına taramaz. Ana model önce bir F-16, helikopter, İHA veya
-füze tanır; ardından balon modeli yalnızca bulunan maketin gövdesi ve altındaki sınırlı bölgede
-çalışır. Bu bölgenin dışında kalan bağımsız balonlar gösterilmez. Aynı modelin `best.pt`,
+**Balon takibi (`app/balon_takip.py`, 24.09):** Aşama 2/3'te kilit ve nişan **balona**
+kurulur; araç yalnız balonun kimliğini söyler. Balon modeli her karede tam kareyi ve (küçük
+balonda) balonun çevresini büyüterek tarar — kare başına tek toplu çıkarım. Araç göründüğü
+karelerde hemen altındaki balonun kimlik kartına taraf (gövde rengi) ve tip yazılır; araç
+modeli okuyamazsa balonun hemen üstündeki gövdenin rengi taraf oyu verir (mavi öncelikli). Kart
+bir kez kesinleşince araç görünmese de geçerlidir. Aşama 2'de her balon hedeftir, Aşama 3'te yalnız
+kartı "Düşman" olan balona ateş edilir. Ateş edilen balon kaybolursa imha sayılır. Ayrıntı ve
+eşikler modülün başında.
+
+Balon modeli yoksa ya da ayar panelinde "Balon takibi" kapalıysa eski yol çalışır: araca
+kilitlenilir, balonun yeri gövdeden kestirilir (`balon_ofset`). Aynı modelin `best.pt`,
 `best.onnx`, `best.engine` gibi farklı çıktıları dosya adına göre tek aile sayılır ve gereksiz
 yere iki kez belleğe alınmaz.
-
-Balon **yalnız düşman hedefin altında** aranır (Aşama 3'te rengi "Dost" okunan makete ateş
-edilmez; onun balonunu bulmak boşuna işlem demektir — Aşama 1–2'de taraf hiç okunmaz, her
-hedefin altı taranır). Bulunan balon sadece çizilmez, **nişan noktası olur**: lazer balonun
-merkezine kilitlenir, birden fazla aday varsa maketin asılma noktasına en yakın olan seçilir.
-Balon bulunamazsa nişan eskisi gibi gövdeden kestirilir (`balon_ofset` ayarı).
 
 Yalnızca `models/` **kökü** taranır — alt klasördeki model **bulunmaz**.
 
@@ -60,8 +63,16 @@ alt çubukta "Model yok" uyarısı görünür.
 DRONE · F16 · FUZE · HELIKOPTER
 ```
 
-**`balon` sınıfı ana modelde YOK.** Balonlar ayrı bir ağırlıktan da algılanıp canlı görüntüde
-gösterilebilir. Alt çubuktaki sınıf özeti, yüklenen modellerin birleşik sınıf listesini yazar.
+**`balon` sınıfı ana modelde YOK** — balonu `bestb2.pt` tanır (`green-balloon`,
+`red-balloon`; ikisi de "balon" sayılır, şartname: balon rengi değişebilir, hepsi aynı renkte).
+⚠ Balon modeli renge çok dayanıyor: düzensiz kırmızı bir leke de %93 "balon" çıkabiliyor;
+koridor videosunda (24.09) gri cam kapıyı %57, kırmızı tişörtü ve zemindeki yansımayı da
+"balon" buldu. `balon_takip` bunlara karşı kırmızı oranı + en/boy süzgeci, gövde ve dikey
+devir kurallarını uygular. Küçük balonu **büyütülmüş pencerede** iyi görür (128 px pencere).
+⚠ Aynı videoda altında drone asılı ~18 m'deki balonu hiçbir ölçekte görmedi — yeniden eğitimde
+bu tür kareler (uzak, gövdeye yapışık balon) eklenmeli. `best.pt` el yapımı drone/F16'yı da
+neredeyse hiç okumadı. Alt çubuktaki
+sınıf özeti, yüklenen modellerin birleşik sınıf listesini yazar.
 
 Yeni model eğitildiğinde **5 sınıfın tamamı** (`f16, helikopter, drone, fuze, balon`)
 bulunmalı. Yeni `best.pt`'yi bu klasöre koyup commit'lemen yeterli; alt çubuk modelin

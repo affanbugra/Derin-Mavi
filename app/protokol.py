@@ -85,11 +85,6 @@ MAKS_STEP_SN = 8000.0
 #   duzeltilene kadar buradaki sayilar komut acisidir, fiziksel aci degil.
 TILT_MIN, TILT_MAX = 0.0, 180.0
 
-# Arayuzun ACILIS calisma siniri (operator ⚙ panelinden TILT_MAX'a kadar yukseltir).
-# Tavan 180'e cikarildi ama varsayilan 90'da birakildi: kimse istemeden namluyu arkaya
-# devirmesin. "Daha yukari cikmam lazim" diyen operator bilincli olarak yukseltir.
-TILT_CALISMA_VARSAYILAN = 90.0
-
 # ---- LAZER GUCU (PWM duty %) — firmware LAZER_GUC_VARSAYILAN ile AYNI olmali ----
 # Lazer surucusunun PWM girisi duty oraniyla gucu belirler; tam guc kullanilmiyor.
 # ⚠ Dusuk guc DWELL SURESINI uzatir: %40'ta balonun patlamasi tam guce gore ~2.5 kat
