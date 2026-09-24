@@ -56,6 +56,7 @@ bu dosyada yapilir; disaridaki kod G/STATE3'un ham acisini kullanmaz.
 """
 import math
 import os
+import re
 import time
 
 # ---- Kart sabitleri (ws_motor_test/esp32_ws_test/motion_core.h ile AYNI olmali) ----
@@ -266,6 +267,20 @@ KAYNAK = os.environ.get("DERINMAVI_TILT", "off").strip() or "off"
 # Firmware IKISINI DE dinler (Serial + Serial0), yani ikisi de gecerlidir; sorun
 # yalnizca numarayi elle yazmaktir. `DERINMAVI_TILT=auto` bu isi bitirir.
 ESP_VIDLER = (0x303A, 0x1A86)
+
+
+def port_adi(ad):
+    """Kullanicinin yazdigi port adini isletim sistemine uygun hale getirir.
+
+    YALNIZ Windows bicimi (`com3`) buyuk harfe cevrilir. macOS/Linux'ta port bir
+    DOSYA YOLUDUR ve buyuk/kucuk harf duyarlidir: eskiden her ad `.upper()` ile
+    buyutuluyordu, `/dev/cu.usbmodem1101` -> `/DEV/CU.USBMODEM1101` olup "No such
+    file" ile acilamiyordu (Mac'te kart takiliyken "cihaz yok"). Windows'ta davranis
+    AYNEN korunur: `COM3`/`com3` yine `COM3` olur."""
+    ad = ad.strip()
+    if re.fullmatch(r"(?i)com\d+", ad):
+        return ad.upper()
+    return ad
 
 
 def otomatik_port_bul(dinleme=0.8, gunluk=None):
@@ -967,7 +982,7 @@ class TiltSurucu:
                                      write_timeout=0.05)
             baglanti.dtr = False
             baglanti.rts = False
-            baglanti.port = self.kaynak.upper()
+            baglanti.port = port_adi(self.kaynak)
             baglanti.open()
             baglanti.reset_input_buffer()
             self.seri = baglanti
@@ -1605,6 +1620,13 @@ class TiltSurucu:
 
 
 if __name__ == "__main__":
+    # ---- port adi: Windows eskisi gibi, Mac/Linux yolunun harfleri korunur ----
+    assert port_adi("COM3") == "COM3" and port_adi("com12") == "COM12"   # Windows aynen
+    assert port_adi(" com5 ") == "COM5"
+    assert port_adi("/dev/cu.usbmodem1101") == "/dev/cu.usbmodem1101", "Mac yolu bozuldu"
+    assert port_adi("/dev/ttyUSB0") == "/dev/ttyUSB0"                     # Linux
+    assert port_adi("/dev/cu.wchusbserial1420") == "/dev/cu.wchusbserial1420"
+
     # ---- komut bicimi: kart strtod ile okur, keyboard_control.py ile AYNI bicim ----
     # OPERATOR acisi girer, karta KOL acisi cikar (fark: KULLANICI_SIFIR)
     assert git(12.5) == f"G{12.5 + KULLANICI_SIFIR:.4f}\n"

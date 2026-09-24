@@ -93,7 +93,8 @@ class Kontrol:
         else:                       # gercek seri port (or. COM5, /dev/ttyUSB0)
             try:
                 import serial       # pyserial — yalniz gercek portta gerekir
-                self.seri = serial.Serial(self.kaynak.upper(), 115200, timeout=0.05)
+                # port_adi: Windows'ta COM3 aynen; Mac/Linux yolunun harfleri korunur
+                self.seri = serial.Serial(T.port_adi(self.kaynak), 115200, timeout=0.05)
                 # NOT: bircok ESP32 karti port acilinca (DTR/RTS) RESET atar; acilis
                 # banner'i ve ilk komutlarin yanki satirlari karisabilir. Komutlar MUTLAK
                 # oldugu icin bu kalici bir sapma yaratmaz (bkz. protokol.py).
