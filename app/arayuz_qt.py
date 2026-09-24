@@ -817,6 +817,7 @@ class OrtakVeri:
         self.kare_sira = -1
         self.kare_t = 0.0
         self.dets = []
+        self.dets_t = None      # dets'in geldigi karenin kamera zamani (kayma telafisi)
         self.balonlar = []
         self.active_idx = -1
         self.fps = 0.0          # YOLO inference FPS
@@ -824,6 +825,24 @@ class OrtakVeri:
         self.merkezde = False   # Hedef olu bolgede mi (dwell icin)
         self.nisan_hata_px = None   # teshis: (px, py) nisan noktasi - lazer referansi
         self.olu_bolge_px = None    # teshis: (olu_x, olu_y) o karedeki isabet yaricapi
+
+def kamera_kaymasi_px(fn, t0, t1, genislik):
+    """Kamera `t0` -> `t1` arasinda donunce goruntudeki sahne kac px kaydi (dx, dy).
+    fn: t -> (pan, kamera yukselisi) derece ya da None (kart/gecmis yok -> None doner).
+    Isaret: pan saga (+) donerse sahne SOLA kayar (dx < 0). Algi (kamera_kaymasi_bildir)
+    ve ekran cizimi (kutularin gecikme telafisi) AYNI hesabi kullanir."""
+    if fn is None or t0 is None or t1 is None:
+        return None
+    try:
+        gecikme = float(algi.AYAR.get("kamera_gecikme", 0.03))
+        a0, a1 = fn(t0 - gecikme), fn(t1 - gecikme)
+    except Exception:
+        return None
+    if a0 is None or a1 is None or None in a0 or None in a1:
+        return None
+    ppd = float(algi.AYAR.get("takip_ppd_pan", 18.7)) * genislik / 1280.0
+    return -(a1[0] - a0[0]) * ppd, (a1[1] - a0[1]) * ppd
+
 
 # =====================================================================
 #  Algilama (Inference) is parcacigi (Thread 2)
@@ -843,27 +862,17 @@ class InferenceThread(QThread):
         self.estop = False
         self.otonom = False                 # Otonom modda mi
         self.kamera_acisi_fn = None
-        self._onceki_kamera_acisi = None
+        self._onceki_kare_t = None
         self.nisanci = nisan.PDNisanci()
         self.balon_kilidi = False           # bu karede kilidi balon_takip mi kurdu
 
     def _kamera_kaymasi(self, kare_t, genislik):
-        fn = self.kamera_acisi_fn
-        if fn is None:
+        onceki_t, self._onceki_kare_t = self._onceki_kare_t, kare_t
+        kayma = kamera_kaymasi_px(self.kamera_acisi_fn, onceki_t, kare_t, genislik)
+        if kayma is None:
             return
-        try:
-            aci = fn(kare_t - float(algi.AYAR.get("kamera_gecikme", 0.03)))
-        except Exception:
-            aci = None
-        if aci is None or None in aci:
-            self._onceki_kamera_acisi = None
-            return
-        onceki, self._onceki_kamera_acisi = self._onceki_kamera_acisi, aci
-        if onceki is not None:
-            ppd = float(algi.AYAR.get("takip_ppd_pan", 18.7)) * genislik / 1280.0
-            dx, dy = -(aci[0] - onceki[0]) * ppd, (aci[1] - onceki[1]) * ppd
-            algi.kamera_kaymasi_bildir(dx, dy)
-            balon_takip.kamera_kaymasi_bildir(dx, dy)
+        algi.kamera_kaymasi_bildir(*kayma)
+        balon_takip.kamera_kaymasi_bildir(*kayma)
 
     def _algila(self, frame):
         """Bir karenin tespitleri. Doner: (dets, balonlar, active_idx).
@@ -1025,6 +1034,7 @@ class InferenceThread(QThread):
 
                 with self.veri.kilit:
                     self.veri.dets = dets
+                    self.veri.dets_t = kare_t
                     self.veri.balonlar = balonlar
                     self.veri.active_idx = active_idx
                     self.veri.fps = fps
@@ -1144,6 +1154,7 @@ class VideoThread(QThread):
                     self.veri.kare_t = kare_t
                     self.veri.kamera_fps = kamera_fps
                     dets = list(self.veri.dets)
+                    dets_t = self.veri.dets_t
                     balonlar = list(self.veri.balonlar)
                     active_idx = self.veri.active_idx
                     fps = self.veri.fps
@@ -1160,6 +1171,14 @@ class VideoThread(QThread):
                 data["kirmizi_kaniti"] = bool(aktif and not aktif.get("hayalet")
                                                and aktif.get("anlik_kirmizi", False))
                 data["estop"] = self.estop
+                # KUTU GECIKME TELAFISI (25.09 video): kutular algi thread'inin son
+                # bitirdigi, ekrandakinden ~1-3 kare ESKI kareden gelir. Gimbal donerken
+                # kutu balonun gerisinde/ilerisinde kaliyordu. Kart acisi gecmisinden o
+                # iki kare arasindaki kamera donusu kadar kaydirilip cizilir (yalniz ekran;
+                # nisan/PD kendi karesiyle calismaya devam eder).
+                data["kayma"] = kamera_kaymasi_px(
+                    getattr(self.inference_thread, "kamera_acisi_fn", None),
+                    dets_t, kare_t, frame.shape[1]) or (0.0, 0.0)
                 data["merkezde"] = getattr(self.veri, "merkezde", False)
                 data["nisan_hata_px"] = getattr(self.veri, "nisan_hata_px", None)
                 data["olu_bolge_px"] = getattr(self.veri, "olu_bolge_px", None)
@@ -2941,6 +2960,10 @@ class MainWindow(QMainWindow):
             self._estop_kisayolu()                  # YALNIZ kurar; devam arayuz butonundan
             return                                  # ayni tikta baska komut isleme
 
+        # HASSASIYET: Capraz (A) art arda 1/2/3 basis -> Hassas/Orta/Hizli.
+        if d.hassasiyet_kenar:
+            self._hassasiyet_basis(simdi)
+
         # ATES: L2 + R2 birlikte -> AC/KES (tek dokunus, bekleme yok).
         if d.ates_kenar:
             self._ates_kisayolu()                   # -> _ates_bas (tek kapi)
@@ -2991,13 +3014,36 @@ class MainWindow(QMainWindow):
         return self.HASSASIYET.get(getattr(self, "hassasiyet", None),
                                    self.HASSASIYET[self.HASSASIYET_VARSAYILAN])
 
-    def _hassasiyet_sec(self, ad):
+    def _hassasiyet_ayarla(self, ad):
         if ad not in self.HASSASIYET:
             return
         self.hassasiyet = ad
         for a, b in getattr(self, "hassasiyet_btns", {}).items():
             b.setChecked(a == ad)
+
+    def _hassasiyet_sec(self, ad):
+        """Arayuzdeki kademe butonu."""
+        self._hassasiyet_ayarla(ad)
         self._odak_geri()                   # tiklama klavyeyi canli goruntuden almasin
+
+    # KISAYOL (25.09): klavye [C] / kol Capraz (A). HASSASIYET_ARALIK_S icinde art arda
+    # 1 basis = Hassas, 2 = Orta, 3 = Hizli (tablo sirasi). Her basis HEMEN uygulanir:
+    # bekleme zamanlayicisi yok, operator sonucu aninda gorur.
+    HASSASIYET_TUSU = Qt.Key_C
+    HASSASIYET_ARALIK_S = 0.5
+
+    def _hassasiyet_basis(self, simdi=None):
+        simdi = time.time() if simdi is None else simdi
+        if simdi - getattr(self, "_hs_son_t", -1e9) <= self.HASSASIYET_ARALIK_S:
+            self._hs_sayac = min(len(self.HASSASIYET), getattr(self, "_hs_sayac", 0) + 1)
+        else:
+            self._hs_sayac = 1
+        self._hs_son_t = simdi
+        ad = list(self.HASSASIYET)[self._hs_sayac - 1]
+        self._hassasiyet_ayarla(ad)
+        adim, hiz = self.HASSASIYET[ad]
+        self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;Hassasiyet: '
+                            f'<b>{ad}</b> — tek dokunuş {adim:g}°, basılı {hiz:g}°/sn')
 
     # ---- GORUNTU ZOOM (sag cubuk) ----
     # DIJITAL zoom: yalniz EKRANDAKI goruntu kirpilip buyutulur. Algi, nisan ve otonom
@@ -4001,6 +4047,10 @@ class MainWindow(QMainWindow):
         if event.key() == ESTOP_TUSU:
             self._estop_kisayolu()
             return True
+        if event.key() == self.HASSASIYET_TUSU:     # [C]: art arda 1/2/3 = kademe
+            if not event.isAutoRepeat():
+                self._hassasiyet_basis()
+            return True
         if self._ates_tusu(event, basildi=True):
             return True
         if self._zoom_tusu(event, basildi=True):
@@ -4012,7 +4062,7 @@ class MainWindow(QMainWindow):
         return True
 
     def _tus_birak(self, event):
-        if event.key() == ESTOP_TUSU:
+        if event.key() in (ESTOP_TUSU, self.HASSASIYET_TUSU):
             return True
         if self._ates_tusu(event, basildi=False):
             return True
@@ -4488,6 +4538,10 @@ class MainWindow(QMainWindow):
 
             scale_x = pix.width() / kaynak.width()
             scale_y = pix.height() / kaynak.height()
+            # Tespit kutulari eski kareden: kamera donusu kadar kaydirilir (VideoThread
+            # "kayma"). Nisangah (lazer) kameraya sabittir, kaydirilmaz.
+            kx, ky = data.get("kayma", (0.0, 0.0))
+            bx0, by0 = ox - kx, oy - ky
             
             font = QFont("Consolas", 10, QFont.Bold)
             painter.setFont(font)
@@ -4496,8 +4550,8 @@ class MainWindow(QMainWindow):
             
             for bx in data.get("balonlar", []):
                 x1, y1, x2, y2 = bx
-                rx1, ry1 = (x1 - ox) * scale_x, (y1 - oy) * scale_y
-                rx2, ry2 = (x2 - ox) * scale_x, (y2 - oy) * scale_y
+                rx1, ry1 = (x1 - bx0) * scale_x, (y1 - by0) * scale_y
+                rx2, ry2 = (x2 - bx0) * scale_x, (y2 - by0) * scale_y
                 pen.setColor(QColor(60, 200, 235))
                 painter.setPen(pen)
                 painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
@@ -4518,10 +4572,19 @@ class MainWindow(QMainWindow):
                 painter.setPen(pen)
 
                 x1, y1, x2, y2 = d["box"]
-                rx1, ry1 = (x1 - ox) * scale_x, (y1 - oy) * scale_y
-                rx2, ry2 = (x2 - ox) * scale_x, (y2 - oy) * scale_y
+                rx1, ry1 = (x1 - bx0) * scale_x, (y1 - by0) * scale_y
+                rx2, ry2 = (x2 - bx0) * scale_x, (y2 - by0) * scale_y
 
+                # Balonun kisa kacirmada tutulan kutusu (hayalet) KESIKLI: yerinde
+                # kalir ama operator o an modelin gormedigini bilir.
+                balon_hayalet = d.get("balon") and d.get("hayalet")
+                if balon_hayalet:
+                    pen.setStyle(Qt.DashLine)
+                    painter.setPen(pen)
                 painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
+                if balon_hayalet:
+                    pen.setStyle(Qt.SolidLine)
+                    painter.setPen(pen)
 
                 tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"])
                 ad_cv = "?" if d["cls"] == "belirsiz" else algi.goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
@@ -4530,7 +4593,7 @@ class MainWindow(QMainWindow):
                 # Hayalet: gercek bir tespit DEGIL, son bilinen konum. Guveni yapay
                 # olarak 1 oldugu icin "%1" yazmak yanilticiydi (operator zayif ama
                 # gercek bir tespit sanabilir) — acikca soyluyoruz.
-                if d.get("hayalet"):
+                if d.get("hayalet") and not d.get("balon"):
                     txt2 = f"{ad_cv} · KAYIP"
                 else:
                     txt2 = f"{ad_cv} %{d['conf']}"
@@ -4559,7 +4622,7 @@ class MainWindow(QMainWindow):
                     # yeri YANLIS gosterirdi ve operator kalibrasyonu (balon_ofset)
                     # neye gore cevirecegini goremezdi.
                     hx, hy = algi.det_nisan_noktasi(d, data.get("nisan_balonlar", []))
-                    cx, cy = (hx - ox) * scale_x, (hy - oy) * scale_y
+                    cx, cy = (hx - bx0) * scale_x, (hy - by0) * scale_y
                     pen.setColor(color)
                     painter.setPen(pen)
                     painter.drawEllipse(QPointF(cx, cy), 16, 16)

@@ -37,6 +37,8 @@ KLAVYE = (
      "yalnız ekran.", (Qt.Key_Z,)),
     (("X",), "Uzaklaştır", "Basılı tuttukça, 1×'e (eski hâline) kadar. Yalnız Manuel + "
      "Aşama 1.", (Qt.Key_X,)),
+    (("C",), "Hassasiyet", "Art arda 1 basış = Hassas, 2 = Orta, 3 = Hızlı (yarım saniye "
+     "içinde).", (Qt.Key_C,)),
     (("Esc",), "ACİL DURDUR", "Her modda, her durumda; ateş de kesilir. Yalnız durdurur — "
      "devam için ekrandaki DEVAM ET butonu.", (Qt.Key_Escape,)),
 )
@@ -58,7 +60,9 @@ KOL = (
     (("sag_cubuk",), "Sağ joystick", "Zoom",
      "Yalnız Manuel + Aşama 1. Yukarı yakınlaştırır (en çok 4×), aşağı 1×'e kadar "
      "uzaklaştırır. Yalnız ekran — gimbal'i ve otonomu etkilemez."),
-    (("capraz", "daire", "kare", "ucgen"), "Çarpı / Daire / Kare / Üçgen", None, ""),
+    (("capraz",), "Çarpı (Xbox: A)", "Hassasiyet",
+     "Art arda 1 basış = Hassas, 2 = Orta, 3 = Hızlı (yarım saniye içinde)."),
+    (("daire", "kare", "ucgen"), "Daire / Kare / Üçgen", None, ""),
 )
 
 # Kısayolu olmayan, yalniz ekrandan yapilan isler (unutulmasin diye listede).

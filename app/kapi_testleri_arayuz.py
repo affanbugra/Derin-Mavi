@@ -154,6 +154,10 @@ class SahtePencere:
     _kol_yenile = A.MainWindow._kol_yenile
     _zoom_acik = A.MainWindow._zoom_acik
     _hassasiyet = A.MainWindow._hassasiyet
+    _hassasiyet_ayarla = A.MainWindow._hassasiyet_ayarla
+    _hassasiyet_basis = A.MainWindow._hassasiyet_basis
+    HASSASIYET_TUSU = A.MainWindow.HASSASIYET_TUSU
+    HASSASIYET_ARALIK_S = A.MainWindow.HASSASIYET_ARALIK_S
     HASSASIYET = A.MainWindow.HASSASIYET
     HASSASIYET_VARSAYILAN = A.MainWindow.HASSASIYET_VARSAYILAN
     _zoom_katsayi = A.MainWindow._zoom_katsayi
@@ -1113,6 +1117,47 @@ def test_hassasiyet_tek_dokunus_ve_hiz():
     assert A.MainWindow.HASSASIYET["Hassas"][0] <= 0.1
 
 
+def test_hassasiyet_kisayolu_ve_kutu_kaymasi():
+    """[C] / kol Çarpı: yarım saniyede art arda 1/2/3 basış = Hassas/Orta/Hızlı (25.09).
+    Ayrıca kutu gecikme telafisi: kamera dönüşü kadar px kayma, işaret ve boyut doğru."""
+    Qt = A.Qt
+    w = SahtePencere()
+    w.thread = A.VideoThread(None, None, None)
+    w.hassasiyet = "Hızlı"
+    T = [100.0]
+
+    def c(ara=0.2):
+        T[0] += ara
+        w._hassasiyet_basis(T[0])
+
+    c(5.0); assert w.hassasiyet == "Hassas", w.hassasiyet
+    c(); assert w.hassasiyet == "Orta", w.hassasiyet
+    c(); assert w.hassasiyet == "Hızlı", w.hassasiyet
+    c(); assert w.hassasiyet == "Hızlı", "4. basis tavani asti"
+    c(1.0); assert w.hassasiyet == "Hassas", "ara verince yeniden saymadi"
+    # klavye [C] ve kol Capraz ayni yoldan
+    w._hs_son_t = -1e9
+    assert w._tus_bas(SahteTus(Qt.Key_C)) and w.hassasiyet == "Hassas"
+    w._tus_bas(SahteTus(Qt.Key_C))
+    assert w.hassasiyet == "Orta", "[C] ikinci basis Orta yapmadi"
+    w._tus_bas(SahteTus(Qt.Key_C, tekrar=True))
+    assert w.hassasiyet == "Orta", "[C] otomatik tekrar kademe degistirdi"
+    w._hs_son_t = -1e9
+    w.gamepad = SahteGamepad(basili=("capraz",))
+    w._gamepad_tik()
+    assert w.hassasiyet == "Hassas", "kol Capraz hassasiyeti secmedi"
+
+    # Kutu kaymasi: kamera 2° saga dondu -> sahne sola kayar (dx < 0), 1280 px'te ppd px/°
+    aci = {1.0: (10.0, 5.0), 2.0: (12.0, 5.5)}
+    fn = lambda t: aci[round(t + float(A.algi.AYAR.get("kamera_gecikme", 0.03)), 3)]
+    dx, dy = A.kamera_kaymasi_px(fn, 1.0, 2.0, 1280)
+    ppd = float(A.algi.AYAR.get("takip_ppd_pan", 18.7))
+    assert abs(dx + 2.0 * ppd) < 1e-6 and abs(dy - 0.5 * ppd) < 1e-6, (dx, dy)
+    assert A.kamera_kaymasi_px(None, 1.0, 2.0, 1280) is None
+    assert A.kamera_kaymasi_px(lambda t: None, 1.0, 2.0, 1280) is None
+    assert A.kamera_kaymasi_px(fn, None, 2.0, 1280) is None
+
+
 def test_kontroller_listesi_gercek_tuslarla_ayni():
     """Arayüzdeki "Kontroller" paneli (kontroller.py) ile arayüzün GERÇEKTEN dinlediği
     klavye tuşları aynı olmalı. Bir tuş eklenir/değişir de liste unutulursa operatör
@@ -1120,7 +1165,7 @@ def test_kontroller_listesi_gercek_tuslarla_ayni():
     import kontroller as K
     Qt = A.Qt
     dinlenen = (set(A.TUS_YON) | set(A.MainWindow.ATES_TUSLARI) | {A.ESTOP_TUSU}
-                | set(A.MainWindow.ZOOM_TUSLARI))
+                | set(A.MainWindow.ZOOM_TUSLARI) | {A.MainWindow.HASSASIYET_TUSU})
     yazili = K.klavye_tuslari()
     assert dinlenen == yazili, (
         f"kontroller.py ile arayuz ayrisiyor — listede eksik: {dinlenen - yazili}, "
@@ -1174,6 +1219,7 @@ if __name__ == "__main__":
     test_kontroller_listesi_gercek_tuslarla_ayni()
     test_sag_cubuk_zoom_yalniz_manuel_asama1()
     test_hassasiyet_tek_dokunus_ve_hiz()
+    test_hassasiyet_kisayolu_ve_kutu_kaymasi()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "

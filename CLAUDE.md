@@ -175,14 +175,17 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
 - Hazır ayar: atış yatay ±30 / dikey ±15 (ateş alanı hareket alanından dar başlar).
 - Açı karolarında açık pencereler saydam renkli dilim olarak görünür: **sarı** =
   harekete yasak, **kırmızı** = atışa yasak, **soluk yeşil** = atış izni.
-- Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) · `Z`/`X` = zoom yakın/uzak ·
+- Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) · `Z`/`X` = zoom yakın/uzak · `C` (art arda 1/2/3) = hassasiyet ·
   **`Esc` = ACİL DURDUR** (yalnız kurar). Kol: D-pad + **sol joystick (yatay + dikey)**, **sağ joystick Y = görüntü zoom'u**
   (yalnız Manuel + Aşama 1, en çok 4×, yalnız ekran — komut üretmez) ·
-  **Options/Start = ACİL DURDUR** (yalnız kurar) · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
+  **Options/Start = ACİL DURDUR** (yalnız kurar) · Çarpı/A (art arda 1/2/3) = hassasiyet · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
   Acil durdurmadan çıkış (DEVAM ET) yalnız arayüz butonuyla; donanım butonu basılıyken olmaz.
 - **HASSASİYET** (D-pad altında): Hassas 0,1° / Orta 0,5° (açılış) / Hızlı 1° tek dokunuş;
   basılı tutma 3 / 10 / 40 °/sn. 15 m'de 1° ≈ 26 cm. Kol D-pad'i de tek dokunuş atar,
   joystick karesel. Tablo: `MainWindow.HASSASIYET`. Merkeze alma/otonom etkilenmez.
+- **Ekrandaki kutular (25.09 video):** kutu algı thread'inin eski karesinden gelir; çizilirken
+  kart açı geçmişiyle kameranın o andan beri dönüşü kadar kaydırılır (`kamera_kaymasi_px`,
+  kart bağlı değilse telafi yok). Oturmuş balon izi kısa kaçırmada kesikli kutuyla kalır.
 - **Bir tuşu değiştiren `kontroller.py`'yi de değiştirir** (üst çubuktaki "Kontroller" paneli oradan
   okur). Ayrışırsa `kontroller.py` / `kapi_testleri_arayuz.py` kırmızıya düşer.
 

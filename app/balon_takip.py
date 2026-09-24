@@ -52,6 +52,11 @@ from renk_analizi import renk_oranlari
 # ---- Iz (takip) ----
 ONAY_KARE = 3            # iz kilitlenmeden once en az bu kadar karede GERCEKTEN gorulmeli
 GOSTER_KARE = 2          # tek karelik yanlis kutu ekranda yanip sonmesin
+# KILITSIZ iz de oturmussa (OTURMUS_KARE) model onu kisa sure kaciriyorken EKRANDA kalir
+# (hizla ileri tasinan hayalet, iz silinene kadar = KAYIP_S). 25.09 video (Asama 1, manuel):
+# iki sabit balonun kutulari karelerin yarisinda tek tek kayboluyor, operator "surekli
+# yeniden taniyor" goruyordu. Kilit/ates bundan etkilenmez: yalniz gosterim listesi.
+GOSTER_BOY_YUMUSATMA = 0.3  # ekrandaki kutu BOYU EMA'si (merkez anlik kalir; nisan kaymaz)
 KAYIP_S = 0.5            # bu kadar gorulmeyen iz silinir (algi.KILIT_BIRAKMA_S ile ayni gerekce)
 TAHMIN_AZAMI_S = 0.3     # hizla ileri tasima tavani (uzun kayipta kestirim sacmalamasin)
 HIZ_YUMUSATMA = 0.3      # iz hizi EMA katsayisi (yalniz esleme kapisi ve hayalet kutu icin)
@@ -1001,6 +1006,15 @@ def _det(iz, asama, simdi):
         cx, cy = _tahmin_merkez(iz, simdi)
         ox, oy = _merkez(box)
         box = (box[0] + cx - ox, box[1] + cy - oy, box[2] + cx - ox, box[3] + cy - oy)
+    # Kutu BOYU yumusatilir (model her karede birkac px farkli kutu verir; ekranda
+    # "buyuyup kuculuyor" goruluyordu). Merkez anliktir: nisan noktasi gecikmez.
+    w, h = box[2] - box[0], box[3] - box[1]
+    gw, gh = iz.get("g_wh") or (w, h)
+    gw += GOSTER_BOY_YUMUSATMA * (w - gw)
+    gh += GOSTER_BOY_YUMUSATMA * (h - gh)
+    iz["g_wh"] = (gw, gh)
+    cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+    box = (cx - gw / 2, cy - gh / 2, cx + gw / 2, cy + gh / 2)
     uzak = f" {mesafe:.1f}m" if mesafe is not None else ""
     d = {"cls": algi.BALON,
          "ham": "Balon" + (f" {algi.goster_ad_cv(tip, tip)}" if tip else "") + uzak,
@@ -1054,7 +1068,8 @@ def guncelle(model, frame, arac_dets, asama, estop=False, simdi=None):
     dets, aktif = [], -1
     for iz in sorted(_izler.values(), key=lambda z: z["no"]):
         kilitli_mi = iz["id"] == _durum["kilit"]
-        if not kilitli_mi and (not iz["goruldu"] or iz["isabet"] < GOSTER_KARE):
+        if not kilitli_mi and (iz["isabet"] < GOSTER_KARE
+                               or (not iz["goruldu"] and iz["isabet"] < OTURMUS_KARE)):
             continue
         d = _det(iz, asama, simdi)
         if kilitli_mi:
@@ -1153,6 +1168,25 @@ if __name__ == "__main__":
     assert a == -1 and len(b) == 1, (b, a)
     b, a = kos(m, kare, estop=True)
     assert a == -1, "E-Stop'ta balon kilidi"
+
+    # 2b. A1 (25.09 video): OTURMUS balonu model kisa sure kacirsa da kutu EKRANDA kalir
+    #     (hayalet, kilit yok); genc iz kalmaz. Kutu boyu tek karelik sicramayla oynamaz.
+    sifirla()
+    b, a = kos(m, kare, asama=1, n=OTURMUS_KARE)
+    assert len(b) == 1 and not b[0].get("hayalet")
+    b, a = kos(m, sahne(), asama=1, n=3)                     # ~0.1 sn: ne model ne renk gorur
+    assert len(b) == 1 and b[0].get("hayalet") and a == -1, \
+        f"oturmus balon kisa kacirmada ekrandan kayboldu: {b}"
+    b, a = kos(m, kare, asama=1)
+    assert len(b) == 1 and not b[0].get("hayalet"), "model yeniden gorunce hayalet kaldi"
+    x1, y1, x2, y2 = b[0]["box"]
+    b, a = kos(m, sahne([(640, 400, 60)]), asama=1)          # model bir kare 1.5x kutu verdi
+    gw = b[0]["box"][2] - b[0]["box"][0]
+    assert gw < 0.5 * ((x2 - x1) + 60), f"kutu boyu tek karede sicradi: {x2 - x1} -> {gw}"
+    sifirla()
+    b, a = kos(m, kare, asama=1, n=GOSTER_KARE + 1)          # genc iz
+    b, a = kos(m, sahne(), asama=1)
+    assert b == [], "genc (oturmamis) iz hayalet olarak gosterildi"
 
     # 3. A3: araci hic okunmayan balona ASLA kilit yok (kart bos = ates yok).
     sifirla()

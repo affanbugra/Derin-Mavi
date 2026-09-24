@@ -68,6 +68,8 @@ if PYGAME_VAR:
     # ACIL DURDUR yalniz Options/Start (24.09). Daire/B eskiden ikinci E-Stop tusuydu;
     # yuz tuslarinin yaninda kazara basiliyordu, kaldirildi.
     CB_ESTOP = pygame.CONTROLLER_BUTTON_START
+    # Alt yuz tusu (PS: Capraz, Xbox: A): HASSASIYET — art arda 1/2/3 basis (25.09).
+    CB_HASSASIYET = pygame.CONTROLLER_BUTTON_A
     CB_TETIK = (pygame.CONTROLLER_AXIS_TRIGGERLEFT,     # L2 / R2 (analog)
                 pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
     # 24.09: iki eksen de SOL cubukta (X = yatay, Y = dikey). 22.09'daki "sol = yatay,
@@ -151,6 +153,11 @@ class Durum:
         """L1 VE R1 BU yoklamada birlikte basili hale geldi mi (merkeze al). Tek omuz
         tusu bir sey yapmaz: kazara dokunus gimbal'i merkeze kosturmasin (24.09)."""
         return {"l1", "r1"} <= self.basili and bool({"l1", "r1"} & self.kenar)
+
+    @property
+    def hassasiyet_kenar(self):
+        """Capraz/A BU yoklamada basildi mi (hassasiyet: art arda 1/2/3 basis)."""
+        return "capraz" in self.kenar
 
     @property
     def ates_basili(self):
@@ -282,7 +289,8 @@ class Gamepad:
             else:
                 self._koy(d, ad, False)
 
-        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP)):
+        for ad, btn in (("l1", CB_MERKEZ[0]), ("r1", CB_MERKEZ[1]), ("start", CB_ESTOP),
+                        ("capraz", CB_HASSASIYET)):
             self._koy(d, ad, bool(c.get_button(btn)))
         for ad, eksen in (("l2", CB_TETIK[0]), ("r2", CB_TETIK[1])):
             self._koy(d, ad, c.get_axis(eksen) / CB_EKSEN_OLCEK > TETIK_ESIK)
