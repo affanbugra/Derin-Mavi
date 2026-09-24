@@ -598,6 +598,20 @@ def qss() -> str:
     #fire:checked  {{ background: {KIRMIZI}; color: #FFFFFF; }}
     #fire:disabled {{ background: {DOLGU_PASIF}; color: {L3}; }}
     #firest {{ {yazi(ALTBASLIK, L2)} background: transparent; }}
+    /* A2/A3: ATEŞ'in yerinde otonomu BAŞLAT (yesil) / calisirken DURDUR (sari) */
+    #otobaslat {{
+        background: {_a(YESIL, 0.20)};
+        border: none;
+        border-radius: {ATES_BOY // 2}px;
+        color: {YESIL};
+        min-height: {ATES_BOY}px;
+        {yazi(GOVDE_VURGU)}
+        letter-spacing: 1.0px;
+    }}
+    #otobaslat:hover   {{ background: {_a(YESIL, 0.30)}; }}
+    #otobaslat:pressed {{ background: {_a(YESIL, 0.38)}; }}
+    #otobaslat:checked {{ background: {_a(SARI, 0.25)}; color: {SARI}; }}
+    #otobaslat:checked:hover {{ background: {_a(SARI, 0.35)}; }}
 
     /* ---------- aktif hedef şeridi ---------- */
     #engok   {{ {yazi(ALTBASLIK_V, YESIL)} background: transparent; }}

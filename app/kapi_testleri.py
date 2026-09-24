@@ -466,13 +466,20 @@ def test_estop_pan_acisini_kaybetmez(w):
     assert p and abs(p[-1] - 21.0) < 0.3, f"DEVAM sonrasi +1 derece -> {p} (21 beklenirdi)"
 
 
+def _otonomu_baslat(w):
+    """25.09: Otonom sekmesi yalniz HAZIRLIGA gecer; otonom BAŞLAT ile calisir."""
+    w._asama_sec("Aşama 2")
+    w._otonom_baslat()
+    assert w.mod == "Otonom", f"otonom baslamadi: {w.mod}"
+
+
 def test_otonomdan_manuele_gecis_olculen_konumdan_devam_eder(w):
     """Otonomun son KOMUT hedefi gercek konumdan ayrisabilir (motor yolda). Manuele
     gecince ilk tus olculen konumdan hesaplanmali; yoksa namlu farki bir anda kapatir."""
     k = w.kontrol
     assert w._aci_hareket(15.0 - w.pan_ham, 0.0)
     _kart_bekle(w, 3.0)
-    w._mod_sec("Otonom")
+    _otonomu_baslat(w)
     w.pan_ham = w.pan_aci = 27.0          # otonomun son komutu; kart 15'te (yetismedi)
     k.pan_hedef = 27.0
     w._mod_sec("Manuel")
@@ -497,7 +504,7 @@ def test_otonomda_takip_ivmesi_yumusak(w):
 
     def son_pz_ivme():
         return float([c for c in k.tilt.mock.kayit if c.startswith("PZ")][-1][2:].split(",")[1])
-    w._mod_sec("Otonom")
+    _otonomu_baslat(w)
     _kart_bekle(w, 0.3)
     assert abs(k.tilt.mock.ivme - round(TS.TAKIP_IVME * dpd, 1)) < 0.2, \
         f"otonomda tilt ivmesi {k.tilt.mock.ivme / dpd:.0f} der/sn2"
@@ -518,7 +525,7 @@ def test_yakin_balonda_takip_boya_gore_yumusar(w):
     for e in (w._pan_takip, w._tilt_takip):
         assert e.olcek_ref_px == HK_.SAHA_AYARI["olcek_ref_px"], "takipci saha ayariyla kurulmadi"
         assert e.kayip_dur_s == HK_.SAHA_AYARI["kayip_dur_s"] and e.kayipta_tut
-    w._mod_sec("Otonom")
+    _otonomu_baslat(w)
     saat = w._test_saat
 
     def olc(kaynak, box, gen=1280):
@@ -538,7 +545,7 @@ def test_kilit_baska_nesneye_gecince_takip_sifirlanir(w):
     """Kilitli hedefin kimligi degisirse iki eksenin hedef kestirimi sifirdan kurulur;
     ayni kimlikte (normal takip) sifirlanmaz. 23.09 kaydi: kimliksiz bir kutu 213 px
     otede kilide girdi, eski hedefin gecmisiyle birlesti, pan'a 62 der/sn komut gitti."""
-    w._mod_sec("Otonom")
+    _otonomu_baslat(w)
     sayac = {"pan": 0, "tilt": 0}
     w._pan_takip.hedef_degisti = lambda: sayac.__setitem__("pan", sayac["pan"] + 1)
     w._tilt_takip.hedef_degisti = lambda: sayac.__setitem__("tilt", sayac["tilt"] + 1)

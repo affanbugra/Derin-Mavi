@@ -48,14 +48,14 @@ KLAVYE = (
 # oldugunu denetler (ekranda yanan tus = tabloda yazan tus).
 KOL = (
     (("sol_cubuk",), "Sol joystick", "Yatay + dikey",
-     "Az itince çok yavaş, sonuna kadar HASSASİYET hızı. Bırakınca yumuşak durur."),
+     "Az itince çok yavaş, sonuna kadar HASSASİYET hızı. Yalnız Aşama 1 (Manuel)."),
     (("up", "down", "left", "right"), "D-pad", "Yön",
-     "Klavye gibi: tek basış = HASSASİYET adımı, basılı tutunca sürekli. Joystick "
-     "hareketliyken yok sayılır."),
+     "Klavye gibi: tek basış = HASSASİYET adımı, basılı tutunca sürekli. Yalnız "
+     "Aşama 1 (Manuel)."),
     (("l2", "r2"), "L2 + R2", "Ateş aç / kes",
      "İkisi birlikte, tek dokunuş. Tek tetik bir şey yapmaz."),
     (("l1", "r1"), "L1 + R1", "Merkeze al",
-     "İkisi birlikte; 0° / 0°'a kademeli. Tek tuş bir şey yapmaz."),
+     "İkisi birlikte; 0° / 0°'a kademeli. Yalnız Aşama 1 (Manuel)."),
     (("start",), "Options / Start", "ACİL DURDUR",
      "Tekrar basınca devam (durdurduktan en az 1 sn sonra). Donanım butonu basılıyken olmaz."),
     (("sag_cubuk",), "Sağ joystick", "Zoom",
@@ -70,7 +70,9 @@ KOL = (
 EKRAN = (
     ("DEVAM ET", "ACİL DURDUR'dan çıkış — Esc / Options ile aynı kapı. Donanım butonu "
      "basılıyken olmaz."),
-    ("ATEŞ butonu", "Space + B ile aynı kapı."),
+    ("ATEŞ butonu", "Aşama 1. Space + B ile aynı kapı."),
+    ("AŞAMA n'İ BAŞLAT", "Aşama 2/3'te ATEŞ'in yerinde. Aşama seçmek otonomu başlatmaz "
+     "(hazırlık: elle hareket yok, ayarlar yapılır); bu buton başlatır, tekrar basınca durdurur."),
     ("HASSASİYET", "Hassas 0,1° · Orta 0,5° · Hızlı 1° tek dokunuş (15 m'de ≈ 3 / 13 / 26 cm). "
      "Basılı tutma ve joystick hızını da belirler. Klavye, D-pad ve kol birlikte."),
 )

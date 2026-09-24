@@ -180,6 +180,11 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
   (yalnız Manuel + Aşama 1, en çok 4×, yalnız ekran — komut üretmez) ·
   **Options/Start = ACİL DURDUR aç/kapa** · Çarpı/A (art arda 1/2/3) = hassasiyet · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
   Acil durdurmadan çıkış: DEVAM ET butonu ya da aynı kısayol; donanım butonu basılıyken olmaz.
+- **Mod = aşama (25.09):** Aşama 1 = Manuel (kendiliğinden seçili). Aşama 2/3 seçilince
+  **hazırlık** (`mod == "Hazırlık"`): otonom başlamaz, klavye/kol/ekran D-pad/merkez hareket
+  ETTİRMEZ (`_manuel_hareket_izni`); yasak alan, hassasiyet, lazer ayarlanır. ATEŞ'in yerindeki
+  **AŞAMA n'İ BAŞLAT** otonomu açar/kapatır. Sağ kolon her aşamada aynı; aşamaya özel olan
+  (A1 zarf / A2-A3 takip-nişan-aranan) alt satırda. Mod değişince elle açılmış ateş kesilir.
 - **HASSASİYET** (D-pad altında): Hassas 0,1° / Orta 0,5° (açılış) / Hızlı 1° tek dokunuş;
   basılı tutma 3 / 10 / 40 °/sn. 15 m'de 1° ≈ 26 cm. Kol D-pad'i de tek dokunuş atar,
   joystick karesel. Tablo: `MainWindow.HASSASIYET`. Merkeze alma/otonom etkilenmez.
@@ -226,14 +231,12 @@ boyanınca 1904 karede kilit 0 — ama **gerçek mavi maketle denenmedi.**
 ### 7.2 Diğerleri
 | Konu | Durum |
 |---|---|
-| ~~E-Stop'ta tilt park mı~~ | **Kapandı (23.09):** iki eksen de olduğu yerde donar. Yeni tilt kartı zaten donduruyordu; eski yoldaki park kaldırıldı (kartla laptop farklı şey söylüyordu) |
 | Lazer | **Tek kart (24.09):** S3 GPIO 18, firmware yüklendi ve kartla doğrulandı (LZR1 yayını, STOP/START, güç) — **lazer takılı değilken; yakılarak denenmedi.** Doğrulanmadı: PWM frekansı sürücüyle uyumlu mu, 3.3 V/5 V mantık seviyesi, GPIO 18 ↔ GND 10 kΩ pull-down. Acil buton GPIO 15'e henüz bağlanmadı |
 | Balon modeli | **Kuruldu (24.09)**, kendi kameramızın koridor videosunda ölçüldü (ayrıntı: `git log -p CLAUDE.md`). Menzil içinde (balon ≥16 px) A2/A3 kilidi %96–100. ⚠ **Model, altında drone asılı ~18 m'deki balonu hiç görmüyor** (1080p'de de; 604–1145. kareler): bu videonun kareleri etiketlenip `bestb2` yeniden eğitilmeli. Araç modeli (`best.pt`) el yapımı drone/F16'yı neredeyse hiç okumuyor → A3 kartında **tip çoğunlukla yok**: operatör "Aranan" tipi seçerse tipsiz balon kilitlenmez; balon çapı girilirse tipsiz balona yalnız 10–15 m'de ateş (ortak bant). Hareketli namluda (bulanıklık) ve açık havada denenmedi. ⚠ 24.09 akşam: uzaktaki **pembe, çubuğa bağlı** balonları hiç tanımıyor (kayıtta 10 sn tespit 0; 96–320 px her pencere boyunda 48 denemede ≤7) — pencere ayarı değil, eğitim verisi |
 | Aşama-1 zarf sırası | Arayüzde sürükle-sırala var ama **hiçbir yer okumuyor**; ceza mantığı yok |
 | Dwell (lazeri hedefte tutma) | Balonda 2 sn ateş taahhüdü + körlükte yol izleme (24.09, §8) — **donanımda denenmedi** |
 | Mesafe ölçümü | **Balon çapından** kestirim (24.09): ⚙ "Balon çapı (cm)" sahada cetvelle ölçülüp girilmeli, 10 m'de etiketle doğrulanmalı. Girilmezse (0) A3 menzil kontrolü YOK. Çap yanlışsa A3'te hiç ateş edilmeyebilir |
 | Homing | Gerçek limit switch yok; `home()` = "0°'a dön" |
-| ~~`tasarim.py` testi kırmızı~~ | **Kapandı (23.09):** `#hedefsatir` stili eklendi |
 | Doküman tutarsızlığı | `FINAL_ENTEGRASYON.md` hâlâ "pan ±90 yapısal" diyor; artık kodda sınır yok (23.09) |
 
 ### 7.3 Eski notlardan düzelenler (V1.4 ile değişti)

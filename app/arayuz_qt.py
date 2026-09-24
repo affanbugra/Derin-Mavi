@@ -1460,8 +1460,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(760, 500)
         self.resize(1280, 800)
 
-        # mod-asama kilidini ilk durum icin uygula (stack + pill + kural senkron)
-        self._mod_sec(self.mod)
+        # mod-asama bagini ilk durum icin uygula (Manuel = Asama 1; stack + pill + kural)
+        self._asama_sec(self.asama)
 
         # saat
         self.saat_timer = QTimer(self)
@@ -1588,11 +1588,11 @@ class MainWindow(QMainWindow):
         ekle(self._tab_grubu("ÇALIŞMA MODU", ("Manuel", "Otonom"),
                              self.mod, self._mod_sec, self.mod_btns))
         ekle(self._div())
-        # Aktif Gorev (opsiyonel: hicbiri secili olmayabilir; moda gore kilitli)
+        # Aktif Gorev: HER ZAMAN biri secili (25.09: Manuel = Asama 1, Asama 2/3 = otonom
+        # hazirligi). Mod ile asama tek yerde baglanir: `_asama_sec`.
         self.asama_btns = {}
         ekle(self._tab_grubu("AKTİF GÖREV", ("Aşama 1", "Aşama 2", "Aşama 3"),
-                             self.asama, self._asama_sec, self.asama_btns,
-                             optional=True))
+                             self.asama, self._asama_sec, self.asama_btns))
         ekle(self._div())
 
         # KAMERA secici + CANLI göstergesi. Diger iki grupla (ÇALIŞMA MODU / AKTİF GÖREV)
@@ -2171,28 +2171,6 @@ class MainWindow(QMainWindow):
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(8)
 
-        # Aşama 2/3: hangi sınıflara otomatik kilit kurulacağını operatör belirler.
-        # Tespit tablosu bütün sınıfları göstermeye devam eder.
-        algi.hedef_tipleri_ayarla(None)
-        tip_kart = QFrame()
-        tip_kart.setObjectName("panelk")
-        tip_lay = QHBoxLayout(tip_kart)
-        tip_lay.setContentsMargins(10, 5, 10, 5)
-        tip_lay.setSpacing(4)
-        tip_lay.addWidget(QLabel("ARANAN"))
-        self.tip_butonlari = {}
-        for kanon, ad in (("fuze", "Füze"), ("helikopter", "Heli"),
-                          ("f16", "F-16"), ("drone", "İHA")):
-            btn = QPushButton(ad)
-            btn.setCheckable(True)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.clicked.connect(self._tip_secimi_degisti)
-            self.tip_butonlari[kanon] = btn
-            tip_lay.addWidget(btn)
-        self.tip_hepsi_lbl = QLabel("hepsi")
-        tip_lay.addWidget(self.tip_hepsi_lbl)
-        v.addWidget(tip_kart)
-
         hedef_kart = QFrame()
         hedef_kart.setObjectName("panelk")
         hedef_lay = QHBoxLayout(hedef_kart)
@@ -2211,15 +2189,11 @@ class MainWindow(QMainWindow):
         hedef_lay.addWidget(self.hedef_scroll, 1)
         v.addWidget(hedef_kart)
 
-        # Manuel ve Otonom modlar FARKLI paneller gosterir. QStackedWidget ile
-        # gecis yapilir — setVisible() QGraphicsProxyWidget icinde guvenilir
-        # degil (layout yeniden hesaplanmiyordu). Sayfa 0 = Manuel, Sayfa 1 = Otonom.
-        self.sag_mod_stack = QStackedWidget()
+        # Sag kolon HER ASAMADA AYNI (25.09): aci karolari, yasak alanlar, D-pad,
+        # hassasiyet, lazer. Asamaya ozel olan (A1 zarf kartlari / A2-A3 otonom durumu,
+        # aranan tipler) alt satirdadir. ATEŞ satiri A2/A3'te BAŞLAT'a doner.
         self.manuel_panel = self._manuel_kontrol_panel()
-        self.otonom_panel = self._otonom_kontrol_panel()
-        self.sag_mod_stack.addWidget(self.manuel_panel)   # 0 = Manuel
-        self.sag_mod_stack.addWidget(self.otonom_panel)    # 1 = Otonom
-        v.addWidget(self.sag_mod_stack, 1)
+        v.addWidget(self.manuel_panel, 1)
 
 
         return kol
@@ -2262,107 +2236,107 @@ class MainWindow(QMainWindow):
             algi.hedef_sec(None if algi.kilitli_hedef() == track_id else track_id)
 
     def _otonom_kontrol_panel(self):
-        """Otonom mod paneli — takip durumu, aktif hedef bilgisi ve nisan durumu."""
-        mk = QFrame()
-        mk.setObjectName("panelk")
-        mv = QVBoxLayout(mk)
-        mv.setContentsMargins(15, 8, 15, 8)
-        mv.setSpacing(6)
+        """A2/A3 ALT SATIRI (25.09): takip durumu | nisan | aranan tipler — yatay, alt
+        panelin yuksekligine sigar. Sag kolon her asamada ayni kaldigi icin otonoma ozel
+        her sey burada. Nesne adlari `_otonom_panel_guncelle` ile ayni."""
+        mk = QWidget()
+        mv = QHBoxLayout(mk)
+        mv.setContentsMargins(0, 0, 0, 0)
+        mv.setSpacing(10)
 
-        # Baslik
-        mt = QLabel("OTONOM TAKİP DURUMU")
-        mt.setObjectName("ph")
-        mt.setStyleSheet(T.yazi(T.DIPNOT, T.L2, "padding-bottom: 4px;"))
-        mv.addWidget(mt)
-
-        # Takip durumu gostergesi (kilitli / araniyor / E-Stop)
+        # 1. Takip durumu (kilitli / araniyor / E-Stop)
         self.oto_durum_frame = QFrame()
-        self.oto_durum_frame.setObjectName("engok")
+        self.oto_durum_frame.setObjectName("altkart")
         dh = QHBoxLayout(self.oto_durum_frame)
-        dh.setContentsMargins(11, 7, 11, 7)
+        dh.setContentsMargins(11, 6, 11, 6)
         dh.setSpacing(8)
-
         self.oto_durum_dot = QLabel()
         self.oto_durum_dot.setFixedSize(10, 10)
         self.oto_durum_dot.setStyleSheet(T.nokta(T.SARI, 10))
-        dh.addWidget(self.oto_durum_dot)
-
+        dh.addWidget(self.oto_durum_dot, 0, Qt.AlignVCenter)
         oto_sub = QVBoxLayout()
         oto_sub.setSpacing(1)
+        tt = QLabel("TAKİP")
+        tt.setObjectName("ph")
         self.oto_durum_baslik = QLabel("Hedef aranıyor…")
         self.oto_durum_baslik.setObjectName("engname")
         self.oto_durum_alt = QLabel("—")
         self.oto_durum_alt.setObjectName("engsub")
+        self.oto_durum_alt.setWordWrap(True)
+        oto_sub.addWidget(tt)
         oto_sub.addWidget(self.oto_durum_baslik)
         oto_sub.addWidget(self.oto_durum_alt)
+        oto_sub.addStretch(1)
         dh.addLayout(oto_sub, 1)
-        mv.addWidget(self.oto_durum_frame)
+        mv.addWidget(self.oto_durum_frame, 3)
 
-        # Nisan (PD) durumu
+        # 2. Nisan (PD) durumu + aci + lazer
         nisan_kart = QFrame()
         nisan_kart.setObjectName("altkart")
         nv = QVBoxLayout(nisan_kart)
         nv.setContentsMargins(12, 6, 12, 6)
-        nv.setSpacing(3)
-        nt = QLabel("NİŞAN KONTROLÜ")
+        nv.setSpacing(2)
+        nt = QLabel("NİŞAN")
         nt.setObjectName("ph")
         nv.addWidget(nt)
-
-        self.oto_nisan_durum = QLabel("Bekleniyor")
+        self.oto_nisan_durum = QLabel("Başlatılmadı")
         self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.L3))
         nv.addWidget(self.oto_nisan_durum)
-
         self.oto_ates_kapi = QLabel("—")
         self.oto_ates_kapi.setStyleSheet(T.yazi(T.ALTBASLIK, T.L3))
-        self.oto_ates_kapi.setWordWrap(True)
         nv.addWidget(self.oto_ates_kapi)
-
-        # Aci bilgisi (pan/tilt)
         aci_row = QHBoxLayout()
-        aci_row.setSpacing(16)
+        aci_row.setSpacing(12)
         self.oto_pan_lbl = QLabel("Azimut: 0.0°")
-        self.oto_pan_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L2, f"font-family:{T.FM};"))
+        self.oto_pan_lbl.setStyleSheet(T.yazi(T.ALTBASLIK, T.L2, f"font-family:{T.FM};"))
         self.oto_tilt_lbl = QLabel("Yükseliş: 0.0°")
-        self.oto_tilt_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L2, f"font-family:{T.FM};"))
+        self.oto_tilt_lbl.setStyleSheet(T.yazi(T.ALTBASLIK, T.L2, f"font-family:{T.FM};"))
+        self.oto_lazer_durum = QLabel("○ Lazer kapalı")
+        self.oto_lazer_durum.setStyleSheet(T.yazi(T.ALTBASLIK, T.L3))
         aci_row.addWidget(self.oto_pan_lbl)
         aci_row.addWidget(self.oto_tilt_lbl)
         aci_row.addStretch(1)
+        aci_row.addWidget(self.oto_lazer_durum)
         nv.addLayout(aci_row)
+        nv.addStretch(1)
+        mv.addWidget(nisan_kart, 4)
 
-        mv.addWidget(nisan_kart)
+        # 3. ARANAN: hangi siniflara otomatik kilit kurulacagini operator belirler.
+        # Tespit listesi butun siniflari gostermeye devam eder.
+        algi.hedef_tipleri_ayarla(None)
+        tip_kart = QFrame()
+        tip_kart.setObjectName("altkart")
+        tv = QVBoxLayout(tip_kart)
+        tv.setContentsMargins(12, 6, 12, 6)
+        tv.setSpacing(4)
+        ust = QHBoxLayout()
+        at = QLabel("ARANAN")
+        at.setObjectName("ph")
+        ust.addWidget(at)
+        ust.addStretch(1)
+        self.tip_hepsi_lbl = QLabel("hepsi")
+        ust.addWidget(self.tip_hepsi_lbl)
+        tv.addLayout(ust)
+        tip_lay = QHBoxLayout()
+        tip_lay.setSpacing(4)
+        self.tip_butonlari = {}
+        for kanon, ad in (("fuze", "Füze"), ("helikopter", "Heli"),
+                          ("f16", "F-16"), ("drone", "İHA")):
+            btn = QPushButton(ad)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setFocusPolicy(Qt.NoFocus)
+            btn.clicked.connect(self._tip_secimi_degisti)
+            self.tip_butonlari[kanon] = btn
+            tip_lay.addWidget(btn)
+        tv.addLayout(tip_lay)
+        tv.addStretch(1)
+        mv.addWidget(tip_kart, 3)
 
-        # Aktif gorev bilgisi
-        gorev_kart = QFrame()
-        gorev_kart.setObjectName("altkart")
-        gv = QVBoxLayout(gorev_kart)
-        gv.setContentsMargins(12, 6, 12, 6)
-        gv.setSpacing(3)
-        gt = QLabel("GÖREV BİLGİSİ")
-        gt.setObjectName("ph")
-        gv.addWidget(gt)
-
-        self.oto_gorev_lbl = QLabel("Aşama seçilmedi")
-        self.oto_gorev_lbl.setStyleSheet(T.yazi(T.CAGRI, T.L3))
-        self.oto_gorev_lbl.setWordWrap(True)
-        gv.addWidget(self.oto_gorev_lbl)
-
-        mv.addWidget(gorev_kart)
-
-        # Bolge durumu (otonom icin de)
-        self.oto_bolge_status = QLabel("● BÖLGE GÜVENLİ")
-        self.oto_bolge_status.setAlignment(Qt.AlignCenter)
-        self.oto_bolge_status.setStyleSheet(T.durum_bandi(T.YESIL))
-        mv.addWidget(self.oto_bolge_status)
-
-        # Otonom ATES bilgisi — buton YOK ama lazer durumu gosterilir.
-        # Bosluk (stretch) EN SONA konur: daha once lazer durumunun ustundeydi ve
-        # panelin ortasinda hicbir sey anlatmayan genis bir bosluk biriktiriyordu.
-        self.oto_lazer_durum = QLabel("○ Lazer kapalı")
-        self.oto_lazer_durum.setAlignment(Qt.AlignCenter)
-        self.oto_lazer_durum.setStyleSheet(T.yazi(T.GOVDE_VURGU, T.L3))
-        mv.addWidget(self.oto_lazer_durum)
-        mv.addStretch(1)
-
+        # Sag kolondaki bolge bandi artik her asamada gorunur; gorev metni kural
+        # satirinda. Bu iki etiket guncelleme kodu icin tutulur, EKRANA KONMAZ.
+        self.oto_bolge_status = QLabel()
+        self.oto_gorev_lbl = QLabel()
         return mk
 
     def _lazer_bilgi_yaz(self):
@@ -2435,7 +2409,8 @@ class MainWindow(QMainWindow):
     def _pencere_tetik(self, ad):
         """Kutucugu acan dugme — konum ve 'disari tiklama' denetimi icin."""
         if ad == "lazer":
-            return self.lazer_ayar_btn
+            oto = getattr(self, "ates_stack", None) is not None and self.ates_stack.currentIndex() == 1
+            return self.lazer_ayar_btn_oto if oto else self.lazer_ayar_btn
         return self.yasak_dugme[ad][0]
 
     def _pencere_ac(self, ad):
@@ -2576,9 +2551,48 @@ class MainWindow(QMainWindow):
         return sayfa
 
     def _ates_satiri(self):
+        """Sayfa 0 = ATEŞ (Asama 1, Manuel), sayfa 1 = BAŞLAT (Asama 2/3). Iki butonun da
+        ICINDE lazer gucu ⚙'i var: lazer gucu hazirlikta da ayarlanir (25.09).
+        QStackedWidget: setVisible QGraphicsProxyWidget icinde guvenilir degil."""
+        satir = QHBoxLayout()
+        self.ates_stack = QStackedWidget()
+        self.ates_stack.setFixedHeight(T.ATES_BOY)
+        ates_sayfa = QWidget()
+        ates_sayfa.setLayout(self._ates_satiri_ates())
+        self.ates_stack.addWidget(ates_sayfa)
+        self.ates_stack.addWidget(self._baslat_butonu())
+        satir.addWidget(self.ates_stack, 1)
+        return satir
+
+    def _baslat_butonu(self):
+        """A2/A3: otonomu BAŞLAT / DURDUR. Ates etmez; atesi otonom kendi kapisindan
+        (`_otonom_ates_kontrol` -> `_ates_bas`) verir."""
+        self.baslat_btn = QPushButton("▶  AŞAMA 2'Yİ BAŞLAT")
+        self.baslat_btn.setObjectName("otobaslat")
+        self.baslat_btn.setFixedHeight(T.ATES_BOY)
+        self.baslat_btn.setCheckable(True)
+        self.baslat_btn.setCursor(Qt.PointingHandCursor)
+        self.baslat_btn.setFocusPolicy(Qt.NoFocus)
+        self.baslat_btn.setToolTip("Otonom modu başlatır; tekrar basınca durdurur (hazırlığa döner)")
+        self.baslat_btn.clicked.connect(self._otonom_baslat)
+        ic = QHBoxLayout(self.baslat_btn)
+        ic.setContentsMargins(4, 4, 4, 4)
+        self.lazer_ayar_btn_oto = QPushButton("⚙", self.baslat_btn)
+        self.lazer_ayar_btn_oto.setObjectName("lazerayar")
+        self.lazer_ayar_btn_oto.setFixedSize(T.ATES_BOY - 10, T.ATES_BOY - 10)
+        self.lazer_ayar_btn_oto.setCursor(Qt.PointingHandCursor)
+        self.lazer_ayar_btn_oto.setToolTip("Lazer gücü")
+        self.lazer_ayar_btn_oto.setFocusPolicy(Qt.NoFocus)
+        self.lazer_ayar_btn_oto.clicked.connect(self._lazer_sayfasi_ac)
+        ic.addWidget(self.lazer_ayar_btn_oto, 0, Qt.AlignVCenter)
+        ic.addStretch(1)
+        return self.baslat_btn
+
+    def _ates_satiri_ates(self):
         """ATEŞ butonu; lazer gucu ⚙'i butonun ICINDE, solda. ⚙ ayri bir cocuk
         butondur: tiklamasi onda kalir, ATESE GITMEZ (cocuk olayi once alir)."""
         satir = QHBoxLayout()
+        satir.setContentsMargins(0, 0, 0, 0)
         fire = self._ates_butonu()
         ic = QHBoxLayout(fire)
         ic.setContentsMargins(4, 4, 4, 4)
@@ -2875,6 +2889,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(ms, lambda: [self._kol_isik(ad, False) for ad in adlar])
 
     def _dpad_press(self, direction):
+        if not self._manuel_hareket_izni():          # Hazırlık/Otonom: elle hareket yok
+            return
         if direction in ("home", "center"):
             if hasattr(self, "btn_center"):
                 self.btn_center.setStyleSheet(self._key_center_active_style)
@@ -2969,6 +2985,13 @@ class MainWindow(QMainWindow):
         # ATES: L2 + R2 birlikte -> AC/KES (tek dokunus, bekleme yok).
         if d.ates_kenar:
             self._ates_kisayolu()                   # -> _ates_bas (tek kapi)
+
+        # Hazırlık/Otonom (A2/A3): koldan HAREKET ve MERKEZ yok (25.09). Zoom/ates/
+        # hassasiyet/E-Stop yukarida islendi.
+        if not self._manuel_hareket_izni():
+            if self._manuel_kaynak == "kol":
+                self._manuel_fren()
+            return
 
         # MERKEZ: L1 + R1 BIRLIKTE -> merkeze al (kademeli hareket korunur).
         if d.merkez:
@@ -3836,7 +3859,15 @@ class MainWindow(QMainWindow):
         kural_satiri.addStretch(1)
         ic.addLayout(kural_satiri)
 
-        sv.addLayout(ic)
+        # A2/A3: asamanin otonom durumu ayni satirda, saga (25.09). Sayfa 0 bos (A1).
+        self.alt_oto_stack = QStackedWidget()
+        self.alt_oto_stack.addWidget(QWidget())
+        self.alt_oto_stack.addWidget(self._otonom_kontrol_panel())
+        ust = QHBoxLayout()
+        ust.setSpacing(14)
+        ust.addLayout(ic, 4)
+        ust.addWidget(self.alt_oto_stack, 7)
+        sv.addLayout(ust)
         h.addWidget(sysk, 8)
 
         return alt
@@ -3922,13 +3953,84 @@ class MainWindow(QMainWindow):
         return seg, dot, lbl
 
     # ================= OLAYLAR =================
-    # Mod-Asama kilidi: Manuel=yalniz Asama1, Otonom=yalniz Asama2/3 (sartname).
-    IZIN = {"Manuel": {"Aşama 1"}, "Otonom": {"Aşama 2", "Aşama 3"}}
+    # MOD - ASAMA BAGI (25.09 takim karari; sartname: A1 manuel, A2/A3 otonom):
+    #   Asama 1            -> mod "Manuel"   (operator surer ve ates eder)
+    #   Asama 2/3 secilince -> mod "Hazırlık" (otonom BASLAMAZ; operator yasak alan,
+    #                          hassasiyet, lazer gucunu ayarlar; elle HAREKET YOK)
+    #   "AŞAMA n'İ BAŞLAT"  -> mod "Otonom"   (tekrar basinca Hazırlık'a doner)
+    # Koddaki otonom denetimleri `mod == "Otonom"` diye bakar: Hazırlık otonom sayilmaz.
     ASAMA_IDX = {None: 0, "Aşama 1": 1, "Aşama 2": 2, "Aşama 3": 3}
+    HAZIRLIK = "Hazırlık"
 
     def _mod_sec(self, ad):
+        """Ust cubuktaki ÇALIŞMA MODU sekmesi. Manuel -> Asama 1. Otonom -> Asama 2
+        HAZIRLIGI (zaten A2/A3'teyse degisiklik yok); otonom yalniz BAŞLAT ile baslar."""
+        if ad == "Manuel":
+            self._asama_sec("Aşama 1")
+        elif self.asama not in ("Aşama 2", "Aşama 3"):
+            self._asama_sec("Aşama 2")
+        else:
+            self._mod_gorunum()              # tiklanan sekme gorunumu bozmasin
+
+    def _manuel_hareket_izni(self):
+        """Elle hareket (klavye, kol, ekrandaki D-pad, merkeze al) YALNIZ Manuel'de.
+        Hazırlık'ta ve Otonom'da gimbal'i yalniz otonom surer (25.09)."""
+        return getattr(self, "mod", "Manuel") == "Manuel"
+
+    def _otonom_baslat(self):
+        """ATEŞ'in yerindeki BAŞLAT / DURDUR butonu (yalniz Asama 2/3)."""
+        if self.asama not in ("Aşama 2", "Aşama 3"):
+            return
+        if self.mod == "Otonom":
+            self._mod_uygula(self.HAZIRLIK)
+            self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;Otonom durduruldu '
+                                f'— {self.asama} hazırlıkta')
+            return
+        if self._hareket_kilitli():
+            self._mod_gorunum()
+            self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;Önce ACİL '
+                                f'DURDUR\'dan çıkın (DEVAM ET)')
+            return
+        self._mod_uygula("Otonom")
+        self.sb_msg.setText(f'<span style="color:{GRN}">●</span>&nbsp;{self.asama} '
+                            f'başladı — otonom')
+
+    def _mod_gorunum(self):
+        """Mod/asama degisince GORUNUM: ust sekmeler, alt cubuk, ATEŞ <-> BAŞLAT."""
+        mod = getattr(self, "mod", "Manuel")
+        for m, b in getattr(self, "mod_btns", {}).items():
+            b.setChecked(m == ("Manuel" if mod == "Manuel" else "Otonom"))
+        for a, b in getattr(self, "asama_btns", {}).items():
+            b.setChecked(a == self.asama)
+        if hasattr(self, "sb_mod"):
+            etiket = f"Otonom ({self.HAZIRLIK.lower()})" if mod == self.HAZIRLIK else mod
+            self.sb_mod.setText(f'<span style="color:{BLUE}">Sistem:</span>&nbsp;{etiket}')
+        if hasattr(self, "ates_stack"):
+            self.ates_stack.setCurrentIndex(0 if mod == "Manuel" else 1)
+        btn = getattr(self, "baslat_btn", None)
+        if btn is not None:
+            no = (self.asama or "").split()[-1]
+            ek = {"2": "'Yİ", "3": "'Ü"}.get(no, "'İ")
+            calisiyor = mod == "Otonom"
+            btn.setChecked(calisiyor)
+            btn.setText("■  OTONOMU DURDUR" if calisiyor else f"▶  AŞAMA {no}{ek} BAŞLAT")
+
+    def _mod_uygula(self, ad):
+        """Modun TEK degisim kapisi (donanim + algi tarafi). Gorunum `_mod_gorunum`."""
         onceki_mod = getattr(self, "mod", None)
         self.mod = ad
+        # Mod degisince elle acilmis ates KESILIR: ATEŞ butonu Hazırlık/Otonom'da
+        # gorunmez, acik kalan lazer operatorun gozunden kacardi. (Otonom kendi atesini
+        # `_otonom_ates_kontrol`le yonetir.)
+        if onceki_mod != ad and hasattr(self, "kontrol") and hasattr(self, "fire_btn"):
+            self._ates_kes("mod değişti")
+        if getattr(self, "_acik_pencere", None) == "lazer":
+            self._pencere_kapat()            # ⚙ ATEŞ <-> BAŞLAT arasinda yer degistirir
+        if ad != "Manuel":
+            if getattr(self, "_basili_yonler", None):
+                self._tekrar_durdur()        # basili tutulan yon tusu hareketi surdurmesin
+            if getattr(self, "_merkez_calisiyor", False):
+                self._merkez_durdur("otonom/hazırlık")
         # OTONOMDAN CIKIS: hareket kesilir ve ekran/kart hedefi kartin OLCTUGU konuma
         # cekilir. Otonom karta (konum, hiz) akitir; son komut hedefi gercek konumdan
         # derecelerce ayrisabilir. Ilk manuel tus o eski hedeften hesaplanirsa namlu
@@ -3946,38 +4048,12 @@ class MainWindow(QMainWindow):
         k = getattr(self, "kontrol", None)
         if k is not None and hasattr(k, "takip_kipi"):
             k.takip_kipi(ad == "Otonom")
-        if getattr(self, "_acik_pencere", None):
-            self._pencere_kapat()            # manuel panel gizlenirken kutucuk askida kalmasin
-        for m, b in self.mod_btns.items():
-            b.setChecked(m == ad)
-        izin = self.IZIN[ad]
-        for a, b in self.asama_btns.items():
-            b.setEnabled(a in izin)
-        if self.asama not in izin:          # gecersiz asama -> secimi kaldir
-            self.asama = None
-            for b in self.asama_btns.values():
-                b.setChecked(False)
-        # Otonom'a gecerken asama secili degilse ASAMA 3'e dus. Otonom ates kapisi
-        # zaten yalniz Asama 2/3'te acilir (_otonom_ates_kontrol); asamasiz Otonom
-        # "her sey calisiyor ama ates etmiyor" gibi gorunuyordu. Varsayilan AŞAMA 2
-        # (takim karari 22.09): yarismada Otonom'un ilk asamasi o.
-        if ad == "Otonom" and self.asama is None and "Aşama 2" in izin:
-            self.asama = "Aşama 2"
-            for a, b in self.asama_btns.items():
-                b.setChecked(a == self.asama)
-        self.sb_mod.setText(f'<span style="color:{BLUE}">Sistem:</span>&nbsp;{ad}')
         # B3: otonom nisan dongusu yalniz Otonom modda calisir. Mod degisince
         # kontrolcunun turev gecmisi sifirlanir (yeni moda gecince sicrama olmasin).
         if isinstance(getattr(self, "thread", None), VideoThread):
             self.inference_thread.otonom = (ad == "Otonom")
             self.inference_thread.nisanci.sifirla()
-        if hasattr(self, "sag_mod_stack"):
-            # Sag kolondaki QStackedWidget: 0 = Manuel, 1 = Otonom.
-            self.sag_mod_stack.setCurrentIndex(0 if ad == "Manuel" else 1)
-        # Otonom paneldeki gorev bilgisini guncelle
-        if hasattr(self, "oto_gorev_lbl"):
-            self._otonom_gorev_guncelle()
-        self._asama_uygula()
+        self._mod_gorunum()
 
     def _tus_yonu(self, event):
         """Klavye olayindan D-pad yonu. None = bizim tusumuz degil, Qt'ye birak.
@@ -4098,16 +4174,21 @@ class MainWindow(QMainWindow):
             super().keyReleaseEvent(event)
 
     def _asama_sec(self, ad):
-        if not self.asama_btns[ad].isEnabled():
+        """AKTİF GÖREV sekmesi — mod ile asamanin TEK bag kapisi. Asama 1 = Manuel;
+        Asama 2/3 = Hazırlık (otonom BAŞLAT'la baslar). Asama degisirse calisan otonom
+        durur: yeni asamanin kurallari operator onaylamadan uygulanmasin."""
+        if ad not in self.ASAMA_IDX or ad is None:
             return
-        self.asama = None if self.asama == ad else ad   # tekrar tikla -> kaldir
-        for a, b in self.asama_btns.items():
-            b.setChecked(a == self.asama)
+        self.asama = ad
+        self._mod_uygula("Manuel" if ad == "Aşama 1" else self.HAZIRLIK)
         self._asama_uygula()
 
     def _asama_uygula(self):
         """Secili asamaya gore stack + pill + kural + algi davranisi gunceller."""
         self.stack.setCurrentIndex(self.ASAMA_IDX[self.asama])
+        if hasattr(self, "alt_oto_stack"):          # A2/A3: otonom durumu alt satirda
+            self.alt_oto_stack.setCurrentIndex(0 if self.asama in (None, "Aşama 1") else 1)
+        self._mod_gorunum()
         # Algi thread'ine aktif asamayi bildir (renk yalniz A3'te calisir). Thread heniz
         # olusmamis olabilir (ilk cagri __init__ sirasinda). DIKKAT: hasattr(self,"thread")
         # KULLANMA — QObject'in yerlesik thread() metodu yuzunden hep True doner; isinstance ile.
@@ -4894,7 +4975,10 @@ class MainWindow(QMainWindow):
             self.oto_pan_lbl.setText(f"Azimut: {self.pan_val_lbl.text()}")
             self.oto_tilt_lbl.setText(f"Yükseliş: {self.tilt_val_lbl.text()}")
 
-        if self.mod == "Otonom":
+        if self.mod != "Otonom":
+            self.oto_nisan_durum.setText("Başlatılmadı — hazırlık")
+            self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.L3))
+        else:
             if estop:
                 self.oto_nisan_durum.setText("Sistem durduruldu")
                 self.oto_nisan_durum.setStyleSheet(T.yazi(T.CAGRI, T.KIRMIZI))

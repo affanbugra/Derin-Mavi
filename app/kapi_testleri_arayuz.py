@@ -28,10 +28,10 @@ import bolge as B
 
 
 class SahteEtiket:
-    """Metin/stil cagrilarini yutan sahte QLabel."""
+    """Metin/stil cagrilarini yutan sahte QLabel (son metni `_metin`de tutar)."""
 
-    def setText(self, *a):
-        pass
+    def setText(self, metin="", *a):
+        self._metin = metin
 
     def setStyleSheet(self, *a):
         pass
@@ -154,6 +154,14 @@ class SahtePencere:
     _kol_yenile = A.MainWindow._kol_yenile
     _zoom_acik = A.MainWindow._zoom_acik
     _hassasiyet = A.MainWindow._hassasiyet
+    _manuel_hareket_izni = A.MainWindow._manuel_hareket_izni
+    _asama_sec = A.MainWindow._asama_sec
+    _mod_sec = A.MainWindow._mod_sec
+    _mod_uygula = A.MainWindow._mod_uygula
+    _mod_gorunum = A.MainWindow._mod_gorunum
+    _otonom_baslat = A.MainWindow._otonom_baslat
+    HAZIRLIK = A.MainWindow.HAZIRLIK
+    ASAMA_IDX = A.MainWindow.ASAMA_IDX
     _hassasiyet_ayarla = A.MainWindow._hassasiyet_ayarla
     _hassasiyet_basis = A.MainWindow._hassasiyet_basis
     HASSASIYET_TUSU = A.MainWindow.HASSASIYET_TUSU
@@ -1158,6 +1166,83 @@ def test_hassasiyet_kisayolu_ve_kutu_kaymasi():
     assert A.kamera_kaymasi_px(fn, None, 2.0, 1280) is None
 
 
+def test_mod_asama_bagi_ve_hazirlikta_elle_hareket_yok():
+    """25.09: Manuel = Aşama 1 (kendiliğinden seçili). Aşama 2/3 seçilince HAZIRLIK:
+    otonom BAŞLAMAZ ve klavye / kol / ekrandaki D-pad / merkeze al HAREKET ETTİRMEZ.
+    Otonom yalnız BAŞLAT ile başlar, tekrar basınca hazırlığa döner. Mod değişince
+    elle açılmış ateş kesilir; ACİL DURDUR'dayken BAŞLAT reddedilir."""
+    Qt = A.Qt
+    import types
+    w = SahtePencere()
+    w.thread = A.VideoThread(None, None, None)
+    w.inference_thread = types.SimpleNamespace(
+        otonom=False, nisanci=types.SimpleNamespace(sifirla=lambda: None))
+    w._asama_uygula = lambda: None               # gorunum (stack/pill) testte yok
+    w.mod_btns = {m: SahteButon() for m in ("Manuel", "Otonom")}
+    w.asama_btns = {a: SahteButon() for a in ("Aşama 1", "Aşama 2", "Aşama 3")}
+    w.baslat_btn = SahteButon()
+    w.sb_mod = SahteEtiket()
+
+    # Manuel sekmesi -> Asama 1; Otonom sekmesi -> A2 HAZIRLIK (otonom baslamaz)
+    w._mod_sec("Manuel")
+    assert (w.mod, w.asama) == ("Manuel", "Aşama 1")
+    w._mod_sec("Otonom")
+    assert (w.mod, w.asama) == (w.HAZIRLIK, "Aşama 2"), (w.mod, w.asama)
+    assert w.mod_btns["Otonom"].isChecked() and not w.baslat_btn.isChecked()
+
+    # Hazirlikta elle hareket YOK: ekran D-pad, klavye, kol (yon + merkez)
+    pan0, tilt0 = w.pan_aci, w.tilt_aci
+    w._dpad_press("right"); w._dpad_release("right")
+    w._dpad_press("center")
+    w._tus_bas(SahteTus(Qt.Key_W)); w._tus_birak(SahteTus(Qt.Key_W))
+    w.gamepad = SahteGamepad(pan=1.0)
+    w._gp_son_t = time.time() - 0.1
+    w._gamepad_tik()
+    w.gamepad = SahteGamepad(basili=("l1", "r1"))
+    w._gamepad_tik()
+    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "hazirlikta elle hareket gecti"
+    assert not w._merkez_timer.isActive(), "hazirlikta merkeze alma basladi"
+
+    # BASLAT -> Otonom; yine elle hareket yok; tekrar -> Hazirlik
+    w._otonom_baslat()
+    assert w.mod == "Otonom" and w.baslat_btn.isChecked()
+    assert w.inference_thread.otonom, "BASLAT otonom nisan dongusunu acmadi"
+    w._dpad_press("left"); w._dpad_release("left")
+    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "otonomda elle hareket gecti"
+    w._otonom_baslat()
+    assert w.mod == w.HAZIRLIK and not w.baslat_btn.isChecked()
+    assert not w.inference_thread.otonom, "DURDUR otonom dongusunu kapatmadi"
+
+    # Asama degisirse calisan otonom durur (yeni asama onaysiz baslamaz)
+    w._otonom_baslat()
+    w._asama_sec("Aşama 3")
+    assert w.mod == w.HAZIRLIK, "asama degisince otonom surdu"
+    # Asama 3 ayni mantik: hazirlik, elle hareket yok, kendi BAŞLAT'i
+    assert "AŞAMA 3" in w.baslat_btn._metin and "BAŞLAT" in w.baslat_btn._metin, w.baslat_btn._metin
+    w._dpad_press("right"); w._dpad_release("right")
+    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "A3 hazirlikta elle hareket gecti"
+    w._otonom_baslat()
+    assert w.mod == "Otonom" and "DURDUR" in w.baslat_btn._metin
+    w._otonom_baslat()
+
+    # ACIL DURDUR'dayken BASLAT reddedilir
+    w.kontrol.estop(True)
+    w._otonom_baslat()
+    assert w.mod == w.HAZIRLIK, "E-Stop'ta otonom basladi"
+    w.kontrol.estop(False)
+
+    # Asama 1 -> Manuel: hareket geri gelir; manuel ates mod degisince kesilir
+    w._asama_sec("Aşama 1")
+    assert w.mod == "Manuel"
+    w._dpad_press("right"); w._dpad_release("right")
+    assert w.pan_aci != pan0, "Manuel'de hareket calismiyor"
+    w._ates_kisayolu()
+    assert w.kontrol.mock.lazer is True
+    w._asama_sec("Aşama 2")
+    assert w.kontrol.mock.lazer is False and not w.fire_btn.isChecked(), \
+        "Manuel'de acilan ates hazirliga gecince kesilmedi"
+
+
 def test_kontroller_listesi_gercek_tuslarla_ayni():
     """Arayüzdeki "Kontroller" paneli (kontroller.py) ile arayüzün GERÇEKTEN dinlediği
     klavye tuşları aynı olmalı. Bir tuş eklenir/değişir de liste unutulursa operatör
@@ -1220,6 +1305,7 @@ if __name__ == "__main__":
     test_sag_cubuk_zoom_yalniz_manuel_asama1()
     test_hassasiyet_tek_dokunus_ve_hiz()
     test_hassasiyet_kisayolu_ve_kutu_kaymasi()
+    test_mod_asama_bagi_ve_hazirlikta_elle_hareket_yok()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
