@@ -175,8 +175,9 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
 - Hazır ayar: atış yatay ±30 / dikey ±15 (ateş alanı hareket alanından dar başlar).
 - Açı karolarında açık pencereler saydam renkli dilim olarak görünür: **sarı** =
   harekete yasak, **kırmızı** = atışa yasak, **soluk yeşil** = atış izni.
-- Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) ·
-  **`Esc` = ACİL DURDUR** (yalnız kurar). Kol: D-pad + **sol joystick (yatay + dikey)**, sağ joystick **boş** ·
+- Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) · `Z`/`X` = zoom yakın/uzak ·
+  **`Esc` = ACİL DURDUR** (yalnız kurar). Kol: D-pad + **sol joystick (yatay + dikey)**, **sağ joystick Y = görüntü zoom'u**
+  (yalnız Manuel + Aşama 1, en çok 4×, yalnız ekran — komut üretmez) ·
   **Options/Start = ACİL DURDUR** (yalnız kurar) · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
   Acil durdurmadan çıkış (DEVAM ET) yalnız arayüz butonuyla; donanım butonu basılıyken olmaz.
 - **Bir tuşu değiştiren `kontroller.py`'yi de değiştirir** (üst çubuktaki "Kontroller" paneli oradan

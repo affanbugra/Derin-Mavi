@@ -2077,9 +2077,11 @@ class MainWindow(QMainWindow):
             return True
         # Odak giderse (baska pencere, sayi kutusu) Space/B'nin BIRAKMA olayi bize hic
         # gelmeyebilir; takili kalan "basili" kaydi sonra TEK tusla atesi acardi.
-        if (obj is getattr(self, "view", None) and event.type() == QEvent.FocusOut
-                and getattr(self, "_ates_tus_basili", None)):
-            self._ates_tus_basili.clear()
+        if obj is getattr(self, "view", None) and event.type() == QEvent.FocusOut:
+            if getattr(self, "_ates_tus_basili", None):
+                self._ates_tus_basili.clear()
+            if getattr(self, "_zoom_tuslar", None):   # takili Z/X zoom'u surdurmesin
+                self._zoom_tuslar.clear()
         if (obj is getattr(self, "view", None)
                 and event.type() in (QEvent.KeyPress, QEvent.KeyRelease)
                 and not self._metin_girisi_odakta()):
@@ -2501,6 +2503,12 @@ class MainWindow(QMainWindow):
         self._merkez_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._merkez_timer.timeout.connect(self._merkez_tik)
         self._gp_ates_basili = False               # kolun iki tetigi su an basili mi
+        self._zoom = 1.0                           # goruntu zoom'u (sag cubuk; Manuel + A1)
+        self._zoom_tuslar = set()                  # basili Z/X (klavye zoom'u)
+        self._zoom_tus_t = 0.0
+        self._zoom_timer = QTimer(self)
+        self._zoom_timer.setInterval(self.TEKRAR_PERIYOT_MS)
+        self._zoom_timer.timeout.connect(self._zoom_tus_tik)
 
     # ---- Ic sayfa 0: D-pad ----
     def _dpad_sayfasi(self):
@@ -2905,6 +2913,8 @@ class MainWindow(QMainWindow):
         isiklar = set(d.basili)
         if d.hareket_var and not ({"up", "down", "left", "right"} & d.basili):
             isiklar.add("sol_cubuk")
+        if self._zoom_guncelle(d.zoom, dt):
+            isiklar.add("sag_cubuk")
         self._kol_gamepad_isik(isiklar)
         self._gp_ates_basili = d.ates_basili
 
@@ -2930,6 +2940,64 @@ class MainWindow(QMainWindow):
             self._manuel_komut(d.pan * v, d.tilt * v, dt, simdi, "kol")
         elif self._manuel_kaynak == "kol":
             self._manuel_fren()                     # cubuk birakildi: yumusak dur
+
+    # ---- GORUNTU ZOOM (sag cubuk) ----
+    # DIJITAL zoom: yalniz EKRANDAKI goruntu kirpilip buyutulur. Algi, nisan ve otonom
+    # tam kareyle calismaya devam eder — zoom hicbir komutu etkilemez. Kamera
+    # cozunurlugunun otesinde yeni ayrinti gelmez; uzak hedefi operatorun gozune
+    # buyutmek icindir (Asama 1, 15 m hedef = 20 puan).
+    ZOOM_MAX = 4.0
+    ZOOM_HIZ = 1.0          # tam sapmada saniyede e^1 ≈ 2.7 kat (1x -> 4x ~1.4 sn)
+
+    def _zoom_acik(self):
+        """Zoom yalniz Manuel modda ve Asama 1'de gecerli (takim karari 24.09)."""
+        return (getattr(self, "mod", "") == "Manuel"
+                and getattr(self, "asama", None) == "Aşama 1")
+
+    def _zoom_katsayi(self):
+        """Ekrana uygulanacak zoom. Kosul disinda 1x'e doner ve SIFIRLANIR: Asama 1'e
+        geri donuldugunde eski yakinlik kendiliginden geri gelmesin."""
+        if not self._zoom_acik():
+            self._zoom = 1.0
+        return getattr(self, "_zoom", 1.0)
+
+    # Klavye: [Z] yakinlastir, [X] uzaklastir — basili tuttukca, sag cubuk tam
+    # sapmadaki hizla (ayni `_zoom_guncelle`, ayni Manuel + A1 kosulu).
+    ZOOM_TUSLARI = {Qt.Key_Z: 1.0, Qt.Key_X: -1.0}
+
+    def _zoom_tusu(self, event, basildi):
+        """[Z]/[X] olayi. Doner: tus bizimse True (kosul disinda da yutulur)."""
+        if event.key() not in self.ZOOM_TUSLARI:
+            return False
+        if event.isAutoRepeat():
+            return True
+        if basildi:
+            self._zoom_tuslar.add(event.key())
+            self._zoom_tus_t = time.time()
+            self._zoom_timer.start()
+        else:
+            self._zoom_tuslar.discard(event.key())
+            if not self._zoom_tuslar:
+                self._zoom_timer.stop()
+        return True
+
+    def _zoom_tus_tik(self):
+        simdi = time.time()
+        dt = min(0.2, simdi - self._zoom_tus_t)
+        self._zoom_tus_t = simdi
+        if not self._zoom_tuslar:
+            self._zoom_timer.stop()
+            return
+        self._zoom_guncelle(sum(self.ZOOM_TUSLARI[k] for k in self._zoom_tuslar), dt)
+
+    def _zoom_guncelle(self, v, dt):
+        """Sag cubuk Y: yukari (+) yakinlastirir, asagi (-) 1x'e kadar uzaklastirir.
+        Carpimsal: her kademede ayni 'hissedilen' hiz. Doner: zoom degisti mi."""
+        if not v or not self._zoom_acik():
+            return False
+        z = getattr(self, "_zoom", 1.0) * math.exp(self.ZOOM_HIZ * v * dt)
+        self._zoom = min(self.ZOOM_MAX, max(1.0, z))
+        return True
 
     def _tekrar_baslat(self):
         if self._basili_yonler:
@@ -3877,6 +3945,8 @@ class MainWindow(QMainWindow):
             return True
         if self._ates_tusu(event, basildi=True):
             return True
+        if self._zoom_tusu(event, basildi=True):
+            return True
         yon = self._tus_yonu(event)
         if yon is None:
             return event.key() in TUS_YON           # tekrar/otonom: yine de gorunume birakma
@@ -3887,6 +3957,8 @@ class MainWindow(QMainWindow):
         if event.key() == ESTOP_TUSU:
             return True
         if self._ates_tusu(event, basildi=False):
+            return True
+        if self._zoom_tusu(event, basildi=False):
             return True
         yon = self._tus_yonu(event)
         if yon is None:
@@ -4334,15 +4406,30 @@ class MainWindow(QMainWindow):
     # ================= KARE GELDI =================
     def _kare_geldi(self, qimg, data):
         try:
-            pix = QPixmap.fromImage(qimg).scaled(
-                self.video.width(), self.video.height(),
-                Qt.KeepAspectRatio, Qt.FastTransformation)
-                
+            # ZOOM (sag cubuk, Manuel + A1): kare LAZER NISANGAHININ cevresinden
+            # kirpilir ki buyutunce nisangah hedefin ustunde kalsin. Kirpma kare
+            # disina tasmaz. Tum cizimler (kutu, balon, nisan) ayni (ox, oy, olcek)
+            # donusumuyle yapilir — zoom 1x'te eskisiyle birebir aynidir.
+            W, H = qimg.width(), qimg.height()
+            lazer_x = W / 2 + algi.AYAR.get("lazer_ofset_x", 0.0) * W
+            lazer_y = H / 2 + algi.AYAR.get("lazer_ofset_y", 0.0) * H
+            z = self._zoom_katsayi()
+            ox = oy = 0
+            kaynak = qimg
+            if z > 1.001:
+                cw, ch = max(1, int(W / z)), max(1, int(H / z))
+                ox = int(min(max(lazer_x - cw / 2, 0), W - cw))
+                oy = int(min(max(lazer_y - ch / 2, 0), H - ch))
+                kaynak = qimg.copy(ox, oy, cw, ch)
+            pix = QPixmap.fromImage(kaynak).scaled(
+                self.video.width(), self.video.height(), Qt.KeepAspectRatio,
+                Qt.SmoothTransformation if z > 1.001 else Qt.FastTransformation)
+
             painter = QPainter(pix)
             painter.setRenderHint(QPainter.Antialiasing)
-            
-            scale_x = pix.width() / qimg.width()
-            scale_y = pix.height() / qimg.height()
+
+            scale_x = pix.width() / kaynak.width()
+            scale_y = pix.height() / kaynak.height()
             
             font = QFont("Consolas", 10, QFont.Bold)
             painter.setFont(font)
@@ -4351,7 +4438,8 @@ class MainWindow(QMainWindow):
             
             for bx in data.get("balonlar", []):
                 x1, y1, x2, y2 = bx
-                rx1, ry1, rx2, ry2 = x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
+                rx1, ry1 = (x1 - ox) * scale_x, (y1 - oy) * scale_y
+                rx2, ry2 = (x2 - ox) * scale_x, (y2 - oy) * scale_y
                 pen.setColor(QColor(60, 200, 235))
                 painter.setPen(pen)
                 painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
@@ -4372,7 +4460,8 @@ class MainWindow(QMainWindow):
                 painter.setPen(pen)
 
                 x1, y1, x2, y2 = d["box"]
-                rx1, ry1, rx2, ry2 = x1 * scale_x, y1 * scale_y, x2 * scale_x, y2 * scale_y
+                rx1, ry1 = (x1 - ox) * scale_x, (y1 - oy) * scale_y
+                rx2, ry2 = (x2 - ox) * scale_x, (y2 - oy) * scale_y
 
                 painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
 
@@ -4412,7 +4501,7 @@ class MainWindow(QMainWindow):
                     # yeri YANLIS gosterirdi ve operator kalibrasyonu (balon_ofset)
                     # neye gore cevirecegini goremezdi.
                     hx, hy = algi.det_nisan_noktasi(d, data.get("nisan_balonlar", []))
-                    cx, cy = hx * scale_x, hy * scale_y
+                    cx, cy = (hx - ox) * scale_x, (hy - oy) * scale_y
                     pen.setColor(color)
                     painter.setPen(pen)
                     painter.drawEllipse(QPointF(cx, cy), 16, 16)
@@ -4430,8 +4519,8 @@ class MainWindow(QMainWindow):
             # Kare merkezi DEGIL: kamera-lazer boresight/paralaks ofseti kalibre
             # edilmisse (⚙ panel), nisangah lazerin GERCEKTEN vurdugu noktaya kayar.
             # Kalibrasyon yapilmadiysa (ofset=0) davranis eskisiyle aynidir.
-            mcx = pix.width() / 2 + algi.AYAR.get("lazer_ofset_x", 0.0) * pix.width()
-            mcy = pix.height() / 2 + algi.AYAR.get("lazer_ofset_y", 0.0) * pix.height()
+            mcx = (lazer_x - ox) * scale_x
+            mcy = (lazer_y - oy) * scale_y
             pen.setColor(QColor(255, 0, 0)) # Kirmizi
             pen.setWidth(2)
             painter.setPen(pen)
@@ -4440,6 +4529,14 @@ class MainWindow(QMainWindow):
             painter.setBrush(QColor(255, 0, 0))
             painter.drawEllipse(QPointF(mcx, mcy), 2, 2)
             painter.setBrush(Qt.NoBrush) # Reset brush
+
+            if z > 1.001:                          # zoom acik: operator bilsin
+                etiket = f"ZOOM {z:.1f}×"
+                fm = painter.fontMetrics()
+                ew, eh = fm.horizontalAdvance(etiket) + 12, fm.height() + 6
+                painter.fillRect(QRectF(pix.width() - ew - 10, 10, ew, eh), QColor(0, 0, 0, 160))
+                painter.setPen(QColor(255, 255, 255))
+                painter.drawText(QPointF(pix.width() - ew - 4, 13 + fm.ascent()), etiket)
 
             painter.end()
             

@@ -4,8 +4,8 @@
 Sartname Yetenek 1 kullanici komut arayuzlerini "UI/joystick/klavye" diye sayar; joystick
 video icin dogrudan puandir (CLAUDE.md §2).
 
-DUZEN (24.09): SOL cubuk = yatay + dikey (iki eksen), SAG cubuk = BOS (hicbir sey
-yapmaz), D-pad = iki eksen · L2+R2 birlikte = ATES ac (tekrar basinca kes) · L1+R1
+DUZEN (24.09): SOL cubuk = yatay + dikey (iki eksen), SAG cubuk Y = ZOOM (yalniz
+Manuel + Asama 1; gimbal'i HIC surmez), D-pad = iki eksen · L2+R2 birlikte = ATES ac (tekrar basinca kes) · L1+R1
 birlikte = merkeze al (kademeli; 24.09'dan beri tek basina degil) · Options/Start =
 ACIL DURDUR (24.09'dan beri Daire/B DEGIL). Tek tusla ates YOKTUR.
 ACIL DURDUR koldan yalniz KURULUR, asla KALDIRILMAZ (24.09): eskiden Options ikinci
@@ -70,11 +70,12 @@ if PYGAME_VAR:
     CB_ESTOP = pygame.CONTROLLER_BUTTON_START
     CB_TETIK = (pygame.CONTROLLER_AXIS_TRIGGERLEFT,     # L2 / R2 (analog)
                 pygame.CONTROLLER_AXIS_TRIGGERRIGHT)
-    # 24.09: iki eksen de SOL cubukta (X = yatay, Y = dikey); SAG cubuk BOS. 22.09'daki
-    # "sol = yatay, sag = dikey" bolmesi kaldirildi — operator tek elle nisan istedi.
-    # Sag cubuga bir is baglanacaksa kontroller.py'deki tabloyu da guncelle.
+    # 24.09: iki eksen de SOL cubukta (X = yatay, Y = dikey). 22.09'daki "sol = yatay,
+    # sag = dikey" bolmesi kaldirildi — operator tek elle nisan istedi. SAG cubuk Y
+    # yalniz goruntu ZOOM'u verir (hareket DEGIL). Degisirse kontroller.py'yi guncelle.
     CB_EKSEN_PAN = pygame.CONTROLLER_AXIS_LEFTX
     CB_EKSEN_TILT = pygame.CONTROLLER_AXIS_LEFTY
+    CB_EKSEN_ZOOM = pygame.CONTROLLER_AXIS_RIGHTY
     # GameController'da D-pad ayri bir "hat" degil, dort dugmedir.
     CB_DPAD = ((pygame.CONTROLLER_BUTTON_DPAD_UP, 0.0, 1.0, "up"),
                (pygame.CONTROLLER_BUTTON_DPAD_DOWN, 0.0, -1.0, "down"),
@@ -99,6 +100,7 @@ EKSEN_L2, EKSEN_R2 = 4, 5       # tetikler eksen olarak gelirse
 # cubugu yukari itince namlu asagi inerdi).
 EKSEN_PAN = 0             # sol cubuk X
 EKSEN_TILT = 1            # sol cubuk Y (XInput/DirectInput duzeninde 1)
+EKSEN_ZOOM = 3            # sag cubuk Y (XInput duzeninde 3) — yalniz zoom
 
 
 def _olu_bolge(v):
@@ -115,7 +117,8 @@ def _olu_bolge(v):
 class Durum:
     """Bir yoklamanin sonucu.
 
-    * `pan`/`tilt`  : -1..1 (cubuk veya D-pad)
+    * `pan`/`tilt`  : -1..1 (sol cubuk veya D-pad)
+    * `zoom`        : -1..1 (sag cubuk Y; yukari = +, yakinlastir). Hareket DEGILDIR.
     * `basili`      : O AN basili tuslarin adlari — arayuzdeki kol resmini yakar
                       ve "iki tetik birlikte 2 sn" gibi SURE kurallarini besler.
     * `kenar`       : bu yoklamada YENI basilanlar — ac/kapa komutlari icin.
@@ -123,11 +126,12 @@ class Durum:
     Neden iki kume: ates/E-Stop birer ac-kapa (kenar gerekir), ama atesi kurmak
     icin tetiklerin BASILI KALMASI gerekir (seviye gerekir). Ikisi de lazim."""
 
-    __slots__ = ("pan", "tilt", "basili", "kenar")
+    __slots__ = ("pan", "tilt", "zoom", "basili", "kenar")
 
     def __init__(self):
         self.pan = 0.0
         self.tilt = 0.0
+        self.zoom = 0.0
         self.basili = set()
         self.kenar = set()
 
@@ -264,6 +268,7 @@ class Gamepad:
         c = self.ctrl
         d.pan = _olu_bolge(c.get_axis(CB_EKSEN_PAN) / CB_EKSEN_OLCEK)
         d.tilt = -_olu_bolge(c.get_axis(CB_EKSEN_TILT) / CB_EKSEN_OLCEK)
+        d.zoom = -_olu_bolge(c.get_axis(CB_EKSEN_ZOOM) / CB_EKSEN_OLCEK)
 
         # D-pad analog cubukla AYNI alanlari besler: hassas nisan icin dijital yon cogu
         # zaman cubuktan kolaydir. Cubuk zaten hareketliyse D-pad yok sayilir.
@@ -285,6 +290,8 @@ class Gamepad:
         j = self.js
         d.pan = _olu_bolge(float(j.get_axis(EKSEN_PAN)))
         d.tilt = -_olu_bolge(float(j.get_axis(EKSEN_TILT)))
+        if EKSEN_ZOOM < j.get_numaxes():
+            d.zoom = -_olu_bolge(float(j.get_axis(EKSEN_ZOOM)))
 
         if j.get_numhats() > 0:
             hx, hy = j.get_hat(0)
@@ -375,7 +382,12 @@ if __name__ == "__main__":
         d = _cubuk({pygame.CONTROLLER_AXIS_LEFTX: tam})
         assert d.pan == 1.0 and d.tilt == 0.0, "sol cubuk X yatayi surmuyor"
         d = _cubuk({pygame.CONTROLLER_AXIS_RIGHTX: tam, pygame.CONTROLLER_AXIS_RIGHTY: -tam})
-        assert not d.hareket_var, "sag cubuk hala hareket veriyor (bos olmali)"
+        assert not d.hareket_var, "sag cubuk gimbal'i suruyor (yalniz zoom olmali)"
+        assert d.zoom == 1.0, "sag cubuk YUKARI zoom vermiyor"
+        d = _cubuk({pygame.CONTROLLER_AXIS_RIGHTY: tam})
+        assert d.zoom == -1.0, "sag cubuk ASAGI uzaklastirmiyor"
+        d = _cubuk({pygame.CONTROLLER_AXIS_LEFTY: -tam})
+        assert d.zoom == 0.0, "sol cubuk zoom veriyor"
         g.ctrl = None
     print("olu bolge + cubuk duzeni testleri OK")
 
@@ -393,7 +405,7 @@ if __name__ == "__main__":
               f"  hat: {g.js.get_numhats()}")
         print("       Yanlis tusa dusuyorsa gamepad.py'deki BTN_* numaralarini asagidaki")
         print("       'basili' ciktisina bakarak duzeltin.")
-    print("\nDuzen: sol cubuk=yatay+dikey, sag cubuk=bos, D-pad=yon · L2+R2=ates"
+    print("\nDuzen: sol cubuk=yatay+dikey, sag cubuk Y=zoom (Manuel+A1), D-pad=yon · L2+R2=ates"
           " · L1+R1=merkez · Options/Start=ACIL DURDUR (yalniz kurar)")
     print("Cubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
     try:
@@ -407,7 +419,7 @@ if __name__ == "__main__":
             if g.js is not None:
                 ham = " ham:" + str([i for i in range(g.js.get_numbuttons())
                                      if g.js.get_button(i)])
-            print(f"\rpan {d.pan:+.2f}  tilt {d.tilt:+.2f}  {' '.join(olaylar):28s}{ham}   ",
+            print(f"\rpan {d.pan:+.2f}  tilt {d.tilt:+.2f}  zoom {d.zoom:+.2f}  {' '.join(olaylar):28s}{ham}   ",
                   end="", flush=True)
             time.sleep(0.05)
     except KeyboardInterrupt:

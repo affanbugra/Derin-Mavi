@@ -33,6 +33,10 @@ KLAVYE = (
      "Yalnız Manuel mod.", (Qt.Key_R,)),
     (("Space + B",), "Ateş aç / kes", "İkisi birlikte, her modda. Tek tuş bir şey yapmaz. "
      "ACİL DURDUR'da ve atışa yasak alanda açılmaz.", (Qt.Key_Space, Qt.Key_B)),
+    (("Z",), "Yakınlaştır", "Basılı tuttukça, en çok 4×. Yalnız Manuel + Aşama 1; "
+     "yalnız ekran.", (Qt.Key_Z,)),
+    (("X",), "Uzaklaştır", "Basılı tuttukça, 1×'e (eski hâline) kadar. Yalnız Manuel + "
+     "Aşama 1.", (Qt.Key_X,)),
     (("Esc",), "ACİL DURDUR", "Her modda, her durumda; ateş de kesilir. Yalnız durdurur — "
      "devam için ekrandaki DEVAM ET butonu.", (Qt.Key_Escape,)),
 )
@@ -50,7 +54,9 @@ KOL = (
     (("l1", "r1"), "L1 + R1", "Merkeze al",
      "İkisi birlikte; 0° / 0°'a kademeli. Tek tuş bir şey yapmaz."),
     (("start",), "Options / Start", "ACİL DURDUR", "Yalnız durdurur; devam ekrandan."),
-    (("sag_cubuk",), "Sağ joystick", None, ""),
+    (("sag_cubuk",), "Sağ joystick", "Zoom",
+     "Yalnız Manuel + Aşama 1. Yukarı yakınlaştırır (en çok 4×), aşağı 1×'e kadar "
+     "uzaklaştırır. Yalnız ekran — gimbal'i ve otonomu etkilemez."),
     (("capraz", "daire", "kare", "ucgen"), "Çarpı / Daire / Kare / Üçgen", None, ""),
 )
 
@@ -116,11 +122,12 @@ if __name__ == "__main__":
     etkin = {ad for adlar_, _, is_, _ in KOL if is_ for ad in adlar_}
     assert etkin == set(KI.ETKIN), f"tablo / kol_ikon.ETKIN ayrisiyor: {etkin ^ set(KI.ETKIN)}"
 
-    # 3. Cubuk duzeni gamepad.py ile ayni: iki eksen SOL cubukta, sag cubuk bos.
+    # 3. Cubuk duzeni gamepad.py ile ayni: iki eksen SOL cubukta, sag cubuk Y = zoom.
     if G.PYGAME_VAR:
         import pygame
         assert G.CB_EKSEN_PAN == pygame.CONTROLLER_AXIS_LEFTX
         assert G.CB_EKSEN_TILT == pygame.CONTROLLER_AXIS_LEFTY, "dikey sol cubukta degil"
+        assert G.CB_EKSEN_ZOOM == pygame.CONTROLLER_AXIS_RIGHTY, "zoom sag cubuk Y degil"
     assert (G.EKSEN_PAN, G.EKSEN_TILT) == (0, 1), "ham yol: dikey sol cubuk Y (1) olmali"
 
     # 4. Tabloda yazan is, gamepad.Durum'un gercek karariyla ayni: ACIL DURDUR / merkez

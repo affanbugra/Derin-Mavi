@@ -152,6 +152,14 @@ class SahtePencere:
     _kol_parla = A.MainWindow._kol_parla
     _kol_gamepad_isik = A.MainWindow._kol_gamepad_isik
     _kol_yenile = A.MainWindow._kol_yenile
+    _zoom_acik = A.MainWindow._zoom_acik
+    _zoom_katsayi = A.MainWindow._zoom_katsayi
+    _zoom_guncelle = A.MainWindow._zoom_guncelle
+    _zoom_tusu = A.MainWindow._zoom_tusu
+    _zoom_tus_tik = A.MainWindow._zoom_tus_tik
+    ZOOM_TUSLARI = A.MainWindow.ZOOM_TUSLARI
+    ZOOM_MAX = A.MainWindow.ZOOM_MAX
+    ZOOM_HIZ = A.MainWindow.ZOOM_HIZ
     _tus_bas = A.MainWindow._tus_bas
     _tus_birak = A.MainWindow._tus_birak
     _tus_yonu = A.MainWindow._tus_yonu
@@ -205,6 +213,7 @@ class SahtePencere:
         self._son_tekrar_t = 0.0
         self._tekrar_gecikme = SahteTimer()
         self._tekrar_timer = SahteTimer()
+        self._zoom_tuslar, self._zoom_tus_t, self._zoom_timer = set(), 0.0, SahteTimer()
         self._manuel_hiz, self._manuel_hiz_t, self._manuel_kaynak = None, 0.0, None
         self._fren_hiz, self._fren_bitis = None, 0.0
         self._fren_timer = SahteTimer()
@@ -997,13 +1006,77 @@ def test_odunc_kapilar_gercek_pencerede_de_metot():
     assert not bozuk, f"gercek pencerede metot OLMAYAN kapilar: {bozuk}"
 
 
+def test_sag_cubuk_zoom_yalniz_manuel_asama1():
+    """Sağ joystick Y = görüntü zoom'u; yalnız Manuel + Aşama 1'de (24.09). Zoom
+    gimbal'e HİÇ komut göndermez; koşul dışında 1×'e döner ve sıfırlanır."""
+    w = SahtePencere()
+    w.thread = A.VideoThread(None, None, None)
+    w.asama = "Aşama 1"
+    w._zoom = 1.0
+
+    def kol(zoom, sure=0.05, adim=20):
+        for _ in range(adim):
+            w.gamepad = SahteGamepad()
+            w.gamepad._d.zoom = zoom
+            w._gp_son_t = A.time.time() - sure
+            w._gamepad_tik()
+
+    pan0, tilt0 = w.pan_aci, w.tilt_aci
+    kol(1.0)                                     # ~1 sn tam yukari
+    assert w._zoom_katsayi() > 2.0, f"yukari yakinlastirmadi: {w._zoom}"
+    assert "sag_cubuk" in w.kol_ikon.yanan, "zoom sirasinda sag cubuk yanmadi"
+    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "zoom gimbal'i oynatti"
+    kol(1.0, adim=100)
+    assert w._zoom_katsayi() == w.ZOOM_MAX, "zoom tavani asildi"
+    kol(-1.0, adim=100)
+    assert w._zoom_katsayi() == 1.0, "asagi 1x'e donmedi / 1x altina indi"
+
+    # Otonom'da ya da baska asamada zoom YOK
+    for mod, asama in (("Otonom", "Aşama 1"), ("Manuel", "Aşama 2"), ("Manuel", None)):
+        w.mod, w.asama, w._zoom = mod, asama, 1.0
+        kol(1.0)
+        assert w._zoom_katsayi() == 1.0, f"{mod}/{asama}'da zoom calisti"
+
+    # Klavye: [Z] basili yakinlastirir, [X] uzaklastirir; gimbal oynamaz
+    Qt = A.Qt
+    w.mod, w.asama, w._zoom = "Manuel", "Aşama 1", 1.0
+
+    def tus(k, sure=1.0, adim=20):
+        w._tus_bas(SahteTus(k))
+        assert w._zoom_timer.isActive(), "Z/X basinca zoom zamanlayicisi baslamadi"
+        for _ in range(adim):
+            w._zoom_tus_t = A.time.time() - sure / adim
+            w._zoom_tus_tik()
+        w._tus_birak(SahteTus(k))
+        assert not w._zoom_timer.isActive(), "tus birakilinca zoom durmadi"
+
+    tus(Qt.Key_Z)
+    assert w._zoom_katsayi() > 2.0, f"[Z] yakinlastirmadi: {w._zoom}"
+    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "[Z] gimbal'i oynatti"
+    tus(Qt.Key_X, sure=5.0)
+    assert w._zoom_katsayi() == 1.0, "[X] 1x'e donmedi"
+    w.mod = "Otonom"
+    tus(Qt.Key_Z)
+    assert w._zoom_katsayi() == 1.0, "Otonom'da [Z] zoom yapti"
+    w.mod = "Manuel"
+
+    # Kosuldan cikinca sifirlanir; geri donunce eski yakinlik gelmez
+    w.mod, w.asama = "Manuel", "Aşama 1"
+    kol(1.0)
+    w.asama = "Aşama 2"
+    assert w._zoom_katsayi() == 1.0
+    w.asama = "Aşama 1"
+    assert w._zoom_katsayi() == 1.0, "Asama 1'e donunce eski zoom geri geldi"
+
+
 def test_kontroller_listesi_gercek_tuslarla_ayni():
     """Arayüzdeki "Kontroller" paneli (kontroller.py) ile arayüzün GERÇEKTEN dinlediği
     klavye tuşları aynı olmalı. Bir tuş eklenir/değişir de liste unutulursa operatör
     yanlış tuşu öğrenir — bu test o unutkanlığı kırmızıya düşürür (24.09)."""
     import kontroller as K
     Qt = A.Qt
-    dinlenen = set(A.TUS_YON) | set(A.MainWindow.ATES_TUSLARI) | {A.ESTOP_TUSU}
+    dinlenen = (set(A.TUS_YON) | set(A.MainWindow.ATES_TUSLARI) | {A.ESTOP_TUSU}
+                | set(A.MainWindow.ZOOM_TUSLARI))
     yazili = K.klavye_tuslari()
     assert dinlenen == yazili, (
         f"kontroller.py ile arayuz ayrisiyor — listede eksik: {dinlenen - yazili}, "
@@ -1055,6 +1128,7 @@ if __name__ == "__main__":
     test_lazer_gucu_onaysiz_degismez()
     test_odunc_kapilar_gercek_pencerede_de_metot()
     test_kontroller_listesi_gercek_tuslarla_ayni()
+    test_sag_cubuk_zoom_yalniz_manuel_asama1()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
