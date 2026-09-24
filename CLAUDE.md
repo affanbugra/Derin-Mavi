@@ -48,7 +48,7 @@ Bunların her biri **gerçekten yaşanmış bir hatanın** karşılığıdır. D
 | 3 | **Karta giden açı MUTLAK, birim DERECE.** Firmware `moveTo` kullanır; step'e çevirim karttadır. | Delta protokolde ekrandaki açı kartın hedefinden kopuyordu. |
 | 4 | **Lazer ölü adam anahtarı**: 250 ms'de bir `L1` tazelemesi; kart 1 sn tazeleme almazsa lazeri KENDİ keser (`protokol.ATES_TAZELE_MS` / `ATES_ZAMAN_ASIMI_MS`, firmware ile aynı). Tazeleme 1 sn kesildiyse PC lazeri **kendiliğinden yeniden yakmaz**. Kesme (`L0`/`STOP`) her karta ve her porttan gider. | "Kes" komutunun gideceğine güvenilemez: kablo koptuğunda o komut zaten gidemez. Donan arayüz geri gelince eski tazeleme lazeri yeniden yakıyordu (24.09 testte yakalandı). |
 | 5 | **Mekanik sınırlar iki tarafta da uygulanır** (Python + firmware). Tek tarafa güvenilmez. | Seri monitörden elle `T500` yazan biri mekaniği kırabilir. |
-| 6 | **Ateş tek kapıdan, kesmek kolay; ACİL DURDUR kısayolla yalnız KURULUR.** Ateş: `Space`+`B` birlikte, kol `L2`+`R2` birlikte (tek dokunuş, bekleme yok; tek tuş boş) — hepsi `_ates_bas`. ACİL DURDUR: `Esc`, kol `Options/Start` (24.09; Backspace ve Daire artık boş); kısayol asla DEVAM ettirmez, devam yalnız arayüz butonu. | Kol eskiden Options'ın ikinci basışında acil durdurmayı kaldırıyordu. |
+| 6 | **Ateş tek kapıdan; ACİL DURDUR kısayolu aç/kapa ama korumalı.** Ateş: `Space`+`B` birlikte, kol `L2`+`R2` birlikte (tek dokunuş, bekleme yok; tek tuş boş) — hepsi `_ates_bas`. ACİL DURDUR: `Esc`, kol `Options/Start` (24.09; Backspace ve Daire boş). İlk basış kurar, **tekrar basış DEVAM** (24.09 kullanıcı kararı) — yalnız kurulduktan `ESTOP_KISAYOL_BEKLEME_S` (1 sn) sonra; klavye otomatik tekrarı ve kolda basılı tutma sayılmaz. İki yön de `_estop_bas`'tan geçer: donanım butonu basılıyken devam yok. | Kol eskiden Options'ın ikinci basışında acil durdurmayı **anında** kaldırıyordu (panikte çift basış). |
 | 7 | **Otonom ateş yalnız o karede GERÇEKTEN görülen hedefte BAŞLAR** — hayalet kutu / eski sınıf belleği yetmez; A3'te yalnız kartı "Düşman" olan (renk kanıtı şartı 23.09 takım kararıyla kalktı). Başlamış ateşi kesen: E-Stop, atışa yasak açı, dost/menzil engeli, kilidin düşmesi ya da başka hedefe geçmesi. **Balonda istisna (24.09, kullanıcı isteği):** ateş `OTONOM_ATES_SURE` (2 sn) sürer, hayalet kesmez — lazer noktası modeli kör ediyor. Araçta hayalet keser. | Aşama-3'te dost vurmak −10 puan. Lazer altındaki balona 37 atışın 37'si 0.2 sn'de kesildi. |
 | 8 | **Sahte cihaz (mock) asla "hazır/yeşil" görünmez.** Alt çubukta sarı + "kart takılı değil". | Operatör kablosuz sistemi hazır sanıyordu. |
 | 9 | **Merkeze alma kademelidir** (motor tavan hızıyla), anlık sıfırlama yok; yön komutu veya E-Stop dönüşü keser. | Ekran sıfıra zıplarken gimbal yolda kalıyor, açı referansı kopuyordu. |
@@ -176,10 +176,10 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
 - Açı karolarında açık pencereler saydam renkli dilim olarak görünür: **sarı** =
   harekete yasak, **kırmızı** = atışa yasak, **soluk yeşil** = atış izni.
 - Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) · `Z`/`X` = zoom yakın/uzak · `C` (art arda 1/2/3) = hassasiyet ·
-  **`Esc` = ACİL DURDUR** (yalnız kurar). Kol: D-pad + **sol joystick (yatay + dikey)**, **sağ joystick Y = görüntü zoom'u**
+  **`Esc` = ACİL DURDUR aç/kapa** (tekrar basış ≥1 sn sonra devam). Kol: D-pad + **sol joystick (yatay + dikey)**, **sağ joystick Y = görüntü zoom'u**
   (yalnız Manuel + Aşama 1, en çok 4×, yalnız ekran — komut üretmez) ·
-  **Options/Start = ACİL DURDUR** (yalnız kurar) · Çarpı/A (art arda 1/2/3) = hassasiyet · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
-  Acil durdurmadan çıkış (DEVAM ET) yalnız arayüz butonuyla; donanım butonu basılıyken olmaz.
+  **Options/Start = ACİL DURDUR aç/kapa** · Çarpı/A (art arda 1/2/3) = hassasiyet · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
+  Acil durdurmadan çıkış: DEVAM ET butonu ya da aynı kısayol; donanım butonu basılıyken olmaz.
 - **HASSASİYET** (D-pad altında): Hassas 0,1° / Orta 0,5° (açılış) / Hızlı 1° tek dokunuş;
   basılı tutma 3 / 10 / 40 °/sn. 15 m'de 1° ≈ 26 cm. Kol D-pad'i de tek dokunuş atar,
   joystick karesel. Tablo: `MainWindow.HASSASIYET`. Merkeze alma/otonom etkilenmez.

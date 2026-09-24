@@ -39,8 +39,8 @@ KLAVYE = (
      "Aşama 1.", (Qt.Key_X,)),
     (("C",), "Hassasiyet", "Art arda 1 basış = Hassas, 2 = Orta, 3 = Hızlı (yarım saniye "
      "içinde).", (Qt.Key_C,)),
-    (("Esc",), "ACİL DURDUR", "Her modda, her durumda; ateş de kesilir. Yalnız durdurur — "
-     "devam için ekrandaki DEVAM ET butonu.", (Qt.Key_Escape,)),
+    (("Esc",), "ACİL DURDUR", "Her modda, her durumda; ateş de kesilir. Tekrar basınca devam "
+     "(durdurduktan en az 1 sn sonra). Donanım butonu basılıyken devam olmaz.", (Qt.Key_Escape,)),
 )
 
 # Satir: (kol_ikon adlari, tus, is, aciklama). is = None -> tus BOS (bir sey yapmaz).
@@ -56,7 +56,8 @@ KOL = (
      "İkisi birlikte, tek dokunuş. Tek tetik bir şey yapmaz."),
     (("l1", "r1"), "L1 + R1", "Merkeze al",
      "İkisi birlikte; 0° / 0°'a kademeli. Tek tuş bir şey yapmaz."),
-    (("start",), "Options / Start", "ACİL DURDUR", "Yalnız durdurur; devam ekrandan."),
+    (("start",), "Options / Start", "ACİL DURDUR",
+     "Tekrar basınca devam (durdurduktan en az 1 sn sonra). Donanım butonu basılıyken olmaz."),
     (("sag_cubuk",), "Sağ joystick", "Zoom",
      "Yalnız Manuel + Aşama 1. Yukarı yakınlaştırır (en çok 4×), aşağı 1×'e kadar "
      "uzaklaştırır. Yalnız ekran — gimbal'i ve otonomu etkilemez."),
@@ -67,7 +68,8 @@ KOL = (
 
 # Kısayolu olmayan, yalniz ekrandan yapilan isler (unutulmasin diye listede).
 EKRAN = (
-    ("DEVAM ET", "ACİL DURDUR'dan çıkış YALNIZ bu butonla. Donanım butonu basılıyken olmaz."),
+    ("DEVAM ET", "ACİL DURDUR'dan çıkış — Esc / Options ile aynı kapı. Donanım butonu "
+     "basılıyken olmaz."),
     ("ATEŞ butonu", "Space + B ile aynı kapı."),
     ("HASSASİYET", "Hassas 0,1° · Orta 0,5° · Hızlı 1° tek dokunuş (15 m'de ≈ 3 / 13 / 26 cm). "
      "Basılı tutma ve joystick hızını da belirler. Klavye, D-pad ve kol birlikte."),

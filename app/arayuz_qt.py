@@ -1664,8 +1664,9 @@ class MainWindow(QMainWindow):
         self.estop_btn.setCheckable(True)
         self.estop_btn.setToolTip(
             "ACİL DURDUR: lazer kesilir, iki eksen olduğu yerde durur, kart kilitlenir.\n"
-            "Kısayol: klavyede [Esc] · kolda [Options / Start].\n"
-            "Kısayollar YALNIZ DURDURUR — devam için bu butona (DEVAM ET) tıklayın.\n"
+            "Kısayol: klavyede [Esc] · kolda [Options / Start] — ilk basış durdurur,\n"
+            f"tekrar basış devam ettirir (en az {self.ESTOP_KISAYOL_BEKLEME_S:g} sn sonra). "
+            "DEVAM ET butonu da aynı işi yapar.\n"
             "Donanım butonu (kart GPIO 15) basılıyken devam edilemez.")
         self.estop_btn.clicked.connect(self._estop_bas)
         ekle(self.estop_btn)
@@ -2943,7 +2944,8 @@ class MainWindow(QMainWindow):
         self._gp_son_t = simdi
 
         # E-STOP her kosulda islenir (digerlerinden ONCE): acil durdurma bir moda ya da
-        # baska bir kosula bagli olamaz. Ayni buton DEVAM icin de kullanilir.
+        # baska bir kosula bagli olamaz. Ayni tus tekrar basilinca DEVAM ettirir (24.09;
+        # kurulduktan ESTOP_KISAYOL_BEKLEME_S sonra — bkz. _estop_kisayolu).
         # Koldaki gercek tuslar ekrandaki kol resminde yanar (durum gostergesi).
         # Cubuk analogdur (dugme degil): sapinca kendi dairesi yanar. Iki eksen de SOL
         # cubukta (24.09); sag cubuk bos. D-pad de pan/tilt'i doldurur — o an cubuk degil
@@ -2957,7 +2959,7 @@ class MainWindow(QMainWindow):
         self._gp_ates_basili = d.ates_basili
 
         if d.estop:
-            self._estop_kisayolu()                  # YALNIZ kurar; devam arayuz butonundan
+            self._estop_kisayolu()                  # ac/kapa (DEVAM: tekrar basis)
             return                                  # ayni tikta baska komut isleme
 
         # HASSASIYET: Capraz (A) art arda 1/2/3 basis -> Hassas/Orta/Hizli.
@@ -4027,25 +4029,38 @@ class MainWindow(QMainWindow):
             self._ates_kisayolu()             # -> _ates_bas (tek kapi)
         return True
 
-    def _estop_kisayolu(self):
-        """Klavye [Esc] / kol [Options/Start]: ACIL DURDURU KURAR, asla kaldirmaz.
+    # Kisayolla DEVAM icin acil durdur kurulduktan sonra en az bu kadar gecmeli.
+    ESTOP_KISAYOL_BEKLEME_S = 1.0
 
-        Kaldirma (DEVAM) yalniz arayuz butonundan: panikte iki kez basmak ya da tusa
-        takili kalmak acil durdurmayi sessizce kaldirmamali (eski kol yolu bunu yapiyordu).
-        Kurmak `_estop_bas` uzerinden gider — butonla ayni tek kapi."""
+    def _estop_kisayolu(self):
+        """Klavye [Esc] / kol [Options/Start]: ACIL DURDUR AC/KAPA (24.09 kullanici karari).
+
+        Ilk basis kurar, ikinci basis DEVAM ettirir. Iki yon de butonla AYNI tek kapidan
+        (`_estop_bas`) gecer: donanim butonu basiliyken kisayolla da devam edilemez (kart
+        STOP'ta kalir, `_esp_yokla` E-Stop'u geri kurar). ⚠ Kurulduktan sonra
+        ESTOP_KISAYOL_BEKLEME_S dolmadan gelen basis YOK SAYILIR: panikte cift basis / tus
+        titremesi acil durdurmayi aninda kaldirmasin (22.09'da kol tam bunu yapiyordu).
+        Klavyenin otomatik tekrari `_tus_bas`'ta, kolun basili tutmasi `Durum.kenar`'da elenir."""
         btn = getattr(self, "estop_btn", None)
-        if btn is None or btn.isChecked():
+        if btn is None:
             return
-        btn.setChecked(True)
-        self._estop_bas()
+        if not btn.isChecked():
+            btn.setChecked(True)
+            self._estop_bas()
+            return
+        if time.time() - getattr(self, "_estop_kurulma_t", 0.0) < self.ESTOP_KISAYOL_BEKLEME_S:
+            return
+        btn.setChecked(False)
+        self._estop_bas()                   # DEVAM: butonun DEVAM ET'i ile ayni kapi
 
     def _tus_bas(self, event):
         """Klavyenin TEK kapisi (basma). Doner: tus bizimse True.
         Hareket `_dpad_press` -> `_aci_hareket` ile gider: ekran + KART (motor) birlikte."""
-        # [Esc] = ACIL DURDUR (yalniz kurar; ates de kesilir). Her modda, her durumda.
-        # Tekrar/basili tutma zararsiz.
+        # [Esc] = ACIL DURDUR ac/kapa (ates de kesilir). Her modda, her durumda.
+        # Otomatik tekrar SAYILMAZ: basili tutulan Esc acil durdurmayi acip kapatmasin.
         if event.key() == ESTOP_TUSU:
-            self._estop_kisayolu()
+            if not event.isAutoRepeat():
+                self._estop_kisayolu()
             return True
         if event.key() == self.HASSASIYET_TUSU:     # [C]: art arda 1/2/3 = kademe
             if not event.isAutoRepeat():
@@ -4141,6 +4156,8 @@ class MainWindow(QMainWindow):
         ediyor" gibi gorunur). Artik hareket kapisi da E-Stop'ta kapaniyor.
         """
         aktif = self.estop_btn.isChecked()
+        if aktif:
+            self._estop_kurulma_t = time.time()     # kisayolla DEVAM beklemesi buradan
         self._kol_isik("start", aktif)      # koldaki Options: E-Stop suresince yanar
         self.thread.estop = aktif
         self.inference_thread.estop = aktif

@@ -894,24 +894,58 @@ def test_tek_kart_otonom_ates_ve_gercek_lazer():
         w.close()
 
 
-def test_klavye_ve_kol_acil_durdurur_ama_kaldirmaz():
-    """[Esc] ve kolda [Options/Start] ACIL DURDURU kurar; tekrar basmak onu KALDIRMAZ
-    (eski kol yolu ikinci basista devam ediyordu). Devam yalniz butondan. Daire/B
-    24.09'dan beri acil durdur DEGILDIR."""
+def test_klavye_ve_kol_acil_durdurur_tekrar_basinca_devam():
+    """[Esc] ve kolda [Options/Start] ACIL DURDUR AC/KAPA (24.09 kullanici karari): ilk
+    basis kurar, tekrar basis DEVAM ettirir — ama kurulduktan ESTOP_KISAYOL_BEKLEME_S
+    dolmadan DEGIL (22.09'da kol ikinci basista aninda kaldiriyordu: panikte cift basis).
+    Klavyenin otomatik tekrari ve kolda basili tutmak sayilmaz; donanim butonu basiliyken
+    kisayol devam ettiremez; devam atesi yeniden ACMAZ. Daire/B acil durdur DEGILDIR."""
     import gamepad as G
+    from PySide6.QtGui import QKeyEvent
     w = _tek_pencere()
     try:
         m = w.kontrol.tilt.mock
+        bekleme = w.ESTOP_KISAYOL_BEKLEME_S
+        assert bekleme >= 0.5, "kisayolla devam beklemesi kaldirildi / cok kisa"
+
+        def esc(tekrar=False):
+            return w._tus_bas(QKeyEvent(A.QEvent.KeyPress, A.Qt.Key_Escape, A.Qt.NoModifier,
+                                        "", tekrar))
+
+        def gecir():                           # kurulmadan bu yana bekleme doldu
+            w._estop_kurulma_t -= bekleme + 0.1
+
+        def yokla3():
+            for _ in range(3):
+                _yokla(w, 0.2)
+
         _ates_ac(w)
-        from PySide6.QtGui import QKeyEvent
-        tus = QKeyEvent(A.QEvent.KeyPress, A.Qt.Key_Escape, A.Qt.NoModifier)
-        assert w._tus_bas(tus)
+        assert esc()
         assert w.estop_btn.isChecked() and m.acil and not m.lazer_acik, "Esc acil durdurmadi"
-        assert w._tus_bas(tus) and w.estop_btn.isChecked(), "ikinci Esc acil durdurmayi kaldirdi"
-        w.estop_btn.setChecked(False)
-        w._estop_bas()
-        _yokla(w, 0.2)
-        assert not w.estop_btn.isChecked()
+        assert esc() and w.estop_btn.isChecked(), "bekleme dolmadan ikinci Esc DEVAM ettirdi"
+        gecir()
+        assert esc(tekrar=True) and w.estop_btn.isChecked(), \
+            "basili tutulan Esc (otomatik tekrar) DEVAM ettirdi"
+        assert esc()
+        yokla3()
+        assert not w.estop_btn.isChecked() and not m.acil, "tekrar Esc DEVAM ettirmedi"
+        assert not w.fire_btn.isChecked() and not m.lazer_acik, "DEVAM atesi yeniden acti"
+
+        # Donanim butonu basiliyken kisayol devam ettiremez (DEVAM ET butonuyla ayni kapi).
+        m.buton_bas(True)
+        _yokla(w)
+        assert w.estop_btn.isChecked(), "kurulum: donanim butonu E-Stop kurmadi"
+        gecir()
+        esc()
+        yokla3()
+        assert m.acil and w.estop_btn.isChecked(), "donanim butonu basiliyken Esc DEVAM ettirdi"
+        m.buton_bas(False)
+        yokla3()
+        assert m.acil and w.estop_btn.isChecked(), "buton birakilinca KENDILIGINDEN devam etti"
+        gecir()
+        esc()
+        yokla3()
+        assert not m.acil and not w.estop_btn.isChecked(), "buton birakildiktan sonra Esc DEVAM etmedi"
 
         class SahteKol:
             bagli, ad = True, "test"
@@ -926,16 +960,24 @@ def test_klavye_ve_kol_acil_durdurur_ama_kaldirmaz():
                 pass
         kol = SahteKol()
         w.gamepad = kol
-        kol.d = G.Durum()
-        kol.d.basili, kol.d.kenar = {"daire"}, {"daire"}
-        w._gamepad_tik()
-        assert not w.estop_btn.isChecked(), "Daire hala acil durduruyor"
-        for tus_adi in ("start", "start"):
+
+        def kol_bas(tus, kenar=True):
             kol.d = G.Durum()
-            kol.d.basili, kol.d.kenar = {tus_adi}, {tus_adi}
+            kol.d.basili, kol.d.kenar = {tus}, ({tus} if kenar else set())
             w._gamepad_tik()
-            assert w.estop_btn.isChecked() and m.acil, \
-                f"kolda {tus_adi} acil durdurmayi kaldirdi ya da kurmadi"
+
+        kol_bas("daire")
+        assert not w.estop_btn.isChecked(), "Daire hala acil durduruyor"
+        kol_bas("start")
+        assert w.estop_btn.isChecked() and m.acil, "kolda Options acil durdurmadi"
+        kol_bas("start")
+        assert w.estop_btn.isChecked(), "bekleme dolmadan ikinci Options DEVAM ettirdi"
+        gecir()
+        kol_bas("start", kenar=False)
+        assert w.estop_btn.isChecked(), "Options'i basili tutmak DEVAM ettirdi"
+        kol_bas("start")
+        yokla3()
+        assert not w.estop_btn.isChecked() and not m.acil, "tekrar Options DEVAM ettirmedi"
     finally:
         w.close()
 
@@ -1133,7 +1175,7 @@ def test_manuel_basili_tutma_yorunge_ve_yumusak_fren():
     try:
         k, m = w.kontrol, w.kontrol.tilt.mock
         assert k.yorunge_destekli, "kurulum: sahte kart yorunge bilmiyor"
-        v = A.P.HIZ_TABLO[w.hiz_seviye][0]
+        v = w._hassasiyet()[1]           # basili tutma hizi HASSASIYET'ten (24.09)
         (_, pan_ivme), (_, tilt_ivme) = k.hiz_profilleri()
 
         def tut(*yonler, n=6):
@@ -1214,7 +1256,8 @@ def test_manuel_basili_tutma_yorunge_ve_yumusak_fren():
 
 
 def test_kol_cubugu_yorunge_ve_birakinca_fren():
-    """Kol cubugu da ayni yol: sapma x hiz ile yorunge; cubuk birakilinca bir kez fren."""
+    """Kol cubugu da ayni yol: yorunge, cubuk birakilinca bir kez fren. Hiz KARESEL
+    egriyle (sapma x |sapma| x HASSASIYET hizi, 24.09): az itince cok yavas."""
     import gamepad as G
     gercek = A.time
     A.time = _SahteZaman
@@ -1237,22 +1280,23 @@ def test_kol_cubugu_yorunge_ve_birakinca_fren():
         kol = SahteKol()
         w.gamepad = kol
         w._gp_son_t = saat[0]
-        v = A.P.HIZ_TABLO[w.hiz_seviye][0]
+        v = w._hassasiyet()[1]
+        sapma = 0.5
+        vv = sapma * abs(sapma) * v                          # karesel egri
         (_, _), (_, tilt_ivme) = k.hiz_profilleri()
         n0 = len(m.kayit)
         kol.d = G.Durum()
-        kol.d.tilt = 0.5
+        kol.d.tilt = sapma
         for _ in range(5):
             saat[0] += 0.05
             w._gamepad_tik()
         Y = _yorunge_listesi(m.kayit[n0:], "Y")
-        assert len(Y) >= 4 and abs(Y[-1][1] - 0.5 * v) < 1e-3, Y
+        assert len(Y) >= 4 and abs(Y[-1][1] - vv) < 1e-3, Y
         kol.d = G.Durum()                                    # cubuk birakildi
         n1 = len(m.kayit)
         saat[0] += 0.05
         w._gamepad_tik()
         F = _yorunge_listesi(m.kayit[n1:], "Y")
-        vv = 0.5 * v
         assert F and F[-1][1] == 0.0, "cubuk birakilinca fren yok"
         assert abs(F[-1][0] - (Y[-1][0] + vv * 0.05 + vv * vv / (2 * tilt_ivme))) < 0.05, (F, Y[-1])
         n2 = len(m.kayit)
@@ -1290,7 +1334,7 @@ TAKIP_TESTLERI = [
     test_tek_kart_acil_durdurma,
     test_tek_kart_donanim_butonu,
     test_tek_kart_otonom_ates_ve_gercek_lazer,
-    test_klavye_ve_kol_acil_durdurur_ama_kaldirmaz,
+    test_klavye_ve_kol_acil_durdurur_tekrar_basinca_devam,
     test_panel_aktif_hedefi_hayalet_ve_balon_bilgisi_tasir,
     test_balon_modunda_kilit_ve_nisan_balonda,
     test_surekli_takip_konum_kipi,

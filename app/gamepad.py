@@ -8,9 +8,10 @@ DUZEN (24.09): SOL cubuk = yatay + dikey (iki eksen), SAG cubuk Y = ZOOM (yalniz
 Manuel + Asama 1; gimbal'i HIC surmez), D-pad = iki eksen · L2+R2 birlikte = ATES ac (tekrar basinca kes) · L1+R1
 birlikte = merkeze al (kademeli; 24.09'dan beri tek basina degil) · Options/Start =
 ACIL DURDUR (24.09'dan beri Daire/B DEGIL). Tek tusla ates YOKTUR.
-ACIL DURDUR koldan yalniz KURULUR, asla KALDIRILMAZ (24.09): eskiden Options ikinci
-basista DEVAM ediyordu — yanlislikla iki kez basmak acil durdurmayi kaldiriyordu.
-Devam yalniz arayuzdeki "DEVAM ET" butonuyla, bilincli bir eylemle olur.
+ACIL DURDUR koldan AC/KAPA (24.09 kullanici karari): Options/Start ilk basista kurar,
+TEKRAR basinca devam ettirir — ama kurulduktan en az 1 sn sonra (arayuz
+`_estop_kisayolu`): panikte cift basis acil durdurmayi aninda kaldirmasin. Basili tutmak
+tekrarlamaz (`kenar`). Donanim butonu basiliyken koldan da devam edilemez.
 
 ⚠ BU MODUL KOMUT URETMEZ, YALNIZCA OKUR. Arayuz okunan durumu kendi guvenlik kapilarindan
   gecirir (`_aci_hareket`, `_ates_bas`, `_estop_bas`). Gamepad'in kendi yolu OLMAMALIDIR:
@@ -145,7 +146,7 @@ class Durum:
 
     @property
     def estop(self):
-        """Options/Start BU yoklamada basildi mi (ACIL DURDUR — yalniz kurar)."""
+        """Options/Start BU yoklamada basildi mi (ACIL DURDUR ac/kapa; arayuz karar verir)."""
         return "start" in self.kenar
 
     @property
@@ -416,7 +417,7 @@ if __name__ == "__main__":
         print("       Yanlis tusa dusuyorsa gamepad.py'deki BTN_* numaralarini asagidaki")
         print("       'basili' ciktisina bakarak duzeltin.")
     print("\nDuzen: sol cubuk=yatay+dikey, sag cubuk Y=zoom (Manuel+A1), D-pad=yon · L2+R2=ates"
-          " · L1+R1=merkez · Options/Start=ACIL DURDUR (yalniz kurar)")
+          " · L1+R1=merkez · Options/Start=ACIL DURDUR ac/kapa")
     print("Cubugu oynatin / dugmelere basin (Ctrl+C ile cikis).")
     try:
         while True:
