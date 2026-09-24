@@ -180,6 +180,9 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
   (yalnız Manuel + Aşama 1, en çok 4×, yalnız ekran — komut üretmez) ·
   **Options/Start = ACİL DURDUR** (yalnız kurar) · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
   Acil durdurmadan çıkış (DEVAM ET) yalnız arayüz butonuyla; donanım butonu basılıyken olmaz.
+- **HASSASİYET** (D-pad altında): Hassas 0,1° / Orta 0,5° (açılış) / Hızlı 1° tek dokunuş;
+  basılı tutma 3 / 10 / 40 °/sn. 15 m'de 1° ≈ 26 cm. Kol D-pad'i de tek dokunuş atar,
+  joystick karesel. Tablo: `MainWindow.HASSASIYET`. Merkeze alma/otonom etkilenmez.
 - **Bir tuşu değiştiren `kontroller.py`'yi de değiştirir** (üst çubuktaki "Kontroller" paneli oradan
   okur). Ayrışırsa `kontroller.py` / `kapi_testleri_arayuz.py` kırmızıya düşer.
 

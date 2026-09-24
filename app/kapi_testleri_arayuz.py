@@ -153,6 +153,9 @@ class SahtePencere:
     _kol_gamepad_isik = A.MainWindow._kol_gamepad_isik
     _kol_yenile = A.MainWindow._kol_yenile
     _zoom_acik = A.MainWindow._zoom_acik
+    _hassasiyet = A.MainWindow._hassasiyet
+    HASSASIYET = A.MainWindow.HASSASIYET
+    HASSASIYET_VARSAYILAN = A.MainWindow.HASSASIYET_VARSAYILAN
     _zoom_katsayi = A.MainWindow._zoom_katsayi
     _zoom_guncelle = A.MainWindow._zoom_guncelle
     _zoom_tusu = A.MainWindow._zoom_tusu
@@ -223,7 +226,7 @@ class SahtePencere:
         self._merkez_timer = SahteTimer()
         self._kol_ui, self._kol_gp = set(), set()
         self.kol_ikon = SahteKol()
-        self.aci_adim = 1.0
+        self.hassasiyet = "Hızlı"            # eski testlerin varsaydigi 1° / 40°/s
         self._key_normal_style = self._key_active_style = ""
         for ad, _, _ in A.MainWindow.YON_TABLO.values():
             setattr(self, ad, SahteButon())
@@ -1069,6 +1072,47 @@ def test_sag_cubuk_zoom_yalniz_manuel_asama1():
     assert w._zoom_katsayi() == 1.0, "Asama 1'e donunce eski zoom geri geldi"
 
 
+def test_hassasiyet_tek_dokunus_ve_hiz():
+    """HASSASİYET (24.09): tek dokunuş adımı ve basılı tutma hızı seçili kademeden gelir;
+    kolun D-pad'i de klavye gibi TEK ADIM atar (eskiden kısa basış bile 40°/s akıyordu,
+    15 m'de nişan alınamıyordu). Joystick karesel: yarım itiş çeyrek hız."""
+    for ad, (adim, hiz) in A.MainWindow.HASSASIYET.items():
+        w = SahtePencere()
+        w.thread = A.VideoThread(None, None, None)
+        w.hassasiyet = ad
+        # klavye / ekrandaki D-pad: tek dokunus = adim
+        w._dpad_press("right"); w._dpad_release("right")
+        assert abs(w.pan_aci - adim) < 0.011, f"{ad}: klavye tek dokunus {w.pan_aci}° (beklenen {adim}°)"
+        # kol D-pad: ilk basis TEK ADIM, esik dolmadan akmaz
+        once = w.pan_aci
+        w.gamepad = SahteGamepad(pan=1.0, basili=("right",))
+        w.gamepad._d.dpad = True
+        w._gp_son_t = time.time() - 0.1
+        w._gamepad_tik()
+        assert abs(w.pan_aci - once - adim) < 0.011, f"{ad}: kol D-pad ilk basis {w.pan_aci - once}°"
+        w.gamepad = SahteGamepad(pan=1.0, basili=("right",), kenar=())
+        w.gamepad._d.dpad = True
+        w._gp_son_t = time.time() - 0.1
+        w._gamepad_tik()
+        assert abs(w.pan_aci - once - adim) < 0.011, f"{ad}: kol D-pad esik dolmadan akti"
+        # esik doldu: secili hizla akar (0.1 sn x hiz)
+        w._gp_dpad_t0 = time.time() - 1.0
+        onc2 = w.pan_aci
+        w._gp_son_t = time.time() - 0.1
+        w._gamepad_tik()
+        assert 0 < w.pan_aci - onc2 <= hiz * 0.1 + 0.02, f"{ad}: basili hiz {w.pan_aci - onc2}"
+        # joystick: yarim itis = ceyrek hiz
+        w2 = SahtePencere()
+        w2.thread = A.VideoThread(None, None, None)
+        w2.hassasiyet = ad
+        w2.gamepad = SahteGamepad(pan=0.5)
+        w2._gp_son_t = time.time() - 0.1
+        w2._gamepad_tik()
+        assert 0 < w2.pan_aci <= hiz * 0.25 * 0.1 + 0.02, f"{ad}: joystick egrisi {w2.pan_aci}"
+    # Hassas kademe 15 m'de balondan kucuk adim atmali
+    assert A.MainWindow.HASSASIYET["Hassas"][0] <= 0.1
+
+
 def test_kontroller_listesi_gercek_tuslarla_ayni():
     """Arayüzdeki "Kontroller" paneli (kontroller.py) ile arayüzün GERÇEKTEN dinlediği
     klavye tuşları aynı olmalı. Bir tuş eklenir/değişir de liste unutulursa operatör
@@ -1129,6 +1173,7 @@ if __name__ == "__main__":
     test_odunc_kapilar_gercek_pencerede_de_metot()
     test_kontroller_listesi_gercek_tuslarla_ayni()
     test_sag_cubuk_zoom_yalniz_manuel_asama1()
+    test_hassasiyet_tek_dokunus_ve_hiz()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "

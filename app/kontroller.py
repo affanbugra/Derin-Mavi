@@ -21,13 +21,13 @@ import tasarim as T
 # Satir: (tuslar, is, aciklama, Qt tuslari). Qt tuslari, testin arayuzun gercekten
 # dinledigi tuslarla karsilastirmasi icindir.
 KLAVYE = (
-    (("W", "↑"), "Yukarı", "Kısa dokunuş 1°, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("W", "↑"), "Yukarı", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
      (Qt.Key_W, Qt.Key_Up)),
-    (("S", "↓"), "Aşağı", "Kısa dokunuş 1°, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("S", "↓"), "Aşağı", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
      (Qt.Key_S, Qt.Key_Down)),
-    (("A", "←"), "Sola", "Kısa dokunuş 1°, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("A", "←"), "Sola", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
      (Qt.Key_A, Qt.Key_Left)),
-    (("D", "→"), "Sağa", "Kısa dokunuş 1°, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("D", "→"), "Sağa", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
      (Qt.Key_D, Qt.Key_Right)),
     (("R",), "Merkeze al", "0° / 0°'a motor hızıyla kademeli döner; yön tuşu keser. "
      "Yalnız Manuel mod.", (Qt.Key_R,)),
@@ -46,9 +46,10 @@ KLAVYE = (
 # oldugunu denetler (ekranda yanan tus = tabloda yazan tus).
 KOL = (
     (("sol_cubuk",), "Sol joystick", "Yatay + dikey",
-     "Analog: ne kadar itersen o kadar hızlı. Bırakınca yumuşak durur."),
+     "Az itince çok yavaş, sonuna kadar HASSASİYET hızı. Bırakınca yumuşak durur."),
     (("up", "down", "left", "right"), "D-pad", "Yön",
-     "Tam hızla tek yön. Joystick hareketliyken yok sayılır."),
+     "Klavye gibi: tek basış = HASSASİYET adımı, basılı tutunca sürekli. Joystick "
+     "hareketliyken yok sayılır."),
     (("l2", "r2"), "L2 + R2", "Ateş aç / kes",
      "İkisi birlikte, tek dokunuş. Tek tetik bir şey yapmaz."),
     (("l1", "r1"), "L1 + R1", "Merkeze al",
@@ -64,6 +65,8 @@ KOL = (
 EKRAN = (
     ("DEVAM ET", "ACİL DURDUR'dan çıkış YALNIZ bu butonla. Donanım butonu basılıyken olmaz."),
     ("ATEŞ butonu", "Space + B ile aynı kapı."),
+    ("HASSASİYET", "Hassas 0,1° · Orta 0,5° · Hızlı 1° tek dokunuş (15 m'de ≈ 3 / 13 / 26 cm). "
+     "Basılı tutma ve joystick hızını da belirler. Klavye, D-pad ve kol birlikte."),
 )
 
 

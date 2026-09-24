@@ -119,6 +119,7 @@ class Durum:
 
     * `pan`/`tilt`  : -1..1 (sol cubuk veya D-pad)
     * `zoom`        : -1..1 (sag cubuk Y; yukari = +, yakinlastir). Hareket DEGILDIR.
+    * `dpad`        : pan/tilt D-pad'den mi geldi (arayuz D-pad'e "tek dokunus" uygular)
     * `basili`      : O AN basili tuslarin adlari — arayuzdeki kol resmini yakar
                       ve "iki tetik birlikte 2 sn" gibi SURE kurallarini besler.
     * `kenar`       : bu yoklamada YENI basilanlar — ac/kapa komutlari icin.
@@ -126,12 +127,13 @@ class Durum:
     Neden iki kume: ates/E-Stop birer ac-kapa (kenar gerekir), ama atesi kurmak
     icin tetiklerin BASILI KALMASI gerekir (seviye gerekir). Ikisi de lazim."""
 
-    __slots__ = ("pan", "tilt", "zoom", "basili", "kenar")
+    __slots__ = ("pan", "tilt", "zoom", "dpad", "basili", "kenar")
 
     def __init__(self):
         self.pan = 0.0
         self.tilt = 0.0
         self.zoom = 0.0
+        self.dpad = False
         self.basili = set()
         self.kenar = set()
 
@@ -276,7 +278,7 @@ class Gamepad:
             if c.get_button(btn):
                 self._koy(d, ad, True)
                 if not d.hareket_var:
-                    d.pan, d.tilt = kpan, ktilt
+                    d.pan, d.tilt, d.dpad = kpan, ktilt, True
             else:
                 self._koy(d, ad, False)
 
@@ -298,8 +300,8 @@ class Gamepad:
             for ad, acik in (("left", hx < 0), ("right", hx > 0),
                              ("down", hy < 0), ("up", hy > 0)):
                 self._koy(d, ad, acik)
-            if not d.hareket_var:
-                d.pan, d.tilt = float(hx), float(hy)
+            if not d.hareket_var and (hx or hy):
+                d.pan, d.tilt, d.dpad = float(hx), float(hy), True
 
         def bas(no):
             return bool(j.get_button(no)) if no < j.get_numbuttons() else False

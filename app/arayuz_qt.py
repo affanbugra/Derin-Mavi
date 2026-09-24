@@ -2471,7 +2471,8 @@ class MainWindow(QMainWindow):
         self.max_tilt_limit = float(TS.ACI_MAX if getattr(self, "kontrol", None) is not None
                                     and getattr(self.kontrol, "tilt_ayri", False)
                                     else min(P.TILT_MAX, B.TILT_CALISMA_MAX))
-        self.aci_adim = 1.0           # tek dokunus = 1° (sabit; arayuzde secim yok — 22.09)
+        # tek dokunus + basili hiz (arayuzden). getattr: D-pad sayfasi once kurulduysa koru
+        self.hassasiyet = getattr(self, "hassasiyet", self.HASSASIYET_VARSAYILAN)
 
         # Harekete / atisa IZINLI pencereler (disi yasak). Birimler ve kurallar:
         # app/bolge.py. Ayarlar ⚙ Aci Ayarlari panelinden gelir.
@@ -2533,6 +2534,23 @@ class MainWindow(QMainWindow):
         satir.addWidget(self.kol_ikon, 0, Qt.AlignVCenter)
         satir.addStretch(1)
         dv.addLayout(satir)
+
+        # HASSASIYET: tek dokunus adimi + basili tutma hizi (klavye, D-pad, kol)
+        hs = QHBoxLayout()
+        hs.setSpacing(8)
+        cap = QLabel("HASSASİYET")
+        cap.setObjectName("tgcap")
+        hs.addWidget(cap, 0, Qt.AlignVCenter)
+        kapsul, self.hassasiyet_btns = self._seviye_butonlari(
+            [(ad, f"{ad} {adim:g}°") for ad, (adim, _) in self.HASSASIYET.items()],
+            getattr(self, "hassasiyet", self.HASSASIYET_VARSAYILAN), self._hassasiyet_sec)
+        for ad, b in self.hassasiyet_btns.items():
+            adim, hiz = self.HASSASIYET[ad]
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setToolTip(f"Tek dokunuş {adim:g}° · basılı tutunca {hiz:g}°/sn\n"
+                         f"15 m'de tek dokunuş ≈ {math.radians(adim) * 1500:.0f} cm")
+        hs.addWidget(kapsul, 1)
+        dv.addLayout(hs)
         dv.addLayout(self._ates_satiri())
         dv.addStretch(1)                               # artan yer en altta kalir
         return sayfa
@@ -2847,7 +2865,8 @@ class MainWindow(QMainWindow):
         getattr(self, ad).setStyleSheet(self._key_active_style)
         self._kol_isik(direction, True)
         self._fren_durdur()
-        self._aci_hareket(kpan * self.aci_adim, ktilt * self.aci_adim)   # tek dokunus
+        adim = self._hassasiyet()[0]
+        self._aci_hareket(kpan * adim, ktilt * adim)   # tek dokunus
         self._basili_yonler.add(direction)
         if not self._tekrar_timer.isActive():
             self._tekrar_gecikme.start(self.TEKRAR_GECIKME_MS)
@@ -2934,12 +2953,51 @@ class MainWindow(QMainWindow):
         # (`_tekrar_tik`) ile ayni matematik — tek farki analog carpan. Sabit adim
         # gonderilseydi hedef motorun onune gecer, cubuk birakildiginda gimbal
         # yetismek icin donmeye devam ederdi.
-        if d.hareket_var:
-            v = P.HIZ_TABLO[self.hiz_seviye][0]
+        # D-pad (kol): klavyeyle AYNI kural — ilk basis TEK ADIM (secili hassasiyet),
+        # TEKRAR_GECIKME_MS'den uzun basili kalirsa surekli harekete gecer. Eskiden kisa
+        # bir basis bile 40 der/sn akip ustune fren mesafesi ekliyordu (sahada 15 m'de
+        # nisan alinamiyordu, 24.09).
+        adim, v = self._hassasiyet()
+        if d.hareket_var and d.dpad:
+            yeni = bool({"up", "down", "left", "right"} & d.kenar)
+            if yeni or not hasattr(self, "_gp_dpad_t0"):
+                self._gp_dpad_t0 = simdi
+                if self._manuel_kaynak == "kol":
+                    self._manuel_fren()
+                self._fren_durdur()
+                self._aci_hareket(d.pan * adim, d.tilt * adim)
+                return
+            if simdi - self._gp_dpad_t0 < self.TEKRAR_GECIKME_MS / 1000.0:
+                return                              # basili tutma esigi dolmadi
             self._fren_durdur()
             self._manuel_komut(d.pan * v, d.tilt * v, dt, simdi, "kol")
+        elif d.hareket_var:
+            # Joystick: KARESEL egri — az itince cok yavas (ince nisan), sonuna kadar
+            # itince secili hiz. Dogrusal egride en ufak dokunus bile hizli kaciyordu.
+            self._fren_durdur()
+            self._manuel_komut(d.pan * abs(d.pan) * v, d.tilt * abs(d.tilt) * v,
+                               dt, simdi, "kol")
         elif self._manuel_kaynak == "kol":
             self._manuel_fren()                     # cubuk birakildi: yumusak dur
+
+    # ---- MANUEL HASSASIYET ----
+    # (tek dokunus adimi derece, basili tutma / tam joystick hizi derece/sn). 15 m'de
+    # 1° ≈ 26 cm (balondan buyuk); "Hassas" 0.1° ≈ 2.6 cm. Merkeze alma ve otonom bu
+    # tablodan ETKILENMEZ (onlar P.HIZ_TABLO kademesini kullanir).
+    HASSASIYET = {"Hassas": (0.1, 3.0), "Orta": (0.5, 10.0), "Hızlı": (1.0, 40.0)}
+    HASSASIYET_VARSAYILAN = "Orta"
+
+    def _hassasiyet(self):
+        return self.HASSASIYET.get(getattr(self, "hassasiyet", None),
+                                   self.HASSASIYET[self.HASSASIYET_VARSAYILAN])
+
+    def _hassasiyet_sec(self, ad):
+        if ad not in self.HASSASIYET:
+            return
+        self.hassasiyet = ad
+        for a, b in getattr(self, "hassasiyet_btns", {}).items():
+            b.setChecked(a == ad)
+        self._odak_geri()                   # tiklama klavyeyi canli goruntuden almasin
 
     # ---- GORUNTU ZOOM (sag cubuk) ----
     # DIJITAL zoom: yalniz EKRANDAKI goruntu kirpilip buyutulur. Algi, nisan ve otonom
@@ -3018,7 +3076,7 @@ class MainWindow(QMainWindow):
         simdi = time.time()
         dt = min(0.2, simdi - self._son_tekrar_t)      # takilma sonrasi sicrama olmasin
         self._son_tekrar_t = simdi
-        v = P.HIZ_TABLO[self.hiz_seviye][0]            # derece/sn
+        v = self._hassasiyet()[1]                      # derece/sn (HASSASIYET)
         kpan = ktilt = 0.0
         for yon in self._basili_yonler:                # W+D gibi capraz kombinasyonlar
             _, p, t = self.YON_TABLO[yon]
