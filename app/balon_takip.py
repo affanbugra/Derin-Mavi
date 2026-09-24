@@ -44,6 +44,7 @@ import threading
 import time
 
 import cv2
+import numpy as np
 
 import algi
 from renk_analizi import renk_oranlari
@@ -159,7 +160,9 @@ DIKEY_KAT = 4.0
 GOVDE_DEVIR_KARE = 3     # kilitli izin altinda bu kadar kare balon gorulurse kilit ona gecer
 
 # ---- Ates / imha ----
-IMHA_S = 2.0             # ates basladiktan sonra bu sure icinde kaybolan balon = imha
+ATES_SURE_S = 2.0        # varsayilan ates turu (arayuz OTONOM_ATES_SURE'yi ates_basladi'ya verir)
+IMHA_S = 3.0             # ates basladiktan sonra bu sure icinde kaybolan balon = imha
+#                          (ates turu + kamera gecikmesi + kayip siniri; tur uzayinca buyudu)
 AZAMI_ATES = 3           # patlamayan balona (gercek lazerle) en cok bu kadar ates turu
 YASAK_S = 10.0           # sonra bu kadar yeniden secilmez (arayuz OTONOM_BEKLEME_SURE ile ayni)
 # ---- Kart tasima: balon KAYIP_S'den uzun kaybolup AYNI YERDE yeniden bulunursa ----
@@ -182,6 +185,25 @@ BOY_YUMUSATMA = 0.3      # mesafe icin balon genisligi EMA katsayisi
 OLU_ORANI = 0.25
 # A3: balonun ic %40'inin bu kadari dost mavisiyse (mavi govde onunde) ateş yok.
 ONDE_MAVI_ORAN = 0.15
+
+# ---- LAZER ALTINDA (24.09 saha) ----
+# Lazer balona degince kamerada doygun (beyaz) bir nokta olur ve model balonu tanimaz:
+# her atista ~0.25 sn sonra (kamera+islem gecikmesi) iz hayalete dustu, ates kapisi
+# lazeri kesti, balon hic 0.2 sn'den uzun isinmadi (%7 de %55 de ayni). Koridor videosundaki
+# 122 gercek balona yapay nokta basildi: yaricap 0.15 boy -> model 105/122, kenarda 58/122.
+# Ates suresince iki onlem, IKISI DE o karedeki kirmizi kanita bagli (CLAUDE.md §1 kural 7):
+#   * TEMIZLIK: balon HALA yerindeyse noktanin pikselleri modele verilmeden once cevreden
+#     doldurulur (105 -> 114, kenarda 58 -> 87). Kosulsuz temizlik patlamis balonun
+#     arkasindaki duvarda noktanin kirmizi halesinden "balon" uyduruyordu (3 -> 45 / 244).
+#   * HALKA KANITI: model yine kacirirsa iz yerinde tutulur — nokta HARIC balon dairesi
+#     kirmizi VE dis halka kirmizi DEGIL (sinirli leke; kirmizi govde/arka plan degil).
+#     Olculdu: balonda 485/487, bos yerde 5/1220 yanlis. Nokta balonun yarisini kapatirsa
+#     karar yok -> kanit yok -> iz hayalet, ates kesilir (guvenli taraf).
+LAZER_GECIKME_S = 0.35   # lazer sonunce de bu kadar kare noktayi gosterir (kamera + islem)
+LAZER_V, LAZER_S = 230, 110   # doygun nokta (HSV): cok parlak ve soluk
+HALKA_IC = 0.5           # nokta haric balon dairesinin (r <= 0.5 boy) en az bu kadari kirmizi
+HALKA_DIS = 0.5          # dis halkanin (0.7-1.0 boy) en cok bu kadari kirmizi
+HALKA_KARAR = 0.10       # nokta disinda dairenin bu kadari kalmadiysa karar yok
 
 _izler = {}              # iz id ("B7") -> iz sozlugu
 _yasak_bolgeler = []     # silinen yasakli izlerin son yeri: yeni kimlikle dogan ayni balon
@@ -229,13 +251,15 @@ def kamera_kaymasi_bildir(dx, dy):
         _kayma[1] += float(dy)
 
 
-def _kaymayi_uygula():
+def _kaymayi_uygula(simdi):
     with _kayma_kilit:
         dx, dy = _kayma
         _kayma[0] = _kayma[1] = 0.0
     if abs(dx) < 0.5 and abs(dy) < 0.5:
         return
     for iz in _izler.values():
+        if _namluya_bagli(iz, simdi):
+            continue
         x1, y1, x2, y2 = iz["box"]
         iz["box"] = (x1 + dx, y1 + dy, x2 + dx, y2 + dy)
 
@@ -250,8 +274,10 @@ def _boy(b):
 
 
 def _tahmin_merkez(iz, simdi):
-    dt = min(max(0.0, simdi - iz["t_son"]), TAHMIN_AZAMI_S)
     cx, cy = _merkez(iz["box"])
+    if _namluya_bagli(iz, simdi):
+        return cx, cy
+    dt = min(max(0.0, simdi - iz["t_son"]), TAHMIN_AZAMI_S)
     return cx + iz["vx"] * dt, cy + iz["vy"] * dt
 
 
@@ -303,6 +329,52 @@ def _kirmizi_orani(frame, kutu):
     s, v = algi.KIRMIZI_ONERI_S, algi.KIRMIZI_ONERI_V
     m = _maske(frame[ay1:ay2, ax1:ax2], (((0, s, v), (12, 255, 255)), ((168, s, v), (180, 255, 255))))
     return float(m.mean()) / 255.0
+
+
+def _lazer_bak(frame, kutu):
+    """Lazer noktali balon: (kanit, nokta_maskesi, kirpinti) — bkz. LAZER ALTINDA.
+    kanit: nokta HARIC balon dairesi kirmizi ve dis halka kirmizi degil."""
+    x1, y1, x2, y2 = kutu
+    s = max(x2 - x1, y2 - y1, 2.0)
+    cx, cy = (x1 + x2) * 0.5, (y1 + y2) * 0.5
+    H, W = frame.shape[:2]
+    ox1, oy1 = int(max(0, cx - s)), int(max(0, cy - s))
+    ox2, oy2 = int(min(W, cx + s + 1)), int(min(H, cy + s + 1))
+    if ox2 - ox1 < 4 or oy2 - oy1 < 4:
+        return False, None, None
+    c = frame[oy1:oy2, ox1:ox2]
+    hsv = cv2.cvtColor(c, cv2.COLOR_BGR2HSV)
+    yy, xx = np.mgrid[0:c.shape[0], 0:c.shape[1]]
+    d = np.hypot(xx - (cx - ox1), yy - (cy - oy1))
+    ic = d <= 0.5 * s
+    nokta = ((hsv[..., 2] >= LAZER_V) & (hsv[..., 1] <= LAZER_S) & ic).astype(np.uint8)
+    genis = nokta
+    if nokta.any():                      # hale: noktanin kendi yaricapi kadar genisletilir
+        r = int(math.sqrt(float(nokta.sum()) / math.pi))
+        genis = cv2.dilate(nokta, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1,) * 2))
+    bak = ic & (genis == 0)
+    if bak.sum() < HALKA_KARAR * ic.sum():
+        return False, nokta, (ox1, oy1, ox2, oy2)
+    sv, vv = algi.KIRMIZI_ONERI_S, algi.KIRMIZI_ONERI_V
+    kir = _maske(c, (((0, sv, vv), (12, 255, 255)), ((168, sv, vv), (180, 255, 255)))) > 0
+    dis = (d >= 0.7 * s) & (d <= 1.0 * s)
+    oran_ic = float((kir & bak).sum()) / float(bak.sum())
+    oran_dis = float((kir & dis).sum()) / float(max(1, dis.sum()))
+    return oran_ic >= HALKA_IC and oran_dis <= HALKA_DIS, nokta, (ox1, oy1, ox2, oy2)
+
+
+def _lazer_temizle(frame, kutu):
+    """Balon hala yerindeyse (halka kaniti) lazer noktasini cevreden doldurur; yeni kare
+    doner. Kanit yoksa kare AYNEN doner — patlamis balonun yerinde balon uydurulmaz."""
+    kanit, nokta, kirp = _lazer_bak(frame, kutu)
+    if not kanit or nokta is None or not nokta.any():
+        return frame
+    ox1, oy1, ox2, oy2 = kirp
+    m = cv2.dilate(nokta * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+    g = frame.copy()
+    g[oy1:oy2, ox1:ox2] = cv2.inpaint(np.ascontiguousarray(frame[oy1:oy2, ox1:ox2]), m, 3,
+                                      cv2.INPAINT_TELEA)
+    return g
 
 
 def _govde_rengi(frame, kutu):
@@ -514,7 +586,8 @@ def _yeni_iz(t, simdi):
           "oran": 1.0,
           "model_box": t["box"],
           "isabet": 1, "goruldu": True, "vx": 0.0, "vy": 0.0, "kart": _yeni_kart(),
-          "ates_t": None, "ates_sayisi": 0, "yasak_bitis": 0.0,
+          "ates_t": None, "ates_sure": ATES_SURE_S, "ates_bitis": None,
+          "ates_sayisi": 0, "yasak_bitis": 0.0,
           "gen": t["box"][2] - t["box"][0]}
     for y in _yasak_bolgeler:       # yasakli balon yeni kimlikle dogarsa yasak surer
         if algi._ayni_nesne_olabilir(t["box"], y["box"]):
@@ -558,8 +631,8 @@ def _iz_guncelle(iz, t, simdi):
     elif dt > TAHMIN_AZAMI_S:
         iz["vx"] = iz["vy"] = 0.0
     iz.update(box=t["box"], kaynak=t["kaynak"], t_son=simdi, goruldu=True)
-    if t["kaynak"] == "renk":
-        return                  # renk: yer tasir; guven, isabet, boy (mesafe) MODELDEN gelir
+    if t["kaynak"] in ("renk", "lazer"):
+        return                  # renk/lazer: yer tasir; guven, isabet, boy MODELDEN gelir
     iz["gen"] += BOY_YUMUSATMA * ((t["box"][2] - t["box"][0]) - iz["gen"])
     iz["guven"] += GUVEN_YUMUSATMA * (t["conf"] - iz["guven"])
     iz.update(conf=t["conf"], t_model=simdi, isabet=iz["isabet"] + 1, model_box=t["box"])
@@ -608,6 +681,43 @@ def _renkle_devam(frame, simdi):
             alinan.append(adaylar[0])
 
 
+def _lazer_bitisi(iz):
+    """Lazerin bu balonu gosteren SON karesinin ani (ates bittikten sonra da kareler
+    LAZER_GECIKME_S boyunca noktayi gosterir) ya da None (ates edilmedi)."""
+    t = iz["ates_t"]
+    if t is None:
+        return None
+    bitis = iz["ates_bitis"] if iz["ates_bitis"] is not None else t + iz["ates_sure"]
+    return bitis + LAZER_GECIKME_S
+
+
+def _lazer_altinda(iz, simdi):
+    """Bu karede lazer (gercek, otonom ates) bu balona vuruyor olabilir mi?"""
+    b = _lazer_bitisi(iz)
+    return b is not None and iz["ates_t"] <= simdi <= b
+
+
+def _namluya_bagli(iz, simdi):
+    """ATES TAAHHUDU (24.09): lazer altinda ve sonrasindaki BAKISTA (KAYIP_S: patladi mi?)
+    ates edilen balonun izi GORUNTUYE baglidir — namlu balonun uzerinde kalir (duranda
+    bekler, hareketlide kestirilen yolda kayar: hedef_kestirici.EksenTakip.korluk). Kamera
+    kaymasi ve hizla ileri tasima UYGULANMAZ: uygulansaydi balonu izleyen namlunun kaymasi
+    hayaleti geri iterdi; lazer sonrasi geri gelen balon eslesmez, "patladi" sayilip yeni
+    kimlikle bastan dogrulanirdi (A3'te kartsiz: yeniden 3 dusman oyu)."""
+    b = _lazer_bitisi(iz)
+    return b is not None and iz["ates_t"] <= simdi <= b + KAYIP_S
+
+
+def _lazerle_devam(frame, simdi):
+    """Lazer altindaki KILITLI balonu model goremediyse, halka kanitiyla yerinde tutar
+    (kaynak "lazer"). Kanit yoksa iz hayalet olur: ates kesilir, kaybolursa imha."""
+    iz = _izler.get(_durum["kilit"])
+    if iz is None or iz["goruldu"] or not iz["dogrulandi"] or not _lazer_altinda(iz, simdi):
+        return
+    if _lazer_bak(frame, iz["box"])[0]:
+        _iz_guncelle(iz, {"box": iz["box"], "conf": iz["guven"], "kaynak": "lazer"}, simdi)
+
+
 def _eslestir(tespitler, simdi):
     """Tespitleri izlere en yakin-once (boyla olcekli) esler; kalanlar yeni iz olur."""
     for iz in _izler.values():
@@ -637,11 +747,19 @@ def _eslestir(tespitler, simdi):
 
 
 def _kayip_siniri(iz):
-    return KAYIP_S if iz["isabet"] >= OTURMUS_KARE else KAYIP_GENC_S
+    return KAYIP_S if iz["isabet"] >= OTURMUS_KARE or iz["ates_t"] is not None else KAYIP_GENC_S
+
+
+def _kayip_ani(iz):
+    """Kaybin sayildigi an. ATES TAAHHUDU: lazer noktasi balonu modelden gizler — ates
+    suresince (+ LAZER_GECIKME_S) gorulmemek KAYIP DEGIL. Sayac nokta kaybolunca baslar:
+    balon KAYIP_S icinde geri gelmezse patlamistir (imha); gelirse kilit aynen surer."""
+    b = _lazer_bitisi(iz)
+    return iz["t_son"] if b is None else max(iz["t_son"], b)
 
 
 def _eskileri_sil(simdi):
-    for iid in [i for i, z in _izler.items() if simdi - z["t_son"] > _kayip_siniri(z)]:
+    for iid in [i for i, z in _izler.items() if simdi - _kayip_ani(z) > _kayip_siniri(z)]:
         iz = _izler.pop(iid)
         if iz["yasak_bitis"] > simdi:
             _yasak_bolgeler.append({"box": iz["box"], "bitis": iz["yasak_bitis"]})
@@ -778,12 +896,24 @@ def araca_gore_sec(arac_id, simdi=None):
     return hedef_sec(max(bagli, key=lambda z: z["kart"]["t_arac"])["id"], simdi)
 
 
-def ates_basladi(lazer_gercek, simdi=None):
-    """Arayuz otonom atesi actiginda. Sahte lazerde kayit tutulmaz: hicbir sey patlamaz,
-    kaybolan balon "imha" sayilmamali (algi.hedef_vuruldu ile ayni kural)."""
+def ates_basladi(lazer_gercek, simdi=None, sure=None):
+    """Arayuz otonom atesi actiginda (`sure`: ates turu, sn). Sahte lazerde kayit tutulmaz:
+    hicbir sey patlamaz, kaybolan balon "imha" sayilmamali (algi.hedef_vuruldu ile ayni
+    kural) ve lazer noktasi yoktur (LAZER ALTINDA onlemleri calismaz)."""
     iz = _izler.get(_durum["kilit"])
     if iz is not None and lazer_gercek:
         iz["ates_t"] = time.time() if simdi is None else simdi
+        iz["ates_sure"] = ATES_SURE_S if sure is None else float(sure)
+        iz["ates_bitis"] = None
+
+
+def ates_bitti(simdi=None):
+    """Arayuz atesi kesti (sure doldu, engel, kayip, E-Stop — `_ates_kes`). Lazer altinda
+    onlemleri LAZER_GECIKME_S sonra biter."""
+    simdi = time.time() if simdi is None else simdi
+    for iz in _izler.values():
+        if iz["ates_t"] is not None and iz["ates_bitis"] is None:
+            iz["ates_bitis"] = simdi
 
 
 def ates_tamamlandi(lazer_gercek, simdi=None):
@@ -895,21 +1025,25 @@ def guncelle(model, frame, arac_dets, asama, estop=False, simdi=None):
     _durum["asama"] = asama
     _durum["sayac"] += 1
     _durum["kare_w"] = frame.shape[1]
-    _kaymayi_uygula()
+    _kaymayi_uygula(simdi)
     araclar = [d for d in arac_dets if not d.get("hayalet") and not d.get("balon")]
     kilitli_iz = _izler.get(_durum["kilit"])
     pencereler = _pencereler(frame, araclar, kilitli_iz, simdi)
     esik = float(algi.AYAR.get("balon_esik", algi.VARSAYILAN_AYAR["balon_esik"]))
-    _eslestir(_tespit_et(model, frame, pencereler, esik, araclar), simdi)
+    model_kare = frame
+    if kilitli_iz is not None and _lazer_altinda(kilitli_iz, simdi):
+        model_kare = _lazer_temizle(frame, kilitli_iz["box"])
+    _eslestir(_tespit_et(model, model_kare, pencereler, esik, araclar), simdi)
     for iz in _izler.values():           # modelin bu karede gorup gormedigi (renk sayilmaz)
         iz["oran"] += ORAN_YUMUSATMA * (float(iz["goruldu"]) - iz["oran"])
     _renkle_devam(frame, simdi)
+    _lazerle_devam(frame, simdi)
     for iz in _izler.values():
         if iz["goruldu"]:
             arac = _sahip_arac(iz["box"], araclar)
             if arac is not None:
                 _kart_oyla(iz, arac, frame, simdi)
-            elif iz["kaynak"] != "renk":
+            elif iz["kaynak"] not in ("renk", "lazer"):
                 _govde_gozlemi(iz, _govde_rengi(frame, iz["box"]))
     _eskileri_sil(simdi)
     if estop or asama not in (2, 3):
@@ -926,7 +1060,9 @@ def guncelle(model, frame, arac_dets, asama, estop=False, simdi=None):
         if kilitli_mi:
             aktif = len(dets)
             engel = (_dost_engeli(iz, araclar, frame) or _menzil_engeli(iz)) if asama == 3 else None
-            if engel is None and iz["goruldu"] and simdi - iz["t_model"] > RENK_ATES_S:
+            # Lazer altinda (kaynak "lazer") model zaten goremez; kanit o karedeki halka.
+            if (engel is None and iz["goruldu"] and iz["kaynak"] != "lazer"
+                    and simdi - iz["t_model"] > RENK_ATES_S):
                 engel = "Balon yalnız renkle izleniyor"   # nisan surer, ates model gorunce
             if engel:
                 d["engel"] = engel
@@ -1061,21 +1197,48 @@ if __name__ == "__main__":
 
     # 8. IMHA: gercek lazerle ates edilen balon kaybolursa imha sayilir, kilit
     #    siradaki balona gecer. Sahte lazerde kaybolma imha SAYILMAZ.
+    #    ATES TAAHHUDU (24.09 saha): lazer noktasi balonu modelden gizler — ates suresince
+    #    gorunmeyen balon SILINMEZ (iz + kilit yerinde: silinseydi kilit siradakine gecer,
+    #    namlu lazer yanarken donerdi). Karar lazer sondukten (+ LAZER_GECIKME_S) sonra:
+    #    KAYIP_S icinde geri gelmezse patlamistir.
     sifirla()
     iki = sahne([(640, 400, 40), (900, 400, 40)])
     b, a = kos(m, iki, n=ONAY_KARE)
     ilk = b[a]["id"]
     assert b[a]["box"][0] < 700, "kare merkezine en yakin balon secilmedi"
-    ates_basladi(True, simdi=T[0])
+    ates_basladi(True, simdi=T[0], sure=2.0)
     tek = sahne([(900, 400, 40)])
-    b, a = kos(m, tek)
-    assert a >= 0 and b[a]["id"] == ilk and b[a].get("hayalet"), "patlayan balon hemen silindi"
-    b, a = kos(m, tek, n=int(KAYIP_S * 30) + 2)
+    b, a = kos(m, tek, n=57)                                     # ~1.9 sn: ates suruyor
+    assert a >= 0 and b[a]["id"] == ilk and b[a].get("hayalet"),         "lazer altinda gorunmeyen balon silindi / kilit gecti (ates kesilirdi)"
+    assert son_imha()["sayi"] == 0, "ates bitmeden imha sayildi"
+    ates_bitti(simdi=T[0])
+    b, a = kos(m, tek, n=int((LAZER_GECIKME_S + KAYIP_S) * 30) - 3)
+    assert son_imha()["sayi"] == 0 and b[a]["id"] == ilk,         "lazer sondu, balonun geri gelmesi beklenmeden imha sayildi"
+    b, a = kos(m, tek, n=6)
     assert son_imha()["sayi"] == 1 and son_imha()["id"] == ilk, son_imha()
     assert a >= 0 and b[a]["id"] != ilk and b[a]["box"][0] > 800, "siradaki balona gecilmedi"
     ates_basladi(False, simdi=T[0])                            # sahte lazer
     b, a = kos(m, sahne([]), n=int(KAYIP_S * 30) + 2)
     assert son_imha()["sayi"] == 1, "sahte lazerde kaybolan balon imha sayildi"
+
+    # 8b. PATLAMAYAN balon lazer sonrasi geri gelir: AYNI kimlik, kilit surer, imha YOK
+    #     (yeniden ates edilir). Ates boyunca namlu balonu izler: bu izin kutusu kamera
+    #     kaymasiyla kaymaz ve hizla ileri tasinmaz (namluya bagli); digerleri kayar.
+    sifirla()
+    b, a = kos(m, iki, n=ONAY_KARE)
+    ilk = b[a]["id"]
+    ates_basladi(True, simdi=T[0], sure=2.0)
+    _izler[ilk]["vx"] = 60.0                    # tasinsaydi 0.3 sn'de 18 px kayardi
+    b, a = kos(m, tek, n=30)
+    kamera_kaymasi_bildir(25.0, 0.0)
+    b, a = kos(m, tek)
+    assert b[a]["id"] == ilk and b[a].get("hayalet") and abs(b[a]["box"][0] - 620) <= 1,         f"namluya bagli iz kaydi: {b[a]['box']}"
+    b, a = kos(m, tek, n=29)
+    ates_bitti(simdi=T[0])
+    b, a = kos(m, iki, n=int(LAZER_GECIKME_S * 30) + 3)          # nokta sondu, balon yerinde
+    assert a >= 0 and b[a]["id"] == ilk and not b[a].get("hayalet"),         "patlamayan balon geri gelince kimligi/kilidi degisti"
+    b, a = kos(m, iki, n=int(KAYIP_S * 30) + 5)
+    assert son_imha()["sayi"] == 0 and b[a]["id"] == ilk, "patlamayan balon imha sayildi"
 
     # 9. Patlamayan balon: AZAMI_ATES gercek ates turundan sonra birakilir, digerine
     #    gecilir; YASAK_S dolmadan geri secilmez. Sahte lazer turlari sayilmaz.
@@ -1186,7 +1349,8 @@ if __name__ == "__main__":
     sifirla()
     b, a = kos(m, kare_d, [arac(govde)], asama=3, n=KART_ONAY + 3)
     ates_basladi(True, simdi=T[0])
-    kos(m, bos, asama=3, n=kayip_kare)
+    ates_bitti(simdi=T[0])        # kisa atis: karar nokta sonunce (KART_HAFIZA_S dolmadan)
+    kos(m, bos, asama=3, n=kayip_kare + int(LAZER_GECIKME_S * 30) + 2)
     assert son_imha()["sayi"] == 1
     b, a = kos(m, kare, asama=3, n=ONAY_KARE + 2)
     assert a == -1 and b[0]["tip"] == "Belirsiz", ("patlayan balonun karti gecti", b)
@@ -1393,16 +1557,75 @@ if __name__ == "__main__":
     kos(SahteModel(), kare, n=OTURMUS_KARE)
     b, a = kos(mz, kare)
     assert a >= 0 and b[a]["kaynak"] != "tam", ("IZ_ESIK altindaki kutu kabul edildi", b[a])
-    # 24e. ATES ALTINDA renkle devam YOK: patlayan balonun yerindeki kirmizi (govde/artik)
-    #      izi yasatmasin — iz hayalet olur, kaybolursa imha sayilir.
+    # 24e. LAZER ALTINDA (24.09 saha): lazer noktasi modeli kor eder (her atis ~0.2 sn'de
+    #      kesiliyordu). Balon SAGLAMSA (halka kaniti) iz ates turu boyunca yerinde surer,
+    #      "yalniz renkle" engeli gelmez; tur bitince (+ gecikme) kanit tek basina iz yasatmaz.
     mr.kor = False
     sifirla()
-    b, a = kos(mr, sahne([(640, 400, 40)]), n=OTURMUS_KARE)
+    tek_balon = sahne([(640, 400, 40)])
+    b, a = kos(mr, tek_balon, n=OTURMUS_KARE)
+    ates_basladi(True, simdi=T[0], sure=2.0)
+    mr.kor = True
+    b, a = kos(mr, tek_balon, n=int((RENK_ATES_S + 0.3) * 30))
+    assert a >= 0 and not b[a].get("hayalet") and b[a]["kaynak"] == "lazer" \
+        and "engel" not in b[a], ("lazer altinda saglam balon birakildi", b[a])
+    ates_bitti(simdi=T[0])
+    b, a = kos(mr, tek_balon, n=int(LAZER_GECIKME_S * 30) + 2)
+    assert a == -1 or b[a].get("hayalet"), ("ates bitti, halka kaniti izi yasatti", b[a])
+    # 24f. Patlayan balonun yerinde (hemen ustunde) KIRMIZI GOVDE kalsa da iz yasamaz:
+    #      halka balonun dairesine bakar, govde oraya girmez -> hayalet, kaybolursa imha.
+    mr.kor = False
+    sifirla()
+    govde_ustte = [((600, 330, 680, 384), KIRMIZI_ARAC)]
+    b, a = kos(mr, sahne([(640, 400, 40)], govde_ustte), n=OTURMUS_KARE)
     ates_basladi(True, simdi=T[0])
     mr.kor = True
-    b, a = kos(mr, sahne([(640, 400, 40)]))
-    assert a >= 0 and b[a].get("hayalet"), ("ates altinda renk izi", b[a])
+    b, a = kos(mr, sahne([], govde_ustte))
+    assert a >= 0 and b[a].get("hayalet"), ("patlayan balonun govdesi izi yasatti", b[a])
+    # 24g. Balon KIRMIZI bir yuzeyin (tisort, govde) onundeyse dis halka da kirmizi: sinirli
+    #      bir balon kaniti yok -> model gormezse iz hayalet (kirmizi arka plana ates surmez).
     mr.kor = False
+    sifirla()
+    arka = sahne([(640, 400, 40)], [((520, 300, 760, 500), KIRMIZI_ARAC)])
+    b, a = kos(mr, arka, n=OTURMUS_KARE)
+    ates_basladi(True, simdi=T[0])
+    mr.kor = True
+    b, a = kos(mr, arka)
+    assert a >= 0 and b[a].get("hayalet"), ("kirmizi arka planda lazer kaniti", b[a])
+    mr.kor = False
+    # 24h. TEMIZLIK: ortasi delik (lazer noktasi) balonu goremeyen model, ates altinda
+    #      temizlenmis karede balonu yeniden gorur. Bos yerdeki nokta + kirmizi hale
+    #      temizlenmez (balon uydurulmaz).
+
+    class DelikKor(SahteModel):
+        """Balon rengine YAKIN (+-40) ve DOLU (alan/kutu >= 0.7) lekeyi gorur."""
+        def predict(self, girdiler, **kw):
+            cikti = []
+            for img in girdiler:
+                alt = tuple(max(0, c - 40) for c in BALON_RENK)
+                ust = tuple(min(255, c + 40) for c in BALON_RENK)
+                n, _, ist, _ = cv2.connectedComponentsWithStats(cv2.inRange(img, alt, ust), 8)
+                cikti.append(_Sonuc([_Kutu((x, y, x + w, y + h), 0.9)
+                                     for x, y, w, h, alan in ist[1:] if alan >= 0.7 * w * h]))
+            return cikti
+
+    dk = DelikKor()
+    noktali = sahne([(640, 400, 40)])
+    cv2.circle(noktali, (640, 400), 8, (255, 255, 255), -1)
+    kutu40 = (620, 380, 660, 420)
+    assert not _tespit_et(dk, noktali, [], 0.3, []), "kurulum: delikli balon gorulmemeliydi"
+    assert len(_tespit_et(dk, _lazer_temizle(noktali, kutu40), [], 0.3, [])) == 1, \
+        "temizlenen noktali balon gorulmedi"
+    sifirla()
+    b, a = kos(dk, tek_balon, n=OTURMUS_KARE)
+    ates_basladi(True, simdi=T[0])
+    b, a = kos(dk, noktali, n=10)
+    assert a >= 0 and b[a]["kaynak"] in ("tam", "pencere"), ("ates altinda temizlik yok", b[a])
+    bos_nokta = sahne([])
+    cv2.circle(bos_nokta, (640, 400), 14, (60, 60, 250), -1)      # kirmizi hale
+    cv2.circle(bos_nokta, (640, 400), 8, (255, 255, 255), -1)
+    assert _lazer_temizle(bos_nokta, kutu40) is bos_nokta, "bos yerde lazer noktasi temizlendi"
+    assert not _lazer_bak(bos_nokta, kutu40)[0], "bos yerde halka kaniti"
 
     # 25. GOVDE RENGI (A3): arac modeli HIC okumasa da balonun hemen ustundeki kirmizi
     #     govde "Düşman" karti kurar (tip yok); mavi govde "Dost" (kilit yok, elle secim
@@ -1496,4 +1719,6 @@ if __name__ == "__main__":
           "renk/sekil suzgeci, yansima, kenar, dusuk guven, genc iz, renkle devam "
           "(engel / sinir / govdeye kaymaz), govde rengi (dusman / dost / karisik / asili degil / "
           "tek tuk kirmizi / arka plan yuzeyi / gokyuzu), pencere boyu (kucuk / birlesik leke), "
-          "cift esik, ates altinda renk yok, suru (kilit disi iz), onde mavi govde")
+          "cift esik, suru (kilit disi iz), onde mavi govde, lazer altinda (halka kaniti / "
+          "tur bitince birakir / patlayinca govde yasatmaz / kirmizi arka plan / temizlik / "
+          "bos yerde balon uydurmaz)")

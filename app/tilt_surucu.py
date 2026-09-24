@@ -117,6 +117,13 @@ HIZ_TABLO = {                 # seviye: (tepe hiz derece/sn, ivme derece/sn^2)
     H_HIZLI:  (75.0, 700.0),  # ani hareket
 }
 HIZ_VARSAYILAN = H_NORMAL
+# OTONOM TAKIP IVME TAVANI (derece/sn^2). 24.09 saha: "balonu sert takip ediyor" — asili
+# balon salinirken namlu kademenin tam ivmesiyle (400/500) ileri geri firliyordu (kayitta
+# %95 150-380 der/sn^2, balonun kendisi 1-2 der/sn). Kartin yorunge kopyasiyla benzetim:
+# 500 -> 250'de tepe ivme yariya iner, takip hatasi degismez (asili balon 9.6 -> 10.2 px,
+# rayda 6 der/sn hedef %95 4.1 -> 3.9 px); 150'de rayda hedef geride kalmaya basliyor.
+# Tepe hiz kademeninki kalir; manuel kullanim etkilenmez.
+TAKIP_IVME = 200.0
 
 # ---- PAN (sag-sol) EKSENI — AYNI ESP32-S3 KARTINDA (GPIO10 PUL / GPIO11 DIR) ----
 # Firmware pan'i "P<derece>" ile alir, "PAN1,pos,target,moving,angle,goal,en" yayinlar
@@ -134,6 +141,12 @@ PAN_HIZ_TABLO = {
     H_NORMAL: (60.0, 500.0),
     H_HIZLI:  (100.0, 800.0),
 }
+PAN_TAKIP_IVME = 250.0          # bkz. TAKIP_IVME
+
+
+def takip_profili(profil, tavan):
+    """(hiz, ivme) profilinin otonom takip karsiligi: ivme `tavan`i asamaz."""
+    return profil[0], min(profil[1], tavan)
 
 
 # ---- KOL ACISI -> KAMERA ACISI (surekli takip icin) ----
@@ -848,6 +861,7 @@ class TiltSurucu:
         self._r_t = None                # R gitti, R SONRASI ilk STATE3 henuz gelmedi
         self._r_ok = False              # R'nin OK/ERR yaniti geldi mi
         self.hiz_seviye = HIZ_VARSAYILAN
+        self.takip_kipi = False         # otonom takip: ivme TAKIP_IVME ile sinirli
         self._aci_gecmisi = []          # [(zaman, aci), ...] — her STATE3'te bir kayit
         self._gonderilen_hiz = None     # karta en son giden (hiz, ivme) — None = gonderilmedi
         # Karttaki firmware "Z" komutunu tanimiyorsa (eski surum yuklu) hiz kademesi
@@ -1072,6 +1086,23 @@ class TiltSurucu:
         self._hiz_bosalt()
         return self.hiz_seviye
 
+    def takip_kipi_ayarla(self, acik):
+        """Otonom takip acik/kapali: iki eksenin ivmesi TAKIP_IVME / PAN_TAKIP_IVME ile
+        sinirlanir (tepe hiz kademeninki). Profil kart dururken gider (Z/PZ kurali)."""
+        self.takip_kipi = bool(acik)
+        self._hiz_bosalt()
+        self._pan_hiz_bosalt()
+        return self.takip_kipi
+
+    def profil(self):
+        """Tilt'e su an istenen (hiz, ivme) — derece cinsinden."""
+        p = HIZ_TABLO[self.hiz_seviye]
+        return takip_profili(p, TAKIP_IVME) if self.takip_kipi else p
+
+    def pan_profil(self):
+        p = PAN_HIZ_TABLO[self.hiz_seviye]
+        return takip_profili(p, PAN_TAKIP_IVME) if self.takip_kipi else p
+
     def _hiz_bosalt(self):
         """Secili kademeyi, kart uygun durumdayken karta bildirir.
 
@@ -1082,7 +1113,7 @@ class TiltSurucu:
         dpd = self.darbe_per_derece
         if dpd is None:
             return False
-        der_hiz, der_ivme = HIZ_TABLO[self.hiz_seviye]
+        der_hiz, der_ivme = self.profil()
         cift = (round(der_hiz * dpd, 1), round(der_ivme * dpd, 1))
         if cift == self._gonderilen_hiz:
             return False
@@ -1461,7 +1492,7 @@ class TiltSurucu:
         """Pan hiz kademesini (PZ) kart dururken bildirir; tilt ile ayni kademe."""
         if not self.pan_destekli or self.pan_durum["hareket"]:
             return False
-        h, iv = PAN_HIZ_TABLO[self.hiz_seviye]
+        h, iv = self.pan_profil()
         cift = (round(h * PAN_DARBE_DER, 1), round(iv * PAN_DARBE_DER, 1))
         if cift == self._pan_gonderilen_hiz:
             return False
@@ -1768,6 +1799,25 @@ if __name__ == "__main__":
     n = len([k for k in h.mock.kayit if k.startswith("Z")])
     h.hiz_ayarla(H_HIZLI); tikh()
     assert len([k for k in h.mock.kayit if k.startswith("Z")]) == n
+
+    # 14c2. YUMUSAK TAKIP (24.09 saha): otonom takipte iki eksenin IVMESI tavanli, tepe hiz
+    #       kademeninki; takipten cikinca kademenin kendi ivmesine doner.
+    def son_pz_ivme():
+        pz = [k for k in h.mock.kayit if k.startswith("PZ")]
+        return float(pz[-1][2:].split(",")[1]) if pz else None
+    h.hiz_ayarla(H_NORMAL); tikh()
+    (th, tiv), (ph, piv) = HIZ_TABLO[H_NORMAL], PAN_HIZ_TABLO[H_NORMAL]
+    assert tiv > TAKIP_IVME and piv > PAN_TAKIP_IVME, "kurulum: Normal ivmesi tavanin ustunde olmali"
+    h.takip_kipi_ayarla(True); tikh()
+    assert abs(h.mock.ivme - round(TAKIP_IVME * dpd, 1)) < 0.2, h.mock.ivme
+    assert abs(h.mock.maks_hiz - round(th * dpd, 1)) < 0.2, "takipte tepe hiz degisti"
+    assert abs(son_pz_ivme() - round(PAN_TAKIP_IVME * PAN_DARBE_DER, 1)) < 0.2, son_pz_ivme()
+    h.takip_kipi_ayarla(False); tikh()
+    assert abs(h.mock.ivme - round(tiv * dpd, 1)) < 0.2, "takipten cikinca ivme donmedi"
+    assert abs(son_pz_ivme() - round(piv * PAN_DARBE_DER, 1)) < 0.2, son_pz_ivme()
+    h.hiz_ayarla(H_YAVAS); h.takip_kipi_ayarla(True); tikh()     # tavan zaten ustte: aynen
+    assert abs(h.mock.ivme - round(HIZ_TABLO[H_YAVAS][1] * dpd, 1)) < 0.2, h.mock.ivme
+    h.takip_kipi_ayarla(False); h.hiz_ayarla(H_HIZLI); tikh()
 
     # 14d. Gecersiz kademe varsayilana duser
     assert h.hiz_ayarla(99) == HIZ_VARSAYILAN

@@ -144,6 +144,7 @@ class SahtePencere:
     TEKRAR_GECIKME_MS = A.MainWindow.TEKRAR_GECIKME_MS
     _ates_bas = A.MainWindow._ates_bas
     _ates_kes = A.MainWindow._ates_kes
+    _takip_korlugu = A.MainWindow._takip_korlugu        # _ates_kes korlugu kisaltir
     _ates_kisayolu = A.MainWindow._ates_kisayolu
     _ates_tusu = A.MainWindow._ates_tusu
     _ates_isigi = A.MainWindow._ates_isigi

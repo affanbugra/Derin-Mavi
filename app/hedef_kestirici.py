@@ -289,6 +289,38 @@ class KalmanTakipKontrolu:
 
 BOSLUK_OGRENME_TAVANI = 1.0      # derece — calisirken ogrenilen boslugun ust siniri
 
+# SAHA AYARI (24.09, "uzakta akiskan ama yakinda titriyor; titremeyi cozunce uzak takilir").
+# Sahada (19:42 oturumu) yakinda (balon 40+ px) namlu duran balona saniyede 1.5-3.8 kez
+# yon degistiriyordu; kayittan hesaplanan hedef dunya acisi 21.0 +- 0.3 derece SABITTI —
+# salinimi kontrolcu uretiyordu. Iki kok neden:
+#   1. Tek sabit ayar: kutu merkezinin kare-kare gurultusu balon boyunun ~%10'u (kayit,
+#      15.5 bin olcum: 20 px'te 2.5 px, 97 px'te 8-11, kuyrukta 31). Uzaga gore ayarli
+#      esikler yakinda gurultuyu "manevra" sayiyor, hiz ileri beslemesi onu motora
+#      tasiyordu. -> olcek_ref_px: balon 24 px'ten buyukse gurultu, hiz esikleri, olu
+#      bantlar ve filtre ivme gurultusu boyla olceklenir; uzakta ayar AYNEN kalir.
+#   2. Tek kayip karede DUR: kare -> karar ~0.15 sn (kayit: t_gonder - t_kare 0.11-0.14 +
+#      pozlama), esik 0.10 idi -> her kacirilan karede namlu durup yeniden kalkiyordu
+#      (yakinda gorulme %56-83). -> kayip_dur_s 0.35 (~0.2 sn gercek bosluk); kisa
+#      boslukta duran/tutulan hedefte namlu yerinde bekler, hareketlide tahminle surer.
+# Kapali cevrim benzetim (kartin yorunge kopyasi, 0.15 sn gecikme, 17 Hz cikarim, boyla
+# buyuyen kuyruklu gurultu, %20 kayip kare; 11 senaryo x 5 tohum), eski -> yeni:
+#   yakin 90 px duran: yon degisimi 4.7 -> 1.3/sn, nisan balonun ic yarisinda %53 -> %83
+#   cok yakin 130 px: 5.0 -> 1.3/sn, %49 -> %82 | yakin yuruyen 70 px: %39 -> %46
+#   uzak yuruyen 20 px: hata 13 -> 5.7 px, %13 -> %43 | uzak duran 18 px: %88 -> %85
+# Denenip ELENENLER (benzetimde yakinda az fayda, uzakta zarar): olcum gurultusunu yalniz
+# boyla olceklemek (esikler sabit), kip gecisinde filtreyi sabit tutmak, bosluk tarafina
+# histerezis, olu bolge kararini filtreli hatayla vermek.
+SAHA_AYARI = dict(olcek_ref_px=24.0, kayip_dur_s=0.35, kayipta_tut=True)
+
+# ATES KORLUGU (EksenTakip.korluk): lazer altinda hedefin yolu son KOR_GECMIS_S sn'lik
+# olcumlere uydurulan dogrudur. Egim KOR_DURAN_HIZ x s der/sn'nin ya da kendi belirsizliginin
+# KOR_GUVEN katinin altindaysa hedef duruyor sayilir. Benzetim taramasi (24 tohum): 1.0 sn'lik
+# pencerede duran balonun namlu oturmasindan gelen sahte 0.35 der/sn egim namluyu kosturdu
+# (13 px duran %88 -> %82); 1.5 sn'de %87. Esik 0.4'e cikinca 0.3 der/sn kayan balon %83 -> %42.
+KOR_GECMIS_S = 1.5
+KOR_DURAN_HIZ = 0.2
+KOR_GUVEN = 3.0
+
 
 class EksenTakip:
     """TEK eksenin surekli takip kontrolcusu (pan veya tilt) — arayuzun otonom yolu.
@@ -327,8 +359,23 @@ class EksenTakip:
                  olu=0.5, bosluk=1.5, telafi=0.5, durus_hizi=3.0, kayip_kovalamasi=0.45,
                  azami_sicrama=25.0, hedef_hiz_siniri=120.0, yor_q=800.0, yor_r=0.3,
                  yor_q_min=60.0, yor_hiz_tavan=45.0, yor_ff_dusuk=0.5, yor_ff_esik=0.3,
-                 yor_ff_pencere=0.6):
+                 yor_ff_pencere=0.6, kayip_dur_s=0.10, olcek_ref_px=None,
+                 kayipta_tut=False):
         self.isaret = 1.0 if isaret >= 0 else -1.0
+        # YAKIN/UZAK DENGESI (24.09 saha) — arayuz SAHA_AYARI ile kurar; bkz. SAHA_AYARI.
+        # kayip_dur_s: son olcumun KARE aninden bu kadar sonra hala tespit yoksa dur.
+        #   Kare -> karar ~0.15 sn surer; 0.10 her TEK kayip karede namluyu durduruyordu.
+        self.kayip_dur_s = max(0.0, float(kayip_dur_s))
+        # olcek_ref_px: BOYA GORE OLCEKLEME. Balon bu boydan (px) buyukse s = boy/ref;
+        #   olcum gurultusu x s, hiz esikleri x s, olu bantlar x s, filtre ivme gurultusu
+        #   x s^2. Kucuk (uzak) balonda ayar AYNEN kalir; yakindaki davranis uzaktakinin
+        #   balon boyuna gore olceklenmis hali olur (acisal boy, hiz ve kutu gurultusu
+        #   mesafeyle birlikte olceklenir).
+        self.olcek_ref_px = None if not olcek_ref_px else float(olcek_ref_px)
+        self._s = 1.0
+        # kayipta_tut: kisa tespit boslugunda (kayip_dur_s dolmadan) namlu duran/tutulan
+        #   hedefte YERINDE bekler (yeni komut yok); hareketli hedefte tahminle devam eder.
+        self.kayipta_tut = bool(kayipta_tut)
         self.yor_hiz_tavan = max(1.0, float(yor_hiz_tavan))
         # UYARLAMALI HIZ ILERI BESLEMESI (bkz. _ileri_besleme_orani). Tespit karenin
         # cekilisinden ~130 ms (kotu durumda ~230 ms) sonra kontrolcuye ulasir, kart da
@@ -372,7 +419,75 @@ class EksenTakip:
         self.durus_hizi = max(0.0, float(durus_hizi))
         self.kayip_kovalamasi = max(0.0, float(kayip_kovalamasi))
         self.azami_sicrama = max(0.5, float(azami_sicrama))
+        self._yor_kipinde = False                   # filtre su an yorunge ayarinda mi
+        self.kor_bitis = None                       # bkz. korluk(); hedefe degil lazere ait
         self.sifirla()
+
+    def korluk(self, bitis_t):
+        """ATES KORLUGU (24.09 saha): lazer noktasi balona degince model balonu goremez
+        (21:27 kaydi: uzak balonda her atistan 3 kare sonra). `bitis_t` anina kadar olcum
+        gelmemesi KAYIP sayilmaz; namlu hedefin son KOR_GECMIS_S'lik yoluna uydurulan
+        dogruyu izler (bkz. _kor_komut). None: kapali. Arayuz yalniz gercek lazerle ates
+        surerken (+ kameranin noktayi gostermeye devam ettigi pay) acar."""
+        self.kor_bitis = None if bitis_t is None else float(bitis_t)
+        self._kor_dogru = None
+
+    def _korde(self, simdi, hata_px):
+        return hata_px is None and self.kor_bitis is not None and simdi < self.kor_bitis
+
+    def _kor_komut(self, simdi, aci, alt, ust, pay):
+        """Korlukte (lazer altinda) yorunge: hedefin son olcumlerine en kucuk karelerle
+        uydurulan DOGRU. Kalman'in anlik hizi degil: yavas (0.3-1 der/sn) kayan uzak balon
+        "duran hedef" kipinde kalir ve namlu bekler, balon ~0.4 sn'de noktanin altindan kayar
+        (Kalman tahminiyle devam benzetimde yavasta hic fark etmedi).
+        Kapali cevrim benzetim (kart yorunge kopyasi, 2 sn kor ates, 24 tohum; ates boyunca
+        namlu balonun UZERINDE, korluk kapali -> acik): 13 px 0.3 der/sn %35 -> %83,
+        0.5 der/sn %11 -> %89, 15 px 1 der/sn %19 -> %88, 25 px 2 der/sn %23 -> %92,
+        30 px 4 der/sn %21 -> %93, 18 px capraz %13 -> %95; duran 13 px %88 -> %87,
+        20 px %85 -> %99; elde hafif sallanan 90 px %92 -> %97. 3 derece savrulan el
+        %15 -> %9: kor iken izlenemez. Egim anlamli degilse duran/tutulan hedefte namlu
+        bekler, degilse olcumlerin ortalamasina gider."""
+        if self._kor_dogru is None:
+            self._kor_dogru = self._dogru_uydur()
+        t0, z0, v = self._kor_dogru
+        if not v and (self._duragan or self._tut is not None):
+            return None                             # duran balon: namlu yerinde bekler
+        hedef = z0 + v * (simdi - t0)
+        namlu = aci - self._ofset()
+        hedef = max(namlu - self.azami_sicrama, min(namlu + self.azami_sicrama, hedef))
+        if v:
+            self._yor_yon = 1 if v > 0 else -1
+        elif not self._yor_yon:
+            self._yor_yon = 1 if hedef > namlu else -1
+        motor = hedef + self._yor_yon * self.bosluk_kest * 0.5
+        hiz = max(-self.yor_hiz_tavan, min(self.yor_hiz_tavan, v))
+        if motor >= ust:
+            motor, hiz = float(ust), min(0.0, hiz)
+        elif motor <= alt:
+            motor, hiz = float(alt), max(0.0, hiz)
+        self.son_komut, self.son_komut_t = hedef, simdi
+        return self._yorunge_sinirla(motor, hiz, alt, ust, pay)
+
+    def _dogru_uydur(self):
+        """(t0, z0, hiz): son olcumlere uydurulan dogru, t0 = son olcum ani. Egim anlamli
+        degilse (KOR_DURAN_HIZ x s ya da egim belirsizliginin KOR_GUVEN kati altinda) hiz 0
+        ve konum olcumlerin ortalamasi: kuyruklu kutu gurultusunun sahte egimiyle 2 sn kosmak
+        duran balonda namluyu balondan cikariyordu (benzetim, 40 tohum, 20 px duran: anlamlilik
+        testiyle %91 -> %97; bedeli 0.3 der/sn kayanda %83 -> %80). Olcum azsa Kalman durumu."""
+        z = self._kor_gecmisi
+        if len(z) >= 4 and z[-1][0] - z[0][0] >= 0.3:
+            n = float(len(z))
+            tm = sum(a for a, _ in z) / n
+            zm = sum(b for _, b in z) / n
+            sxx = sum((a - tm) ** 2 for a, _ in z)
+            v = sum((a - tm) * (b - zm) for a, b in z) / sxx
+            artik = sum((b - zm - v * (a - tm)) ** 2 for a, b in z) / max(1.0, n - 2)
+            if abs(v) < max(KOR_DURAN_HIZ * self._s, KOR_GUVEN * (artik / sxx) ** 0.5):
+                return z[-1][0], zm, 0.0
+            t0 = z[-1][0]
+            return t0, zm + v * (t0 - tm), v
+        k = self.kestirici
+        return k.t, k.x[0], k.x[1]
 
     def sifirla(self):
         self.kestirici.sifirla()
@@ -401,6 +516,8 @@ class EksenTakip:
         self._yavas_t = None                        # hiz esigin altina ne zaman indi
         self._hiz_gecmisi = []                      # [(t_kare, hiz)] — son ~1 sn
         self._z_gecmisi = []                        # [(t_kare, hedef acisi)] — ileri besleme
+        self._kor_gecmisi = []                      # [(t_kare, hedef acisi)] — korluk dogrusu
+        self._kor_dogru = None                      # (t0, z0, hiz) — bu kor aralikta
         self._kayip_durdu = False                   # kayipta tek hiz-sifir komutu
 
     def _ileri_besleme_orani(self):
@@ -421,7 +538,7 @@ class EksenTakip:
             return self.yor_ff_dusuk
         egim = sum((a - tm) * (b - zm) for a, b in z) / sxx
         artik = (sum((b - zm - egim * (a - tm)) ** 2 for a, b in z) / n) ** 0.5
-        return 1.0 if (artik < self.yor_ff_esik and abs(egim) > 1.0) else self.yor_ff_dusuk
+        return 1.0 if (artik < self.yor_ff_esik * self._s and abs(egim) > 1.0 * self._s) else self.yor_ff_dusuk
 
     def hedef_degisti(self):
         """Kilit BASKA bir nesneye gecti: hedef kestirimi sifirdan kurulur.
@@ -442,6 +559,9 @@ class EksenTakip:
         self._yavas_t = None
         self._hiz_gecmisi = []
         self._z_gecmisi = []
+        self._kor_gecmisi = []
+        self._kor_dogru = None
+        self.kor_bitis = None          # lazer eski hedefteydi; arayuz kilit degisince ateşi keser
         self._kayip_durdu = False
 
     @property
@@ -450,16 +570,21 @@ class EksenTakip:
 
     def _kip_ayari(self, yorunge):
         k = self.kestirici
+        s = self._s
         if yorunge:
-            if k.q_min is None or k.r != self._yor_qr[1]:      # kipe ilk giris
-                k.q, k.r = self._yor_qr
-                k.q_min = self._yor_q_min
-                k.q_max = self._yor_qr[0] if self._yor_q_min is not None else None
-                if k.q_min is None:
-                    k.q_max = None
+            if not self._yor_kipinde:                            # kipe (yeniden) giris
+                k.q = self._yor_qr[0] * s * s
+                self._yor_kipinde = True
+            if self._yor_q_min is not None:
+                k.q_min, k.q_max = self._yor_q_min * s * s, self._yor_qr[0] * s * s
+                k.q = min(k.q_max, max(k.q_min, k.q))
+            else:
+                k.q_min = k.q_max = None
+            k.r = self._yor_qr[1] * s
         else:
-            k.q, k.r = self._konum_qr
+            k.q, k.r = self._konum_qr[0] * s * s, self._konum_qr[1] * s
             k.q_min = k.q_max = None
+            self._yor_kipinde = False
 
     def _ofset(self, t=None):
         """Motor sayimi - namlu (derece) `t` aninda. Olcumde KARE ANININ degeri
@@ -513,11 +638,15 @@ class EksenTakip:
             self._hareket_yon = yon
             self._son_aci = aci
 
-    def olcum(self, t_kare, aci_kare, hata_px, ppd):
+    def olcum(self, t_kare, aci_kare, hata_px, ppd, boy_px=None):
         """Kare `t_kare`de cekildi; eksen o an `aci_kare`deydi; hedef merkezden
-        `hata_px` uzakta. Doner: olcum kabul edildi mi."""
+        `hata_px` uzakta; hedef kutusu `boy_px` buyuklugunde (varsa olcum gurultusu
+        boyla olceklenir). Doner: olcum kabul edildi mi."""
         if aci_kare is None or hata_px is None or not ppd:
             return False
+        if self.olcek_ref_px and boy_px:
+            self._s = max(1.0, float(boy_px) / self.olcek_ref_px)
+            self._kip_ayari(self._yor_kipinde)            # r / q sinirlari yeni boya gore
         z = float(aci_kare) - self._ofset(t_kare) + self.isaret * float(hata_px) / float(ppd)
         self._son_kare = (float(t_kare), float(hata_px), float(ppd))
         kabul = self.kestirici.guncelle(t_kare, z)
@@ -525,6 +654,10 @@ class EksenTakip:
             self._z_gecmisi.append((float(t_kare), z))
             while self._z_gecmisi and self._z_gecmisi[0][0] < t_kare - self.yor_ff_pencere:
                 self._z_gecmisi.pop(0)
+            self._kor_gecmisi.append((float(t_kare), z))
+            while self._kor_gecmisi and self._kor_gecmisi[0][0] < t_kare - KOR_GECMIS_S:
+                self._kor_gecmisi.pop(0)
+            self._kor_dogru = None                  # yeni kor aralik yeni dogru
             self._kayip_durdu = False
             self._hiz_gecmisi.append((float(t_kare), self.kestirici.hiz))
             while self._hiz_gecmisi and self._hiz_gecmisi[0][0] < t_kare - 1.0:
@@ -549,7 +682,7 @@ class EksenTakip:
         self._kip_ayari(False)
         simdi, aci = float(simdi), float(aci)
         self.aci_bildir(aci, simdi)
-        if self.kestirici.kayip_sure(simdi) > self.kayip_kovalamasi:
+        if self.kestirici.kayip_sure(simdi) > self.kayip_kovalamasi and not self._korde(simdi, hata_px):
             # Uzun kayipta eski hizla kadraj disina kosma: filtreyi birak, eksen
             # son hedefinde kalir. Yeni gercek olcum iki karede filtreyi yeniden kurar.
             if self.kestirici.baslatildi:
@@ -561,7 +694,7 @@ class EksenTakip:
             return None
         hiz = self.kestirici.hiz
         if (hata_px is not None and olu_px is not None and abs(float(hata_px)) <= float(olu_px)
-                and abs(hiz) <= self.durus_hizi):
+                and abs(hiz) <= self.durus_hizi * self._s):
             return None
         # YERLESME DUZELTMESI: hedef duruyor, motor durduktan SONRA cekilmis bir kare
         # hala olu bolge disini gosteriyor. Bu kare bayat degil (hareket bitmisti), yani
@@ -569,7 +702,7 @@ class EksenTakip:
         # salinimi icindir; yerlesmis namluda salinim yok). Model hatalarinin (bosluk,
         # ppd) biraktigi kalici sapmayi bu kapatir.
         kare = self._son_kare
-        if (kare is not None and olu_px is not None and abs(hiz) <= self.durus_hizi
+        if (kare is not None and olu_px is not None and abs(hiz) <= self.durus_hizi * self._s
                 and kare[0] > self._son_hareket_t + 0.03 and abs(kare[1]) > float(olu_px)
                 and (self.son_komut_t is None or kare[0] > self.son_komut_t)):
             # 0.8: ppd sanilandan buyukse (goruntu dereceye daha cok kayiyorsa) tam
@@ -601,14 +734,14 @@ class EksenTakip:
         tahmin = self.kestirici.tahmin(simdi)
         # Duran hedefte hiz kestirimi yalniz gurultudur; onu ileri tasimak namluyu
         # titretir. Ongoru yalniz gercekten hareket eden hedefe uygulanir.
-        if abs(hiz) > self.durus_hizi:
+        if abs(hiz) > self.durus_hizi * self._s:
             tahmin += hiz * self.ileri
         self.son_tahmin = tahmin
         namlu = aci - self._ofset()
         hedef = max(namlu - self.azami_sicrama, min(namlu + self.azami_sicrama, tahmin))
         referans = namlu if self.son_komut is None else self.son_komut
         fark = hedef - referans
-        olu = self.olu if olu is None else max(self.olu, float(olu))
+        olu = self.olu * self._s if olu is None else max(self.olu * self._s, float(olu))
         if abs(fark) < olu:
             return None
         yon = 1 if fark > 0 else -1
@@ -664,7 +797,8 @@ class EksenTakip:
         simdi, aci = float(simdi), float(aci)
         self.aci_bildir(aci, simdi)
         kayip_sure = self.kestirici.kayip_sure(simdi)
-        if hata_px is None and kayip_sure >= 0.10 and not self._kayip_durdu:
+        kor = self._korde(simdi, hata_px)            # lazer altinda gorunmemek kayip degil
+        if hata_px is None and kayip_sure >= self.kayip_dur_s and not self._kayip_durdu and not kor:
             # Son hizli komut firmware'de 150 ms daha akar. Hedef uc kare kadar
             # gorunmediyse eski hizi sifirla; belirsiz bolgeye tahminle kosma.
             self._kayip_durdu = True
@@ -673,7 +807,7 @@ class EksenTakip:
             return self._yorunge_sinirla(self._tut, 0.0, alt, ust, pay)
         if self._kayip_durdu:
             return None
-        if kayip_sure > self.kayip_kovalamasi:
+        if kayip_sure > self.kayip_kovalamasi and not kor:
             if self.kestirici.baslatildi:
                 self.sifirla()
             return None
@@ -681,6 +815,10 @@ class EksenTakip:
             return None
         if self.son_komut_t is not None and simdi - self.son_komut_t < self.komut_periyodu:
             return None
+        if kor:
+            return self._kor_komut(simdi, aci, alt, ust, pay)
+        if self.kayipta_tut and hata_px is None and (self._duragan or self._tut is not None):
+            return None                    # kisa bosluk, duran hedef: namlu yerinde bekler
         hiz = self.kestirici.hiz
         # DURAN HEDEF -> konum kipinin mantigi (yon histerezisi, yerlesme duzeltmesi,
         # ogrenilen bosluk), karta hiz 0 ile. Sahada (22.09, yere konmus drone) yalniz
@@ -697,11 +835,11 @@ class EksenTakip:
         # duran hedef kipine gecilemiyor, salinim sonmuyordu. Salinimin ortalamasi
         # sifirdir; gercekten hareket eden hedefin hizi ayni isarette kalir.
         v_uzun, v_kisa = self._ort_hiz(simdi, 0.5), self._ort_hiz(simdi, 0.2)
-        if abs(v_uzun) >= 1.0:
+        if abs(v_uzun) >= 1.0 * self._s:
             self._yavas_t = None
         elif self._yavas_t is None:
             self._yavas_t = simdi
-        if self._duragan and abs(v_kisa) > 2.0:
+        if self._duragan and abs(v_kisa) > 2.0 * self._s:
             self._duragan = False
         elif (not self._duragan and self._yavas_t is not None
               and simdi - self._yavas_t >= 0.4):
@@ -715,7 +853,7 @@ class EksenTakip:
         # Tutma konumu GIRISTE bir kez alinir; her cagrida olculen aciya "yeniden
         # oturtmak" motoru kipirdatirdi.
         if (hata_px is not None and olu_px is not None and abs(float(hata_px)) <= float(olu_px)
-                and abs(hiz) <= self.durus_hizi):
+                and abs(hiz) <= self.durus_hizi * self._s):
             if self._tut is None:
                 self._tut = max(float(alt), min(float(ust), aci))
             self.son_komut_t = simdi
@@ -731,7 +869,7 @@ class EksenTakip:
         # Bosluk tarafi: hedef belirgin hizla hareket ediyorsa hizin yonu; yavasta ancak
         # konum farki boslugu asinca degisir. Histerezissiz her kucuk hiz isaret
         # degisiminde komut bosluk kadar sicrardi.
-        if abs(hiz) >= 1.0:
+        if abs(hiz) >= 1.0 * self._s:
             self._yor_yon = 1 if hiz > 0 else -1
         elif abs(hedef - namlu) > max(0.2, self.bosluk_kest) or not self._yor_yon:
             self._yor_yon = 1 if hedef > namlu else -1
@@ -1055,6 +1193,168 @@ if __name__ == "__main__":
     assert uyar and sum(sabit) > 1.0, "kurulum: durus sonrasi yorunge komutu uretilmedi"
     assert sum(uyar) < 0.75 * sum(sabit), f"durusta hiz kisilmadi: {sum(uyar):.1f} vs {sum(sabit):.1f}"
 
+    # 13. SAHA DENGESI (24.09): yakinda titreme / uzakta akicilik. SAHADAKI kosullar: kare ->
+    #     karar 0.15 sn, cikarim 17 Hz, %20 kayip kare, olcum gurultusu balon boyunun %10'u
+    #     (%6 olasilikla 3.5 kat), kart yorunge kopyasi (K=8, 250 der/sn^2).
+    def _saha_kos(hedef_f, boy, ek, sure=9.0, tohum=1):
+        rng5 = random.Random(tohum)
+        e = EksenTakip(isaret=1.0, bosluk=0.8, **ek)
+        dt, x, v, namlu, p0, v0, t0, aktif = 0.002, 0.8, 0.0, 0.8, 0.0, 0.0, -1.0, False
+        gecmis, bekleyen, sonraki, serbest = [], [], 0.0, 0.0
+        hata, icerde, hizlar = [], [], []
+        for i in range(int(sure / dt)):
+            t = i * dt
+            if aktif:
+                vh = 0.0 if t - t0 > 0.15 else v0 + 8.0 * ((p0 + v0 * (t - t0)) - x)
+                vh = max(-60.0, min(60.0, vh))
+                v += max(-250 * dt, min(250 * dt, vh - v))
+                x += v * dt
+            namlu = min(max(namlu, x - 0.3), x + 0.3)
+            gecmis.append((t, x))
+            if t >= sonraki:
+                sonraki += 1 / 30.0
+                if t >= serbest:
+                    serbest = t + 1 / 17.0
+                    s_ = max(1.2, 0.1 * boy) * (3.5 if rng5.random() < 0.06 else 1.0)
+                    gor = rng5.random() < 0.8
+                    bekleyen.append((t + 0.15, t, (hedef_f(t) - namlu) * 18.7 + rng5.gauss(0, s_), gor))
+            while bekleyen and bekleyen[0][0] <= t:
+                _, tk, h, gor = bekleyen.pop(0)
+                xk = next(g[1] for g in reversed(gecmis) if g[0] <= tk)
+                if gor:
+                    e.olcum(tk, xk, h, 18.7, boy_px=boy)
+                r = e.yorunge_komut(t, x, -400, 400, hata_px=h if gor else None,
+                                    olu_px=0.25 * boy if gor else None, pay=0.0)
+                if r is not None:
+                    (p0, v0), t0, aktif = r, t, True
+            if t > 1.5 and i % 5 == 0:
+                d = abs(hedef_f(t) - namlu) * 18.7
+                hata.append(d); icerde.append(d <= 0.25 * boy); hizlar.append(v)
+        yon, son = 0, 0
+        for h_ in hizlar:
+            if abs(h_) > 1.0:
+                s_ = 1 if h_ > 0 else -1
+                yon, son = yon + (son != 0 and s_ != son), s_
+        return yon / (sure - 1.5), st.median(hata), sum(icerde) / len(icerde)
+
+    def _ort(hedef_f, boy, ek):
+        r = [_saha_kos(hedef_f, boy, ek, tohum=k) for k in (1, 2, 3)]
+        return tuple(sum(x[j] for x in r) / len(r) for j in range(3))
+
+    yakin = lambda t: 5.0 + 0.3 * math.sin(2 * math.pi * 0.6 * t)       # 90 px, elde duran
+    uzak = lambda t: 5.0 + 6.0 * (1.5 - abs((t % 6.0) - 3.0))             # 20 px, yuruyen
+    y_eski, y_yeni = _ort(yakin, 90.0, {}), _ort(yakin, 90.0, SAHA_AYARI)
+    u_eski, u_yeni = _ort(uzak, 20.0, {}), _ort(uzak, 20.0, SAHA_AYARI)
+    print(f"  (saha: yakin 90 px yon/sn {y_eski[0]:.2f} -> {y_yeni[0]:.2f}, balon icinde "
+          f"%{100*y_eski[2]:.0f} -> %{100*y_yeni[2]:.0f}; uzak yuruyen hata {u_eski[1]:.1f} -> "
+          f"{u_yeni[1]:.1f} px)")
+    assert y_yeni[0] < 0.6 * y_eski[0], ("yakinda titreme azalmadi", y_eski, y_yeni)
+    assert y_yeni[1] < y_eski[1] and y_yeni[2] >= y_eski[2], ("yakinda nisan kotulesti", y_eski, y_yeni)
+    assert u_yeni[1] <= u_eski[1], ("uzakta takip geride kaldi", u_eski, u_yeni)
+    # Olcek: kucuk balonda ayar AYNEN (s=1); buyukte r ve q sinirlari boyla
+    o = EksenTakip(isaret=1.0, **SAHA_AYARI)
+    o.olcum(0.0, 0.0, 0.0, 18.7, boy_px=20.0)
+    assert o._s == 1.0
+    o.olcum(0.02, 0.0, 0.0, 18.7, boy_px=96.0)
+    o._kip_ayari(True)
+    assert o._s == 4.0 and abs(o.kestirici.r - 0.3 * 4.0) < 1e-9, (o._s, o.kestirici.r)
+    assert abs(o.kestirici.q_max - 800.0 * 16) < 1e-6 and abs(o.kestirici.q_min - 60.0 * 16) < 1e-6
+    o._kip_ayari(False)
+    assert abs(o.kestirici.r - 0.6 * 4.0) < 1e-9 and abs(o.kestirici.q - 40.0 * 16) < 1e-6
+    # Tek kayip kare (kare -> karar 0.15 sn + bir kare) namluyu DURDURMAZ; uzun kayip durdurur
+    k1 = EksenTakip(isaret=1.0, **SAHA_AYARI)
+    for i in range(12):
+        k1.olcum(i / 17.0, 0.0, 10.0 * 18.7 * i / 17.0, 18.7)
+        k1.yorunge_komut(i / 17.0 + 0.15, 0.0, -90.0, 90.0, hata_px=10.0 * 18.7 * i / 17.0, olu_px=5.0)
+    t_son = 11 / 17.0
+    assert not k1._kayip_durdu
+    k1.yorunge_komut(t_son + 0.15 + 1 / 17.0, 0.0, -90.0, 90.0)
+    assert not k1._kayip_durdu, "tek kayip karede namlu durduruldu"
+    r = k1.yorunge_komut(t_son + 0.40, 0.0, -90.0, 90.0)
+    assert k1._kayip_durdu and r is not None and r[1] == 0.0, "uzun kayipta durmadi"
+    # Hiz esikleri boyla olceklenir: 2.5 der/sn, 96 px balonda (s=4, yakinda elde tutulan
+    # hedefin sallanmasi) "duruyor", 20 px balonda (uzakta yuruyen) "hareketli" sayilir.
+    def _duragan_orani(boy):
+        """Son 0.8 sn'de 'duruyor' sayilan adimlarin orani (kip acilip kapaniyorsa ~0.5)."""
+        k3 = EksenTakip(isaret=1.0, **SAHA_AYARI)
+        z, sayim = 0.0, []
+        for i in range(int(2.6 * 17)):
+            t = i / 17.0
+            z += (12.0 if t < 0.6 else 2.5) / 17.0       # once hizli (durustan cikar), sonra yavas
+            k3.olcum(t, 0.0, z * 18.7, 18.7, boy_px=boy)
+            k3.yorunge_komut(t + 0.15, 0.0, -90.0, 90.0, hata_px=z * 18.7, olu_px=0.25 * boy)
+            if t >= 1.8:
+                sayim.append(k3._duragan)
+        return sum(sayim) / len(sayim)
+    assert _duragan_orani(96.0) >= 0.9, "buyuk balonda yavas sallanma hareket sayildi (esik olceklenmedi)"
+    assert _duragan_orani(20.0) <= 0.1, "kucuk balonda yuruyen hedef duruyor sayildi"
+    # Kisa boslukta DURAN hedef: namlu yerinde bekler (yeni komut yok) — tahminle konum
+    # komutu uretip bir sonraki karede geri donmek yakindaki dur-kalk titremesiydi.
+    for tut_acik in (True, False):
+        k2 = EksenTakip(isaret=1.0, **dict(SAHA_AYARI, kayipta_tut=tut_acik))
+        for i in range(20):                          # namlu 0'da, hedef 3 derecede, duruyor
+            k2.olcum(i / 17.0, 0.0, 3.0 * 18.7, 18.7)
+            k2.yorunge_komut(i / 17.0 + 0.15, 0.0, -90.0, 90.0, hata_px=3.0 * 18.7, olu_px=5.0)
+        assert k2._duragan
+        k2.son_komut, k2.son_komut_t = 0.0, None     # son komut namlunun yeri: fark 3 derece
+        r = k2.yorunge_komut(19 / 17.0 + 0.15 + 1 / 17.0, 0.0, -90.0, 90.0)
+        if tut_acik:
+            assert r is None, f"kisa boslukta duran hedefe komut gitti: {r}"
+        else:
+            assert r is not None, "kurulum: kayipta_tut kapaliyken komut beklenirdi"
+
+    # 14. ATES KORLUGU (24.09 saha, 21:27 kaydi): lazer noktasi balona degince model onu
+    #     goremez. korluk() suresince olcum yoklugu KAYIP DEGIL: kayan balonda namlu son
+    #     1.5 sn'ye uydurulan dogruyu izler (durdurulsaydi balon noktanin altindan kayardi),
+    #     duran balonda yerinde bekler, sallanan balonda egim anlamsizsa kosmaz.
+    import random
+
+    def _kor_kos(hiz, korlu, sallanti=0.0, boy=13.0, gur=0.1, tohum=3):
+        rng = random.Random(tohum)
+        # bosluk 0: "namlu balonun uzerinde" beslemesi bosluk modelinin oturma gecisiyle
+        # celisip olcumlere sahte egim katmasin (dogru uydurmanin kendisi sinaniyor)
+        k = EksenTakip(isaret=1.0, bosluk=0.0, **SAHA_AYARI)
+        z = lambda t: 5.0 + hiz * t + sallanti * math.sin(2 * math.pi * 0.6 * t)
+        t = 0.0
+        while t < 1.6:                                  # namlu balonun uzerinde, 17 Hz
+            h = rng.gauss(0.0, gur * boy)
+            k.olcum(t, z(t), h, 18.7, boy_px=boy)
+            k.yorunge_komut(t + 0.12, z(t + 0.12), -90.0, 90.0, hata_px=h, olu_px=0.25 * boy)
+            t += 1 / 17.0
+        bitis = t + 2.0
+        if korlu:
+            k.korluk(bitis)
+        cikti = []
+        while t < bitis - 0.05:                         # ates: model kor
+            cikti.append((t, k.yorunge_komut(t, z(t), -90.0, 90.0)))
+            t += 0.04
+        return k, z, cikti, t
+
+    k, z, c, t = _kor_kos(1.0, korlu=False)
+    assert k._kayip_durdu and any(r is not None and r[1] == 0.0 for _, r in c), \
+        "kurulum: korluk yokken kayipta namlu durmadi"
+    k, z, c, t = _kor_kos(1.0, korlu=True)
+    assert not k._kayip_durdu and not any(r is not None and r[1] == 0.0 for _, r in c), \
+        "lazer altinda (korluk) kayan balonda namlu DURDURULDU"
+    hareket = [r for _, r in c if r is not None]
+    assert hareket and abs(hareket[-1][1] - 1.0) < 0.35, f"korlukte hiz kestirilen yolda degil: {hareket[-1]}"
+    assert abs(k.son_komut - z(k.son_komut_t)) < 0.3,         f"korlukte namlu balondan kaydi: {k.son_komut} / {z(k.son_komut_t)}"
+    assert k.yorunge_komut(t + 0.1, z(t), -90.0, 90.0) is not None and k._kayip_durdu, \
+        "korluk bitti, balon gelmedi: namlu durmali"
+    k, z, c, t = _kor_kos(0.0, korlu=True)
+    assert k._duragan and all(r is None for _, r in c) and not k._kayip_durdu, \
+        f"korlukte DURAN balona komut gitti: {[r for _, r in c if r][:3]}"
+    k, z, c, t = _kor_kos(0.0, korlu=True, sallanti=0.3, boy=90.0)
+    assert all(r is None or r[1] == 0.0 for _, r in c), \
+        "elde sallanan yakin balonda salinimin anlik egimiyle kosuldu"
+    # Gurultulu kutulu DURAN uzak balon (sahada kuyruklu): egim esigi asiyor (-0.28 der/sn)
+    # ama kendi belirsizliginin 3 katinin (0.54) altinda -> anlamsiz, kosulmaz.
+    k, z, c, t = _kor_kos(0.0, korlu=True, boy=20.0, gur=0.3, tohum=24)
+    assert all(r is None or r[1] == 0.0 for _, r in c),         "duran balonda gurultunun anlamsiz egimiyle kosuldu"
+    k.hedef_degisti()
+    assert k.kor_bitis is None, "kilit degisti, korluk yeni hedefe tasindi"
+
     print("hedef_kestirici testleri OK — hiz kestirimi, kesintide tahmin, gurultu, "
           "aykiri/geri-zaman korumasi, hiz-sinirli yumusak komut, sentetik takip, "
-          "hedef degisiminde sifirlama, yorunge hiz tavani, uyarlamali ileri besleme")
+          "hedef degisiminde sifirlama, yorunge hiz tavani, uyarlamali ileri besleme, "
+          "ates korlugu (kayan / duran / sallanan balon)")

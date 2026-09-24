@@ -148,8 +148,8 @@ def calistir(args):
     son_t, mesgul_ta = None, 0.0
     onceki_aci = None
     # arayuz_qt._takip_olcum_geldi aynasi (ayni sinif, ayni ayarlar)
-    pan_tk = HK.EksenTakip(isaret=+1.0, bosluk=algi.AYAR["takip_bosluk"])
-    tilt_tk = HK.EksenTakip(isaret=-1.0, bosluk=algi.AYAR["takip_bosluk"])
+    pan_tk = HK.EksenTakip(isaret=+1.0, bosluk=algi.AYAR["takip_bosluk"], **HK.SAHA_AYARI)
+    tilt_tk = HK.EksenTakip(isaret=-1.0, bosluk=algi.AYAR["takip_bosluk"], **HK.SAHA_AYARI)
     pan_acik = args.pan and k.pan_ayri
     print(f"PAN takibi: {'ACIK (sinir +-%.0f derece)' % args.pan_sinir if pan_acik else 'KAPALI'}")
     A, T = (args.sanal if args.sanal else (0.0, 1.0))

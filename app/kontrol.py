@@ -547,7 +547,21 @@ class Kontrol:
         kademe = self.hiz if seviye is None else P.hiz_kirp(seviye)
         pan = T.PAN_HIZ_TABLO[kademe] if self.pan_ayri else P.HIZ_TABLO[kademe]
         tilt = T.HIZ_TABLO[kademe] if self.tilt_ayri else pan
+        if getattr(self, "_takip_kipi", False):          # karta giden ivme tavanli profil
+            if self.pan_ayri:
+                pan = T.takip_profili(pan, T.PAN_TAKIP_IVME)
+            if self.tilt_ayri:
+                tilt = T.takip_profili(tilt, T.TAKIP_IVME)
         return pan, tilt
+
+    def takip_kipi(self, acik):
+        """Otonom takip acik/kapali. S3 kartinda iki eksenin ivmesi TS.TAKIP_IVME /
+        TS.PAN_TAKIP_IVME ile sinirlanir (yumusak takip); tepe hiz kademeninki kalir.
+        Eski (ayri) pan kartinin profili degismez."""
+        self._takip_kipi = bool(acik)
+        if self.tilt_ayri:
+            self.tilt.takip_kipi_ayarla(self._takip_kipi)
+        return self._takip_kipi
 
     def kapat(self):
         # Tilt karti KALICI olarak kapatilir (D): uygulama kapanirken kol komut
@@ -719,6 +733,14 @@ if __name__ == "__main__":
         saat4[0] += 0.25; k4.oku()
     assert abs(k4.pan_olculen - 15.0) < 0.05, k4.pan_olculen
     assert k4.hiz_profilleri()[0] == T.PAN_HIZ_TABLO[k4.hiz]
+    # Otonom takip: arayuzun hesaplari (fren/mesgul suresi) karttaki TAVANLI ivmeyi gormeli
+    k4.takip_kipi(True)
+    (_, pan_iv), (_, tilt_iv) = k4.hiz_profilleri()
+    assert pan_iv == min(T.PAN_HIZ_TABLO[k4.hiz][1], T.PAN_TAKIP_IVME), pan_iv
+    assert tilt_iv == min(T.HIZ_TABLO[k4.hiz][1], T.TAKIP_IVME), tilt_iv
+    assert k4.tilt.takip_kipi, "takip kipi tilt surucusune gitmedi"
+    k4.takip_kipi(False)
+    assert k4.hiz_profilleri()[0] == T.PAN_HIZ_TABLO[k4.hiz] and not k4.tilt.takip_kipi
     k4.home()
     for _ in range(12):
         saat4[0] += 0.25; k4.oku()

@@ -791,7 +791,11 @@ AYAR_TANIM_NISAN = [
 
 # Otonom Ateşleme Ayarları
 OTONOM_DWELL_SURE = 0.5  # sn (Hedef bu kadar süre merkezde kalırsa lazer açılır)
-OTONOM_ATES_SURE = 1.0   # sn (Lazer açıldıktan sonra en az bu kadar süre açık kalır)
+# sn: otonom ates turu. BALONDA TAAHHUT (24.09 saha, bkz. _otonom_ates_kontrol): balona
+# baslayan ates, kilit ayni balonda kaldikca bu sure boyunca KESINTISIZ surer — lazer noktasi
+# balonu modelden gizlese de. Patlayip patlamadigina lazer sondukten sonra bakilir
+# (balon_takip: geri gelmezse imha, gelirse yeniden ates). 1 sn %55 guc patlatmadi -> 2 sn.
+OTONOM_ATES_SURE = 2.0
 # Atisi tamamlanan hedef bu sure YENIDEN secilmez (maket balonu patlasa da rayda gorunur).
 # ⚠ Yalniz O HEDEF yasaklanir; diger hedeflere hemen kilitlenilir (algi.hedef_vuruldu).
 # Eskiden bu sure boyunca HICBIR hedefe kilitlenilmiyordu — Asama 2'de tur basina 3 hedef.
@@ -1205,7 +1209,7 @@ class VideoThread(QThread):
                 # eskiden buraya hic yazilmiyordu — kapi yalniz testte calisiyordu).
                 active = {"ad": d["ad"], "tip": d["tip"], "conf": d["conf"], "box": d["box"],
                           "hayalet": bool(d.get("hayalet")), "balon": bool(d.get("balon")),
-                          "engel": d.get("engel")}
+                          "engel": d.get("engel"), "id": d.get("id")}
             except IndexError:
                 pass
         imha = balon_takip.son_imha()
@@ -1351,15 +1355,17 @@ class MainWindow(QMainWindow):
         self.hiz_seviye = P.HIZ_VARSAYILAN
         self._nisan_son_t = None   # otonom PD komutlari icin hiz-siniri zamanlayicisi
         self._nisan_mesgul_ta = 0.0   # bu zamana kadar yeni otonom komutu KABUL EDILMEZ
+        # SAHA_AYARI: yakinda boya gore olceklenen (titremez), uzakta aynen kalan takip.
         self._pan_takip = HK.EksenTakip(isaret=+1.0,
-                                        bosluk=algi.AYAR.get("takip_bosluk", 0.8))
+                                        bosluk=algi.AYAR.get("takip_bosluk", 0.8), **HK.SAHA_AYARI)
         self._tilt_takip = HK.EksenTakip(isaret=-1.0,
-                                         bosluk=algi.AYAR.get("takip_bosluk", 0.8))
+                                         bosluk=algi.AYAR.get("takip_bosluk", 0.8), **HK.SAHA_AYARI)
         self._acilis_yukselisi = False
         self._acilis_yukselisi_bekliyor = False
         self._otonom_ates_aktif = False
         self._otonom_hedef_merkezde_t = None
         self._otonom_ates_bitis_t = None
+        self._otonom_ates_id = None        # atesin taahhut edildigi hedef (kilit degisirse kes)
         # Lazer gucu (%). Her acilista GUVENLI VARSAYILANA doner — kalici olarak
         # kaydedilmez: "gecen sefer %100'de birakmisiz" diye baslamak istemeyiz.
         self.lazer_guc = P.LAZER_GUC_VARSAYILAN
@@ -3262,12 +3268,18 @@ class MainWindow(QMainWindow):
             olcek = float(d["w"]) / 1280.0              # ppd 1280 px'te olculdu
             ex, ey, olu_x, olu_y = d["ex"], d["ey"], d["olu_x"], d["olu_y"]
             t_kare = d["t"] - float(algi.AYAR.get("kamera_gecikme", 0.03))
+            # BALON BOYU (1280 px'e gore): yakindaki buyuk balonda takip boya gore
+            # yumusar (HK.SAHA_AYARI). Arac kutusu balon degildir -> olceklenmez.
+            kutu = d.get("box")
+            boy = None
+            if kutu and str(d.get("kaynak", "")).startswith("balon_"):
+                boy = max(abs(kutu[2] - kutu[0]), abs(kutu[3] - kutu[1])) / max(1e-6, olcek)
             self._pan_takip.olcum(t_kare, k.pan_zamaninda(t_kare), ex,
-                                  float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
+                                  float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek, boy_px=boy)
             # Tilt KAMERA ACISINDA izlenir (kol-biyel dogrusal degil, bkz.
             # tilt_surucu.KAMERA_PPD_TABLO); orada ppd pan ile ayni.
             self._tilt_takip.olcum(t_kare, TS.kamera_acisi(k.tilt_zamaninda(t_kare)), ey,
-                                   float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek)
+                                   float(algi.AYAR.get("takip_ppd_pan", 18.7)) * olcek, boy_px=boy)
         # SINIRLAR YALNIZ ARAYUZDEN (kullanici karari 23.09): otonom takip operatorun
         # hareket penceresini kullanir; pencere kapaliysa fiziksel aralik. Gizli tavan,
         # ayri "otonom siniri" ya da pay YOK. Tilt sinirlari KOL (operator) acisindadir,
@@ -3691,6 +3703,10 @@ class MainWindow(QMainWindow):
                 if hasattr(self, "pan_val_lbl"):
                     self._pan_goster()
                     self._tilt_goster()
+        # YUMUSAK TAKIP (24.09 saha): otonomda kartin ivmesi TS.TAKIP_IVME ile sinirli.
+        k = getattr(self, "kontrol", None)
+        if k is not None and hasattr(k, "takip_kipi"):
+            k.takip_kipi(ad == "Otonom")
         if getattr(self, "_acik_pencere", None):
             self._pencere_kapat()            # manuel panel gizlenirken kutucuk askida kalmasin
         for m, b in self.mod_btns.items():
@@ -3975,6 +3991,8 @@ class MainWindow(QMainWindow):
         `_ates_bas` yalnizca butona BASILDIGI ANI denetler; ates surerken kosullar
         degisirse (or. gimbal atisa-yasak bolgeye girerse) kesme yolu burasidir.
         Ates zaten kapaliysa hicbir sey yapmaz."""
+        balon_takip.ates_bitti()        # lazer altinda onlemleri gecikme payiyla biter
+        self._takip_korlugu(time.time(), yalniz_kisalt=True)
         if not self.fire_btn.isChecked() and not self.kontrol.durum.get("lazer"):
             return
         self.fire_btn.setChecked(False)
@@ -3983,6 +4001,17 @@ class MainWindow(QMainWindow):
         if self.kontrol.bagli:
             self._esp_goster(self.kontrol.ates(False))
         self.sb_msg.setText(f'<span style="color:{RED}">●</span>&nbsp;Ateş kesildi — {sebep}')
+
+    def _takip_korlugu(self, lazer_bitis, yalniz_kisalt=False):
+        """Surekli takibe: lazer `lazer_bitis`'e kadar yanar; kamera noktayi LAZER_GECIKME_S
+        daha gosterir, sonra balon KAYIP_S boyunca aranir (patladi mi?). Bu pencerede tespit
+        yoklugu KAYIP sayilmaz (HK.EksenTakip.korluk): duran balonda namlu bekler, kayanda
+        yolunu izler. `yalniz_kisalt`: ates erken kesildi — pencere uzamaz."""
+        bitis = lazer_bitis + balon_takip.LAZER_GECIKME_S + balon_takip.KAYIP_S
+        for e in (getattr(self, "_pan_takip", None), getattr(self, "_tilt_takip", None)):
+            if e is None or (yalniz_kisalt and (e.kor_bitis is None or e.kor_bitis <= bitis)):
+                continue
+            e.korluk(bitis)
 
     def _esp_goster(self, d):
         """Kontrol katmaninin ozetini alt cubuga yansitir.
@@ -4420,13 +4449,31 @@ class MainWindow(QMainWindow):
 
         simdi = time.time()
         a = data.get("active")
+        # KILIT BASKA HEDEFE GECTI (ates surerken): namlu yeni hedefe donecek — lazer
+        # yolda yanmaz. Yeni hedef bastan dwell bekler.
+        if self._otonom_ates_aktif and a and a.get("id") != self._otonom_ates_id:
+            self._otonom_ates_aktif = False
+            self._otonom_hedef_merkezde_t = None
+            if self.fire_btn.isChecked():
+                self.fire_btn.setChecked(False)
+                self._ates_kes("Kilit başka hedefe geçti")
         # ⚠ "Anlik kirmizi kaniti" sarti KALDIRILDI (takim karari 23.09): otonom modda
         # is, hedefi TESPIT edip altindaki balona ates etmektir; rengin o karede
         # okunabilmesini sart kosmak isik/boya yuzunden sistemi hic ates edemez hale
         # getiriyordu. Dost korumasi duruyor: Asama-3'te hedef secimi zaten yalnizca
         # tarafi "Dusman" okunan hedefi kilitler (algi._taraf_belirle).
-        # HAYALET kutu hala ates actirmaz: gorunmeyen hedefe ates edilmez.
-        if a and a.get("hayalet"):
+        # HAYALET kutu hala ates ACTIRMAZ: gorunmeyen hedefe ates BASLAMAZ.
+        # BALONDA ATES TAAHHUDU (24.09 saha, kullanici istegi): BASLAMIS ates ayni balon
+        # kilitli kaldikca OTONOM_ATES_SURE boyunca hayalette de surer. Lazer noktasi balona
+        # degince model balonu tanimiyor: 21:27 kaydinda uzak balona 37 atisin 37'si ~0.2
+        # sn'de (lazer yandiktan 3 kare sonra) "hedef gorunmuyor" diye kesildi, balon hic
+        # isinmadi. Taahhut YALNIZ hayalet kesmesini kaldirir; E-Stop, mod/asama, atisa
+        # yasak aci (_aci_hareket), dost/menzil engeli (hayalette de hesaplanir), kilidin
+        # dusmesi (A3 karti dusmanliktan cikarsa balon_takip birakir) ve kilidin baska
+        # hedefe gecmesi aynen keser. Namlu bu surede balonun yolunda kalir (_takip_korlugu).
+        taahhut = bool(self._otonom_ates_aktif and a and a.get("balon")
+                       and a.get("id") == self._otonom_ates_id)
+        if a and a.get("hayalet") and not taahhut:
             self._otonom_hedef_merkezde_t = None
             self._ates_kapi_yaz("Ateş engelli", "Hedef bu karede görünmüyor", AMB)
             if self._otonom_ates_aktif:
@@ -4457,12 +4504,15 @@ class MainWindow(QMainWindow):
                 # Dwell suresi doldu -> ATESI BASLAT
                 self._otonom_ates_aktif = True
                 self._otonom_ates_bitis_t = simdi + OTONOM_ATES_SURE
+                self._otonom_ates_id = a.get("id")
                 if not self.fire_btn.isChecked():
                     self.fire_btn.setChecked(True)
                     self._ates_bas()
                 if a.get("balon"):
                     # Imha dogrulamasi: bu andan sonra kaybolan balon = patladi.
-                    balon_takip.ates_basladi(lazer_gercek)
+                    balon_takip.ates_basladi(lazer_gercek, sure=OTONOM_ATES_SURE)
+                    if lazer_gercek and self.fire_btn.isChecked():
+                        self._takip_korlugu(self._otonom_ates_bitis_t)
             elif not self._otonom_ates_aktif:
                 self._ates_kapi_yaz("Nişanda — bekleniyor",
                                     f"dwell {gecen:.1f} / {OTONOM_DWELL_SURE:.1f} sn", BLUE)
@@ -4474,7 +4524,9 @@ class MainWindow(QMainWindow):
         # Ates suresi doldu mu veya hedef tamamen kayboldu mu kontrolu
         if self._otonom_ates_aktif:
             self._ates_kapi_yaz("● ATEŞ",
-                                f"kalan {max(0.0, self._otonom_ates_bitis_t - simdi):.1f} sn", RED)
+                                f"kalan {max(0.0, self._otonom_ates_bitis_t - simdi):.1f} sn"
+                                + (" · balon lazer altında görünmüyor, ateş sürüyor"
+                                   if a and a.get("hayalet") else ""), RED)
             # Eger hedef hic yoksa (active = None) veya ates suresi dolduysa LAZERI KES
             if not a or simdi >= self._otonom_ates_bitis_t:
                 self._otonom_ates_aktif = False
