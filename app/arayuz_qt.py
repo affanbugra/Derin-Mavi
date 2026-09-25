@@ -768,17 +768,8 @@ AYAR_TANIM_NISAN = [
      "Hedef kutusu bilinmediğinde kullanılan yedek ölü bölge (kare genişliğinin yüzdesi).\n\n"
      "Normal otonom takipte kullanılmaz — orada yukarıdaki kutuya oranlı değer geçerlidir. "
      "Bu yalnızca bir geri düşüş (fallback) değeridir."),
-    ("lazer_ofset_x", "Lazer ofseti — Yatay", "yuzde", -15, 15,
-     "Kamera ile lazer farklı noktalara monteli; ekran merkezi lazerin vurduğu "
-     "nokta değildir (boresight/paralaks).\n\n"
-     "KALİBRASYON: Manuel modda lazeri bir hedefe TAM İSABET ettirin (nokta hedefin "
-     "üzerinde dururken durun). Ekrandaki yeşil nişangah hedeften SAĞDA duruyorsa "
-     "bu değeri AZALTIN, SOLDA duruyorsa ARTIRIN — nişangah hedefe oturana kadar.\n\n"
-     "Otonom takip artık bu kalibre noktaya kilitlenir, ekran merkezine değil."),
-    ("lazer_ofset_y", "Lazer ofseti — Dikey", "yuzde", -15, 15,
-     "Yatay ofsetle aynı kalibrasyon, dikey eksende.\n\n"
-     "Nişangah hedefin ALTINDA duruyorsa bu değeri AZALTIN, ÜSTÜNDE duruyorsa "
-     "ARTIRIN — nişangah hedefe oturana kadar."),
+    # Lazer ofseti (nisangah) buradan KALKTI (25.09): %1 adimli kaydirici 1280 px'te 13 px
+    # atliyordu, lazer noktasina oturtulamiyordu. Artik lazer kutucugunda piksel piksel.
     ("balon_ofset", "Balon nişan ofseti", "yuzde", 0, 150,
      "Nişan noktası, hedef kutusunun ALT KENARINDAN ne kadar aşağıya konsun. "
      "Birim: hedef kutusunun YÜKSEKLİĞİ (%100 = bir maket boyu aşağı).\n\n"
@@ -796,11 +787,21 @@ AYAR_TANIM_NISAN = [
 
 # Otonom Ateşleme Ayarları
 OTONOM_DWELL_SURE = 0.5  # sn (Hedef bu kadar süre merkezde kalırsa lazer açılır)
-# sn: otonom ates turu. BALONDA TAAHHUT (24.09 saha, bkz. _otonom_ates_kontrol): balona
-# baslayan ates, kilit ayni balonda kaldikca bu sure boyunca KESINTISIZ surer — lazer noktasi
-# balonu modelden gizlese de. Patlayip patlamadigina lazer sondukten sonra bakilir
-# (balon_takip: geri gelmezse imha, gelirse yeniden ates). 1 sn %55 guc patlatmadi -> 2 sn.
-OTONOM_ATES_SURE = 2.0
+
+
+def otonom_ates_suresi():
+    """Otonom ates turu (sn) — ayardan CANLI okunur (varsayilan 2 sn, lazer kutucugundaki
+    kaydiricidan 0.5-5 sn; tek kaynak algi.AYAR). BALONDA TAAHHUT (24.09 saha, bkz.
+    _otonom_ates_kontrol): balona baslayan ates, kilit ayni balonda kaldikca bu sure boyunca
+    KESINTISIZ surer — lazer noktasi balonu modelden gizlese de. Patlayip patlamadigina
+    lazer sondukten sonra bakilir (balon_takip: geri gelmezse imha, gelirse yeniden ates)."""
+    return float(algi.AYAR.get("otonom_ates_sure", algi.VARSAYILAN_AYAR["otonom_ates_sure"]))
+
+
+# Lazer kutucugunun (ATEŞ'in ⚙'i) kendi ayarlari: aninda uygulanir ve ayarlar.json'a
+# HEMEN yazilir. Goruntu isleme panelinin "Sıfırla"si bunlara dokunmaz — resim ayarlarini
+# sifirlayan operator lazer kalibrasyonunu kaybetmesin.
+LAZER_KUTUCUK_AYARLARI = ("otonom_ates_sure", "lazer_ofset_x", "lazer_ofset_y")
 # Atisi tamamlanan hedef bu sure YENIDEN secilmez (maket balonu patlasa da rayda gorunur).
 # ⚠ Yalniz O HEDEF yasaklanir; diger hedeflere hemen kilitlenilir (algi.hedef_vuruldu).
 # Eskiden bu sure boyunca HICBIR hedefe kilitlenilmiyordu — Asama 2'de tur basina 3 hedef.
@@ -2177,7 +2178,8 @@ class MainWindow(QMainWindow):
         return True
 
     def _ayar_sifirla(self):
-        algi.ayar_guncelle(**algi.VARSAYILAN_AYAR)
+        algi.ayar_guncelle(**{k: v for k, v in algi.VARSAYILAN_AYAR.items()
+                              if k not in LAZER_KUTUCUK_AYARLARI})
         for key, (sl, tip) in self.ayar_sliderlar.items():
             sl.setValue(self._slider_birimi(algi.AYAR[key], tip))
 
@@ -2488,6 +2490,10 @@ class MainWindow(QMainWindow):
         if ad == "lazer":
             self._lazer_taslak_ayarla(self.lazer_guc)
             self._lazer_vazgec()
+            t = getattr(self, "_lazer_kayit_timer", None)
+            if t is not None and t.isActive():   # bekleyen sure/nisangah kaydi kaybolmasin
+                t.stop()
+                self._lazer_ayarlari_kaydet()
         else:
             self._bolge_kutulari_yenile()
 
@@ -2621,7 +2627,7 @@ class MainWindow(QMainWindow):
         self.lazer_ayar_btn_oto.setObjectName("lazerayar")
         self.lazer_ayar_btn_oto.setFixedSize(T.ATES_BOY - 10, T.ATES_BOY - 10)
         self.lazer_ayar_btn_oto.setCursor(Qt.PointingHandCursor)
-        self.lazer_ayar_btn_oto.setToolTip("Lazer gücü")
+        self.lazer_ayar_btn_oto.setToolTip("Lazer: güç · otonom atış süresi · nişangah")
         self.lazer_ayar_btn_oto.setFocusPolicy(Qt.NoFocus)
         self.lazer_ayar_btn_oto.clicked.connect(self._lazer_sayfasi_ac)
         ic.addWidget(self.lazer_ayar_btn_oto, 0, Qt.AlignVCenter)
@@ -2640,7 +2646,7 @@ class MainWindow(QMainWindow):
         self.lazer_ayar_btn.setObjectName("lazerayar")
         self.lazer_ayar_btn.setFixedSize(T.ATES_BOY - 10, T.ATES_BOY - 10)
         self.lazer_ayar_btn.setCursor(Qt.PointingHandCursor)
-        self.lazer_ayar_btn.setToolTip("Lazer gücü")
+        self.lazer_ayar_btn.setToolTip("Lazer: güç · otonom atış süresi · nişangah")
         self.lazer_ayar_btn.setFocusPolicy(Qt.NoFocus)
         self.lazer_ayar_btn.clicked.connect(self._lazer_sayfasi_ac)
         ic.addWidget(self.lazer_ayar_btn, 0, Qt.AlignVCenter)
@@ -2716,8 +2722,191 @@ class MainWindow(QMainWindow):
         alt.addStretch(1)
         alt.addWidget(self.lazer_kaydet_btn)
         v.addLayout(alt)
+        self._ates_suresi_bolumu(v)
+        self._nisangah_bolumu(v)
+        # Oklar basili tutulunca her adimda dosyaya yazilmasin: son degisiklikten 0.5 sn sonra.
+        self._lazer_kayit_timer = QTimer(self)
+        self._lazer_kayit_timer.setSingleShot(True)
+        self._lazer_kayit_timer.setInterval(500)
+        self._lazer_kayit_timer.timeout.connect(self._lazer_ayarlari_kaydet)
         self._lazer_taslak_ayarla(self.lazer_guc)
         return sayfa
+
+    # ---- lazer kutucugu: otonom ates suresi + nisangah (25.09 kullanici istegi) ----
+    # Guc (yukarisi) KARTA gider -> taslak + onay. Bu ikisi PC'de kalir -> ANINDA uygulanir
+    # ve ayarlar.json'a yazilir (nisangahi oynatirken ekranda gorebilmek sart).
+    def _ates_suresi_bolumu(self, v):
+        gb = QLabel("OTONOM ATIŞ SÜRESİ")
+        gb.setObjectName("ayargrup")
+        gb.setToolTip("Otonom modda nişan oturunca lazer bu kadar açık kalır (balon lazer "
+                      "altında görünmese de sürer). Varsayılan 2 sn: 1 sn %55 güçte balonu "
+                      "patlatmadı. Anında uygulanır, bir sonraki atıştan geçerli, kaydedilir.")
+        ust = QHBoxLayout()
+        ust.addWidget(gb, 1)
+        self.ates_sure_lbl = QLabel()
+        self.ates_sure_lbl.setObjectName("ayardeg")
+        ust.addWidget(self.ates_sure_lbl, 0, Qt.AlignBottom)
+        v.addLayout(ust)
+        alt, ust_sinir = algi.AYAR_SINIR["otonom_ates_sure"]
+        self.ates_sure_sl = QSlider(Qt.Horizontal)
+        self.ates_sure_sl.setObjectName("ayarsl")
+        self.ates_sure_sl.setMinimum(int(round(alt * 10)))
+        self.ates_sure_sl.setMaximum(int(round(ust_sinir * 10)))
+        self.ates_sure_sl.setSingleStep(1)                   # 0.1 sn
+        self.ates_sure_sl.setPageStep(5)
+        self.ates_sure_sl.setFocusPolicy(Qt.NoFocus)         # ok tuslari gimbal'da kalsin
+        self.ates_sure_sl.oneri_val = int(round(algi.VARSAYILAN_AYAR["otonom_ates_sure"] * 10))
+        self.ates_sure_sl.setValue(int(round(otonom_ates_suresi() * 10)))
+        self.ates_sure_sl.valueChanged.connect(self._ates_suresi_ayarla)
+        v.addWidget(self.ates_sure_sl)
+        self._ates_suresi_yaz()
+
+    def _ates_suresi_ayarla(self, onda):
+        """Kaydirici (0.1 sn birim) -> ayar. Suren atis turunu degistirmez (tur basinda okunur)."""
+        algi.ayar_guncelle(otonom_ates_sure=onda / 10.0)
+        self._ates_suresi_yaz()
+        self._lazer_kayit_iste()
+
+    def _ates_suresi_yaz(self):
+        onda = int(round(otonom_ates_suresi() * 10))
+        lbl = getattr(self, "ates_sure_lbl", None)
+        if lbl is not None:
+            lbl.setText(f"{onda / 10:.1f} sn")
+        sl = getattr(self, "ates_sure_sl", None)
+        if sl is not None:
+            if sl.value() != onda:
+                sl.blockSignals(True)
+                sl.setValue(onda)
+                sl.blockSignals(False)
+            if hasattr(sl, "setStyleSheet"):
+                self._slider_stil_guncelle(sl, onda, lbl)
+
+    def _nisangah_bolumu(self, v):
+        gb = QLabel("NİŞANGAH")
+        gb.setObjectName("ayargrup")
+        ipucu = ("Otonom takip hedefi bu noktaya getirir; ekrandaki kırmızı artı burasıdır.\n\n"
+                 "KALİBRASYON: Manuel modda lazeri bir hedefe tutun, artıyı oklarla lazer "
+                 "noktasının TAM üstüne getirin. 1 tık = kamera karesinde 1 piksel; basılı "
+                 "tutunca sürekli kayar. Zoom açıkken daha hassas görülür.\n\n"
+                 "Anında uygulanır ve kaydedilir. Otonom BAŞLADIKTAN sonra değişmez.")
+        gb.setToolTip(ipucu)
+        ust = QHBoxLayout()
+        ust.addWidget(gb, 1)
+        self.nisangah_lbl = QLabel()
+        self.nisangah_lbl.setObjectName("ayardeg")
+        self.nisangah_lbl.setToolTip(ipucu)
+        ust.addWidget(self.nisangah_lbl, 0, Qt.AlignBottom)
+        v.addLayout(ust)
+        en, boy = 52, 28
+        pad = QWidget()
+        gl = QGridLayout(pad)
+        gl.setContentsMargins(0, 0, 0, 0)
+        gl.setSpacing(4)
+        self.nisangah_btns = {}
+        for ad, metin, satir, kolon, dx, dy in (("up", "▲", 0, 1, 0, -1), ("left", "◀", 1, 0, -1, 0),
+                                                ("right", "▶", 1, 2, 1, 0), ("down", "▼", 2, 1, 0, 1)):
+            b = QPushButton(metin)
+            b.setStyleSheet(T.dpad_stil(en=en, boy=boy))
+            b.setFocusPolicy(Qt.NoFocus)      # Space (ates tusu) odakli dugmeye basmasin
+            b.setCursor(Qt.PointingHandCursor)
+            b.setToolTip(ipucu)
+            b.setAutoRepeat(True)             # basili tut = surekli
+            b.setAutoRepeatDelay(350)
+            b.setAutoRepeatInterval(60)
+            b.clicked.connect(lambda _=False, x=dx, y=dy: self._nisangah_kaydir(x, y))
+            gl.addWidget(b, satir, kolon, Qt.AlignCenter)
+            self.nisangah_btns[ad] = b
+        sifir = QPushButton("SIFIR")
+        sifir.setStyleSheet(T.dpad_stil(merkez=True, en=en, boy=boy))
+        sifir.setFocusPolicy(Qt.NoFocus)
+        sifir.setCursor(Qt.PointingHandCursor)
+        sifir.setToolTip("Nişangahı kare merkezine döndür (ofset 0, 0)")
+        sifir.clicked.connect(self._nisangah_sifirla)
+        gl.addWidget(sifir, 1, 1, Qt.AlignCenter)
+        self.nisangah_btns["sifir"] = sifir
+        satir = QHBoxLayout()
+        satir.addStretch(1)
+        satir.addWidget(pad)
+        satir.addStretch(1)
+        v.addLayout(satir)
+        self._nisangah_yaz()
+
+    def _kare_boyutu(self):
+        """Son kameranin karesi (W, H) — nisangah pikseli bu karenin pikselidir."""
+        return getattr(self, "_kare_wh", None) or (1280, 720)
+
+    def _nisangah_px(self):
+        W, H = self._kare_boyutu()
+        return (int(round(float(algi.AYAR.get("lazer_ofset_x", 0.0)) * W)),
+                int(round(float(algi.AYAR.get("lazer_ofset_y", 0.0)) * H)))
+
+    def _nisangah_kaydir(self, dx, dy):
+        """Nisangahi (otonom takibin lazer noktasi) KAMERA KARESI pikseliyle kaydirir.
+        Deger kare ORANI olarak saklanir (cozunurluk degisse de ayni noktayi gosterir).
+        Otonom basladiysa degismez (_manuel_hareket_izni: kontrol yetkisi otonomda)."""
+        if not self._manuel_hareket_izni():
+            self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;Otonomda nişangah '
+                                f'değişmez — önce OTONOMU DURDUR')
+            return False
+        W, H = self._kare_boyutu()
+        x, y = self._nisangah_px()
+        algi.ayar_guncelle(lazer_ofset_x=(x + dx) / W, lazer_ofset_y=(y + dy) / H)
+        self._nisangah_yaz()
+        self._lazer_kayit_iste()
+        return True
+
+    def _nisangah_sifirla(self):
+        if not self._manuel_hareket_izni():
+            return self._nisangah_kaydir(0, 0)             # ayni uyari
+        algi.ayar_guncelle(lazer_ofset_x=0.0, lazer_ofset_y=0.0)
+        self._nisangah_yaz()
+        self._lazer_kayit_iste()
+        return True
+
+    def _nisangah_yaz(self):
+        x, y = self._nisangah_px()
+
+        def yon(d, arti, eksi):
+            return f"{abs(d)} {arti if d > 0 else eksi}"
+        parca = ([yon(x, "sağ", "sol")] if x else []) + ([yon(y, "aşağı", "yukarı")] if y else [])
+        lbl = getattr(self, "nisangah_lbl", None)
+        if lbl is not None:
+            lbl.setText(" · ".join(parca) + " px" if parca else "merkez")
+        izin = self._manuel_hareket_izni()
+        for b in getattr(self, "nisangah_btns", {}).values():
+            b.setEnabled(izin)
+
+    def _lazer_kayit_iste(self):
+        t = getattr(self, "_lazer_kayit_timer", None)
+        if t is not None:
+            t.start()                         # basili tutarken son adimdan 0.5 sn sonra
+        else:
+            self._lazer_ayarlari_kaydet()
+
+    def _lazer_ayarlari_kaydet(self):
+        """Lazer kutucugunun ayarlarini ayarlar.json'a yazar — YALNIZ bu anahtarlar
+        (goruntu isleme panelinin kaydedilmemis degisiklikleri dosyaya sizmasin). Yazim
+        atomik: yarim kalan dosyayi _ayar_yukle yok sayar, TUM ayarlar kaybolurdu."""
+        yol = self._ayar_dosya()
+        try:
+            with open(yol, encoding="utf-8") as f:
+                d = json.load(f)
+            if not isinstance(d, dict):
+                d = {}
+        except Exception:
+            d = {}
+        for k in LAZER_KUTUCUK_AYARLARI:
+            d[k] = algi.AYAR[k]
+        try:
+            gecici = yol + ".tmp"
+            with open(gecici, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=2)
+            os.replace(gecici, yol)
+            return True
+        except Exception as e:
+            self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;Lazer ayarı '
+                                f'kaydedilemedi: {e}')
+            return False
 
     def _lazer_taslak_ayarla(self, deger):
         """Sayfadaki TASLAK guc (karta gitmez). Kaydirici/kademe/etiket esitlenir."""
@@ -2738,6 +2927,8 @@ class MainWindow(QMainWindow):
             return
         self._lazer_taslak_ayarla(self.lazer_guc)       # her acilis KAYITLI degerle
         self._lazer_vazgec()
+        self._ates_suresi_yaz()                         # sure/nisangah: guncel ayar + mod izni
+        self._nisangah_yaz()
         self._pencere_ac("lazer")
 
     def _lazer_sayfasi_kapat(self):
@@ -4668,6 +4859,7 @@ class MainWindow(QMainWindow):
             # disina tasmaz. Tum cizimler (kutu, balon, nisan) ayni (ox, oy, olcek)
             # donusumuyle yapilir — zoom 1x'te eskisiyle birebir aynidir.
             W, H = qimg.width(), qimg.height()
+            self._kare_wh = (W, H)          # nisangah oklari bu karenin pikseliyle kaydirir
             lazer_x = W / 2 + algi.AYAR.get("lazer_ofset_x", 0.0) * W
             lazer_y = H / 2 + algi.AYAR.get("lazer_ofset_y", 0.0) * H
             z = self._zoom_katsayi()
@@ -4813,14 +5005,22 @@ class MainWindow(QMainWindow):
             # Kalibrasyon yapilmadiysa (ofset=0) davranis eskisiyle aynidir.
             mcx = (lazer_x - ox) * scale_x
             mcy = (lazer_y - oy) * scale_y
-            pen.setColor(QColor(255, 0, 0)) # Kirmizi
             pen.setWidth(2)
-            painter.setPen(pen)
-            painter.drawLine(QPointF(mcx - 10, mcy), QPointF(mcx + 10, mcy))
-            painter.drawLine(QPointF(mcx, mcy - 10), QPointF(mcx, mcy + 10))
-            painter.setBrush(QColor(255, 0, 0))
-            painter.drawEllipse(QPointF(mcx, mcy), 2, 2)
-            painter.setBrush(Qt.NoBrush) # Reset brush
+            if getattr(self, "_acik_pencere", None) == "lazer":
+                # KALIBRASYON (lazer kutucugu acik): ortasi BOS yesil arti — kirmizi lazer
+                # noktasi kirmizi artinin ortasinda kayboluyordu, ustune oturtulamiyordu.
+                pen.setColor(QColor(0, 255, 140))
+                painter.setPen(pen)
+                for x1, y1, x2, y2 in ((-16, 0, -5, 0), (5, 0, 16, 0), (0, -16, 0, -5), (0, 5, 0, 16)):
+                    painter.drawLine(QPointF(mcx + x1, mcy + y1), QPointF(mcx + x2, mcy + y2))
+            else:
+                pen.setColor(QColor(255, 0, 0)) # Kirmizi
+                painter.setPen(pen)
+                painter.drawLine(QPointF(mcx - 10, mcy), QPointF(mcx + 10, mcy))
+                painter.drawLine(QPointF(mcx, mcy - 10), QPointF(mcx, mcy + 10))
+                painter.setBrush(QColor(255, 0, 0))
+                painter.drawEllipse(QPointF(mcx, mcy), 2, 2)
+                painter.setBrush(Qt.NoBrush) # Reset brush
 
             if z > 1.001:                          # zoom acik: operator bilsin
                 etiket = f"ZOOM {z:.1f}×"
@@ -4923,7 +5123,7 @@ class MainWindow(QMainWindow):
         # tarafi "Dusman" okunan hedefi kilitler (algi._taraf_belirle).
         # HAYALET kutu hala ates ACTIRMAZ: gorunmeyen hedefe ates BASLAMAZ.
         # BALONDA ATES TAAHHUDU (24.09 saha, kullanici istegi): BASLAMIS ates ayni balon
-        # kilitli kaldikca OTONOM_ATES_SURE boyunca hayalette de surer. Lazer noktasi balona
+        # kilitli kaldikca otonom_ates_suresi() boyunca hayalette de surer. Lazer noktasi balona
         # degince model balonu tanimiyor: 21:27 kaydinda uzak balona 37 atisin 37'si ~0.2
         # sn'de (lazer yandiktan 3 kare sonra) "hedef gorunmuyor" diye kesildi, balon hic
         # isinmadi. Taahhut YALNIZ hayalet kesmesini kaldirir; E-Stop, mod/asama, atisa
@@ -4961,15 +5161,16 @@ class MainWindow(QMainWindow):
             gecen = simdi - self._otonom_hedef_merkezde_t
             if gecen >= OTONOM_DWELL_SURE and not self._otonom_ates_aktif:
                 # Dwell suresi doldu -> ATESI BASLAT
+                sure = otonom_ates_suresi()      # tur basinda okunur: suren turu degistirmez
                 self._otonom_ates_aktif = True
-                self._otonom_ates_bitis_t = simdi + OTONOM_ATES_SURE
+                self._otonom_ates_bitis_t = simdi + sure
                 self._otonom_ates_id = a.get("id")
                 if not self.fire_btn.isChecked():
                     self.fire_btn.setChecked(True)
                     self._ates_bas()
                 if a.get("balon"):
                     # Imha dogrulamasi: bu andan sonra kaybolan balon = patladi.
-                    balon_takip.ates_basladi(lazer_gercek, sure=OTONOM_ATES_SURE)
+                    balon_takip.ates_basladi(lazer_gercek, sure=sure)
                     if lazer_gercek and self.fire_btn.isChecked():
                         self._takip_korlugu(self._otonom_ates_bitis_t)
             elif not self._otonom_ates_aktif:

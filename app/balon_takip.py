@@ -174,9 +174,12 @@ DIKEY_KAT = 4.0
 GOVDE_DEVIR_KARE = 3     # kilitli izin altinda bu kadar kare balon gorulurse kilit ona gecer
 
 # ---- Ates / imha ----
-ATES_SURE_S = 2.0        # varsayilan ates turu (arayuz OTONOM_ATES_SURE'yi ates_basladi'ya verir)
-IMHA_S = 3.0             # ates basladiktan sonra bu sure icinde kaybolan balon = imha
-#                          (ates turu + kamera gecikmesi + kayip siniri; tur uzayinca buyudu)
+# varsayilan ates turu; arayuz o anki ayari (lazer kutucugu, 0.5-5 sn) ates_basladi'ya verir
+ATES_SURE_S = algi.VARSAYILAN_AYAR["otonom_ates_sure"]
+# Ates basladiktan sonra (ATES TURU + bu pay) icinde kaybolan balon = imha (kamera gecikmesi
+# + kayip siniri). Tur ayarlanabilir oldu (25.09): sabit 3 sn, 4 sn'lik turun 3.5. sn'sinde
+# patlayan balonu "imha" saymazdi.
+IMHA_PAY_S = 1.0
 AZAMI_ATES = 3           # patlamayan balona (gercek lazerle) en cok bu kadar ates turu
 YASAK_S = 10.0           # sonra bu kadar yeniden secilmez (arayuz OTONOM_BEKLEME_SURE ile ayni)
 # ---- Kart tasima: balon KAYIP_S'den uzun kaybolup AYNI YERDE yeniden bulunursa ----
@@ -668,7 +671,7 @@ def _renkle_devam(frame, simdi):
         if (iz["goruldu"] or not iz["dogrulandi"]
                 or simdi - iz["t_model"] > RENK_AZAMI_S):
             continue
-        if iz["ates_t"] is not None and simdi - iz["ates_t"] <= IMHA_S:
+        if iz["ates_t"] is not None and simdi - iz["ates_t"] <= _imha_suresi(iz):
             continue                     # ates altinda: patlarsa KAYBOLSUN (imha); govde
             #                              parcasi / balon artigi izlenip lazer bosa yanmasin
         s = _boy(iz["box"])
@@ -695,6 +698,11 @@ def _renkle_devam(frame, simdi):
         if len(adaylar) == 1:
             _iz_guncelle(iz, {"box": adaylar[0], "conf": iz["guven"], "kaynak": "renk"}, simdi)
             alinan.append(adaylar[0])
+
+
+def _imha_suresi(iz):
+    """Ates basladiktan sonra kaybolmasi imha sayilan sure: bu balonun ates turu + pay."""
+    return iz["ates_sure"] + IMHA_PAY_S
 
 
 def _lazer_bitisi(iz):
@@ -779,7 +787,7 @@ def _eskileri_sil(simdi):
         iz = _izler.pop(iid)
         if iz["yasak_bitis"] > simdi:
             _yasak_bolgeler.append({"box": iz["box"], "bitis": iz["yasak_bitis"]})
-        if iz["ates_t"] is not None and -0.3 <= iz["t_son"] - iz["ates_t"] <= IMHA_S:
+        if iz["ates_t"] is not None and -0.3 <= iz["t_son"] - iz["ates_t"] <= _imha_suresi(iz):
             _imha_isle(iz, simdi)          # patlayan balonun karti TASINMAZ
         elif iz["kart"]["dusman"] or iz["kart"]["dost"] or iz["kart"]["tip"]:
             _kayip_kartlar.append({"box": iz["box"], "vx": iz["vx"], "vy": iz["vy"],
@@ -1290,6 +1298,19 @@ if __name__ == "__main__":
     assert a >= 0 and b[a]["id"] == ilk and not b[a].get("hayalet"),         "patlamayan balon geri gelince kimligi/kilidi degisti"
     b, a = kos(m, iki, n=int(KAYIP_S * 30) + 5)
     assert son_imha()["sayi"] == 0 and b[a]["id"] == ilk, "patlamayan balon imha sayildi"
+
+    # 8c. ATES TURU AYARLANABILIR (25.09, lazer kutucugu): 4 sn'lik turun 3.5. sn'sinde
+    #     patlayan balon da imhadir. Imha penceresi sabit 3 sn'yken sayilmiyordu.
+    sifirla()
+    b, a = kos(m, iki, n=ONAY_KARE)
+    ilk = b[a]["id"]
+    ates_basladi(True, simdi=T[0], sure=4.0)
+    b, a = kos(m, iki, n=105)                                    # 3.5 sn: model goruyor
+    b, a = kos(m, tek, n=15)                                     # patladi, tur suruyor
+    ates_bitti(simdi=T[0])
+    b, a = kos(m, tek, n=int((LAZER_GECIKME_S + KAYIP_S) * 30) + 6)
+    assert son_imha()["sayi"] == 1 and son_imha()["id"] == ilk, \
+        ("uzun ates turunda patlayan balon imha sayilmadi", son_imha())
 
     # 9. Patlamayan balon: AZAMI_ATES gercek ates turundan sonra birakilir, digerine
     #    gecilir; YASAK_S dolmadan geri secilmez. Sahte lazer turlari sayilmaz.

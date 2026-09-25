@@ -164,6 +164,11 @@ VARSAYILAN_AYAR = {
     # Kare genisligi/yuksekliginin orani (%) — cozunurlukten bagimsiz kalsin diye.
     "lazer_ofset_x": 0.0,   # + : lazer, kamera eksenine gore SAGA vuruyor
     "lazer_ofset_y": 0.0,   # + : lazer, kamera eksenine gore ASAGI vuruyor
+    # (25.09) Ikisi de lazer kutucugundaki (ATEŞ'in ⚙'i) oklarla PIKSEL PIKSEL ayarlanir.
+    # OTONOM ATES TURU (sn): dwell dolunca lazer bu kadar acik kalir; balonda hayalet
+    # kesmez (CLAUDE.md §1 kural 7 istisnasi). 24.09 saha: 1 sn %55 guc balonu
+    # patlatmadi -> 2 sn. Lazer kutucugundaki kaydiricidan ayarlanir (25.09 kullanici istegi).
+    "otonom_ates_sure": 2.0,
     # Balon nisan ofseti: nisan noktasi kutunun ALT KENARINDAN bu kadar asagi kayar,
     # birim = HEDEF KUTUSUNUN YUKSEKLIGI. Model balonu goremedigi icin (best.pt 4
     # sinif, balon YOK) balonun yeri maketten GEOMETRIK olarak kestirilir.
@@ -287,6 +292,7 @@ AYAR_SINIR = {
     "fov": (20.0, 140.0),
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
     "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
+    "otonom_ates_sure": (0.5, 5.0),
     "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60), "nisan_govde": (0, 1),
     "takip_ppd_pan": (4.0, 60.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),

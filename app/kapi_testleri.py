@@ -580,13 +580,13 @@ def test_balon_atesi_imha_dogrulamasina_bildirilir(w):
     eski = (balon_takip.ates_basladi, balon_takip.ates_tamamlandi, A.algi.hedef_vuruldu,
             balon_takip.ates_bitti)
     # 24.09 saha: tur suresi balon_takip'e gider (lazer altinda onlemleri o sure boyunca),
-    # kesis (_ates_kes) bildirilir. Sure 1 sn'de %55 guc balonu patlatmadi -> 2 sn.
-    assert A.OTONOM_ATES_SURE >= 2.0, A.OTONOM_ATES_SURE
+    # kesis (_ates_kes) bildirilir. Sure 1 sn'de %55 guc balonu patlatmadi -> 2 sn VARSAYILAN.
+    assert algi.VARSAYILAN_AYAR["otonom_ates_sure"] >= 2.0, algi.VARSAYILAN_AYAR
     balon_takip.ates_basladi = lambda g, simdi=None, sure=None: cagri.append(("basladi", g, sure))
     balon_takip.ates_tamamlandi = lambda g, simdi=None: cagri.append(("tamam", g))
     balon_takip.ates_bitti = lambda simdi=None: cagri.append(("bitti",))
     A.algi.hedef_vuruldu = lambda s, simdi=None: cagri.append(("vuruldu", s))
-    S = A.OTONOM_ATES_SURE
+    S = A.otonom_ates_suresi()
 
     def ates_turu():
         w._otonom_ates_aktif = False
@@ -606,6 +606,25 @@ def test_balon_atesi_imha_dogrulamasina_bildirilir(w):
             f"gercek lazerde balon atesi bildirilmedi / arac yasagi kullanildi: {cagri}"
         assert ("bitti",) in cagri[cagri.index(("basladi", True, S)):], \
             f"ates kesildi, balon_takip'e bildirilmedi (lazer altinda onlemleri surer): {cagri}"
+        # 25.09: sure lazer kutucugundan ayarlanir. Tur (lazerin acik kalacagi an) ve
+        # balon_takip'e giden sure (imha penceresi, lazer altinda onlemleri) onu izler;
+        # SUREN tur degismez (tur basinda okunur).
+        eski_sure = algi.AYAR["otonom_ates_sure"]
+        try:
+            algi.ayar_guncelle(otonom_ates_sure=3.5)
+            cagri.clear()
+            w._otonom_ates_aktif = False
+            _dwell_doldu(w)
+            t0 = time.time()
+            w._otonom_ates_kontrol(_balon_veri(), False)
+            assert ("basladi", True, 3.5) in cagri, f"ayarlanan sure balon_takip'e gitmedi: {cagri}"
+            assert abs(w._otonom_ates_bitis_t - t0 - 3.5) < 0.2, "atis turu ayarlanan sureyi izlemiyor"
+            bitis = w._otonom_ates_bitis_t
+            algi.ayar_guncelle(otonom_ates_sure=1.0)
+            w._otonom_ates_kontrol(_balon_veri(), False)
+            assert w._otonom_ates_aktif and w._otonom_ates_bitis_t == bitis, "suren tur degisti"
+        finally:
+            algi.ayar_guncelle(otonom_ates_sure=eski_sure)
     finally:
         (balon_takip.ates_basladi, balon_takip.ates_tamamlandi, A.algi.hedef_vuruldu,
          balon_takip.ates_bitti) = eski
@@ -629,7 +648,7 @@ def test_dost_onundeyken_otonom_ates_acilmaz(w):
 def test_balon_atesi_lazer_altinda_suruyor(w):
     """ATES TAAHHUDU (24.09 saha): lazer noktasi balona degince model balonu tanimiyor —
     21:27 kaydinda uzak balona 37 atisin 37'si ~0.2 sn'de "hedef gorunmuyor" diye kesildi,
-    balon hic isinmadi. Balona BASLAMIS ates, AYNI balon kilitli kaldikca OTONOM_ATES_SURE
+    balon hic isinmadi. Balona BASLAMIS ates, AYNI balon kilitli kaldikca otonom_ates_suresi()
     boyunca hayalette de surer; takip o surede kaybi "hedef gitti" saymaz (korluk).
     Kesenler aynen keser: dost engeli (hayalette de), kilidin dusmesi, kilidin baska
     balona gecmesi, E-Stop. Hayalette ates BASLAMAZ; arac hedefinde hayalet yine keser."""
@@ -1315,6 +1334,66 @@ def test_kol_cubugu_yorunge_ve_birakinca_fren():
         A.time = gercek
 
 
+def test_lazer_kutucugu_sure_ve_nisangah(w):
+    """25.09 kullanici istegi: (1) otonom lazer suresi lazer kutucugundaki (ATEŞ'in ⚙'i)
+    kaydiricidan; (2) nisangah — otonom takibin lazer noktasi — oklarla PIKSEL PIKSEL
+    (eski %1 adimli kaydirici 13 px atliyordu). Ikisi de aninda uygulanir, ayarlar.json'a
+    YALNIZ kendi anahtarlariyla yazilir; otonom basladiysa nisangah degismez; goruntu
+    panelinin Sifirla'si lazer kalibrasyonunu silmez."""
+    import json
+    import nisan
+    yol = os.path.join(tempfile.mkdtemp(), "ayarlar.json")
+    with open(yol, "w", encoding="utf-8") as f:
+        json.dump({"cozunurluk": 960, "kd": 0.1}, f)
+    w._ayar_dosya = lambda: yol                  # GERCEK ayarlar.json'a yazilmasin
+    eski = dict(algi.AYAR)
+    try:
+        algi.ayar_guncelle(lazer_ofset_x=0.0, lazer_ofset_y=0.0, otonom_ates_sure=2.0)
+        w._kare_wh = (1280, 720)
+        w._lazer_sayfasi_ac()
+        assert w._acik_pencere == "lazer" and w.nisangah_lbl.text() == "merkez"
+        # (1) sure: kaydirici 0.1 sn birimli
+        w.ates_sure_sl.setValue(35)
+        assert A.otonom_ates_suresi() == 3.5 and w.ates_sure_lbl.text() == "3.5 sn"
+        # (2) nisangah: 1 tik = kamera karesinde 1 px
+        for _ in range(3):
+            w.nisangah_btns["up"].click()
+        for _ in range(2):
+            w.nisangah_btns["right"].click()
+        assert abs(algi.AYAR["lazer_ofset_x"] * 1280 - 2) < 1e-6, algi.AYAR["lazer_ofset_x"]
+        assert abs(algi.AYAR["lazer_ofset_y"] * 720 + 3) < 1e-6, algi.AYAR["lazer_ofset_y"]
+        assert w.nisangah_lbl.text() == "2 sağ · 3 yukarı px", w.nisangah_lbl.text()
+        # otonom takip BU noktaya kilitlenir: artinin ustundeki hedefte hata 0
+        n = nisan.PDNisanci()
+        n.adim((642, 357), (1280, 720))
+        assert max(abs(v) for v in n.son_hata_px) < 1e-6, n.son_hata_px
+        n.adim((640, 360), (1280, 720))
+        assert abs(n.son_hata_px[0] + 2) < 1e-6 and abs(n.son_hata_px[1] - 3) < 1e-6, n.son_hata_px
+        # kayit: kutucuk kapaninca bekleyen yazilir; dosyadaki diger ayarlar KORUNUR
+        w._pencere_kapat()
+        with open(yol, encoding="utf-8") as f:
+            d = json.load(f)
+        assert d["cozunurluk"] == 960 and d["kd"] == 0.1, d
+        assert d["otonom_ates_sure"] == 3.5 and round(d["lazer_ofset_x"] * 1280) == 2 \
+            and round(d["lazer_ofset_y"] * 720) == -3, d
+        # goruntu isleme panelinin Sifirla'si lazer kalibrasyonuna dokunmaz
+        w._ayar_sifirla()
+        assert A.otonom_ates_suresi() == 3.5 and round(algi.AYAR["lazer_ofset_x"] * 1280) == 2
+        # OTONOM BASLADI: kontrol yetkisi otonomda — nisangah degismez
+        _otonomu_baslat(w)
+        w._lazer_sayfasi_ac()
+        assert not w.nisangah_btns["up"].isEnabled(), "otonomda nisangah oklari acik"
+        assert w._nisangah_kaydir(0, -1) is False and round(algi.AYAR["lazer_ofset_y"] * 720) == -3
+        w._otonom_baslat()                         # durdur -> hazirlik: yeniden ayarlanir
+        w._lazer_sayfasi_ac()
+        assert w.nisangah_btns["up"].isEnabled()
+        w.nisangah_btns["sifir"].click()
+        assert algi.AYAR["lazer_ofset_x"] == 0.0 and algi.AYAR["lazer_ofset_y"] == 0.0
+        assert w.nisangah_lbl.text() == "merkez"
+    finally:
+        algi.ayar_guncelle(**eski)
+
+
 GERCEK_KART_TESTLERI = [
     test_estop_hareketi_keser,
     test_estop_atesi_keser,
@@ -1335,6 +1414,7 @@ GERCEK_KART_TESTLERI = [
     test_balon_atesi_imha_dogrulamasina_bildirilir,
     test_dost_onundeyken_otonom_ates_acilmaz,
     test_balon_atesi_lazer_altinda_suruyor,
+    test_lazer_kutucugu_sure_ve_nisangah,
 ]
 TAKIP_TESTLERI = [
     test_tek_kart_lazer_ve_olu_adam_anahtari,

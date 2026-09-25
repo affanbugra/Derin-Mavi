@@ -173,6 +173,12 @@ kullanılmıyor. Güç ile ateş ayrı şeylerdir: kart `G<yüzde>` ile "ne kada
 `L1/L0` ile "ne zaman"ı söyler — bu yüzden **ateş sürerken güç değiştirilebilir.**
 ⚠ Düşük güç *dwell* süresini uzatır (%40'ta balon ~2,5 kat geç patlar) ve süre puana bağlıdır.
 
+**Lazer kutucuğu (ATEŞ / BAŞLAT butonundaki ⚙):** güce ek olarak
+**Otonom atış süresi** (0.5–5 sn, varsayılan 2 sn) ve **Nişangah** okları. Nişangah, otonom
+takibin lazer noktasıdır: Manuel modda lazeri bir hedefe tutun, yeşil artıyı oklarla (1 tık
+= 1 piksel, basılı tutunca sürekli) lazer noktasının üstüne getirin. Süre ve nişangah anında
+uygulanır ve `ayarlar.json`'a kaydedilir; otonom başladıktan sonra nişangah değişmez.
+
 **Motor hız düzeyi (3 kademe):** arayüzdeki *MOTOR HIZI* kartından seçilir (hem Manuel hem
 Otonom modda) — Yavaş 15°/s (hassas nişan) · Normal 40°/s · Hızlı 75°/s (geniş tarama).
 Tavanı yatay eksen belirler: 98.4 step/derece nedeniyle 75°/s bile ~7400 step/sn demektir.

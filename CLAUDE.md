@@ -49,7 +49,7 @@ Bunların her biri **gerçekten yaşanmış bir hatanın** karşılığıdır. D
 | 4 | **Lazer ölü adam anahtarı**: 250 ms'de bir `L1` tazelemesi; kart 1 sn tazeleme almazsa lazeri KENDİ keser (`protokol.ATES_TAZELE_MS` / `ATES_ZAMAN_ASIMI_MS`, firmware ile aynı). Tazeleme 1 sn kesildiyse PC lazeri **kendiliğinden yeniden yakmaz**. Kesme (`L0`/`STOP`) her karta ve her porttan gider. | "Kes" komutunun gideceğine güvenilemez: kablo koptuğunda o komut zaten gidemez. Donan arayüz geri gelince eski tazeleme lazeri yeniden yakıyordu (24.09 testte yakalandı). |
 | 5 | **Mekanik sınırlar iki tarafta da uygulanır** (Python + firmware). Tek tarafa güvenilmez. | Seri monitörden elle `T500` yazan biri mekaniği kırabilir. |
 | 6 | **Ateş tek kapıdan; ACİL DURDUR kısayolu aç/kapa ama korumalı.** Ateş: `Space`+`B` birlikte, kol `L2`+`R2` birlikte (tek dokunuş, bekleme yok; tek tuş boş) — hepsi `_ates_bas`. ACİL DURDUR: `Esc`, kol `Options/Start` (24.09; Backspace ve Daire boş). İlk basış kurar, **tekrar basış DEVAM** (24.09 kullanıcı kararı) — yalnız kurulduktan `ESTOP_KISAYOL_BEKLEME_S` (1 sn) sonra; klavye otomatik tekrarı ve kolda basılı tutma sayılmaz. İki yön de `_estop_bas`'tan geçer: donanım butonu basılıyken devam yok. | Kol eskiden Options'ın ikinci basışında acil durdurmayı **anında** kaldırıyordu (panikte çift basış). |
-| 7 | **Otonom ateş yalnız o karede GERÇEKTEN görülen hedefte BAŞLAR** — hayalet kutu / eski sınıf belleği yetmez; A3'te yalnız kartı "Düşman" olan (renk kanıtı şartı 23.09 takım kararıyla kalktı). Başlamış ateşi kesen: E-Stop, atışa yasak açı, dost/menzil engeli, kilidin düşmesi ya da başka hedefe geçmesi. **Balonda istisna (24.09, kullanıcı isteği):** ateş `OTONOM_ATES_SURE` (2 sn) sürer, hayalet kesmez — lazer noktası modeli kör ediyor. Araçta hayalet keser. | Aşama-3'te dost vurmak −10 puan. Lazer altındaki balona 37 atışın 37'si 0.2 sn'de kesildi. |
+| 7 | **Otonom ateş yalnız o karede GERÇEKTEN görülen hedefte BAŞLAR** — hayalet kutu / eski sınıf belleği yetmez; A3'te yalnız kartı "Düşman" olan (renk kanıtı şartı 23.09 takım kararıyla kalktı). Başlamış ateşi kesen: E-Stop, atışa yasak açı, dost/menzil engeli, kilidin düşmesi ya da başka hedefe geçmesi. **Balonda istisna (24.09, kullanıcı isteği):** ateş `otonom_ates_suresi()` (varsayılan 2 sn; 25.09'dan beri lazer kutucuğunda 0.5–5 sn) sürer, hayalet kesmez — lazer noktası modeli kör ediyor. Araçta hayalet keser. | Aşama-3'te dost vurmak −10 puan. Lazer altındaki balona 37 atışın 37'si 0.2 sn'de kesildi. |
 | 8 | **Sahte cihaz (mock) asla "hazır/yeşil" görünmez.** Alt çubukta sarı + "kart takılı değil". | Operatör kablosuz sistemi hazır sanıyordu. |
 | 9 | **Merkeze alma kademelidir** (motor tavan hızıyla), anlık sıfırlama yok; yön komutu veya E-Stop dönüşü keser. | Ekran sıfıra zıplarken gimbal yolda kalıyor, açı referansı kopuyordu. |
 | 10 | **Ayar varsayılanları tek kaynaktan** (`algi.VARSAYILAN_AYAR`). Aynı sabiti ikinci bir yere yazma. | Üç yerde tutulan kp/kd değerleri birbirinden sapmıştı. |
@@ -239,7 +239,7 @@ boyanınca 1904 karede kilit 0 — ama **gerçek mavi maketle denenmedi.**
 | Lazer | **Tek kart (24.09):** S3 GPIO 18, firmware yüklendi ve kartla doğrulandı (LZR1 yayını, STOP/START, güç) — **lazer takılı değilken; yakılarak denenmedi.** Doğrulanmadı: PWM frekansı sürücüyle uyumlu mu, 3.3 V/5 V mantık seviyesi, GPIO 18 ↔ GND 10 kΩ pull-down. Acil buton GPIO 15'e henüz bağlanmadı |
 | Balon modeli | **Kuruldu (24.09)**, kendi kameramızın koridor videosunda ölçüldü (ayrıntı: `git log -p CLAUDE.md`). Menzil içinde (balon ≥16 px) A2/A3 kilidi %96–100. ⚠ **Model, altında drone asılı ~18 m'deki balonu hiç görmüyor** (1080p'de de; 604–1145. kareler): bu videonun kareleri etiketlenip `bestb2` yeniden eğitilmeli. Araç modeli (`best.pt`) el yapımı drone/F16'yı neredeyse hiç okumuyor → A3 kartında **tip çoğunlukla yok**: operatör "Aranan" tipi seçerse tipsiz balon kilitlenmez; balon çapı girilirse tipsiz balona yalnız 10–15 m'de ateş (ortak bant). Hareketli namluda (bulanıklık) ve açık havada denenmedi. ⚠ 24.09 akşam: uzaktaki **pembe, çubuğa bağlı** balonları hiç tanımıyor (kayıtta 10 sn tespit 0; 96–320 px her pencere boyunda 48 denemede ≤7) — pencere ayarı değil, eğitim verisi. ⚠ **25.09 (15–17 m, balon 11–12 px): direğe/makete bitişik balonları (Şekil 3 dizilişi) hiç görmüyor**, serbest asılı olanı görüyor; ~25 px'te üçünü de. Yeniden eğitim verisi: `app/veri_toplama/20260925_172654` (yerel, yüzlü — repoya girmez) |
 | Aşama-1 zarf sırası | Arayüzde sürükle-sırala var ama **hiçbir yer okumuyor**; ceza mantığı yok |
-| Dwell (lazeri hedefte tutma) | Balonda 2 sn ateş taahhüdü + körlükte yol izleme (24.09, §8) — **donanımda denenmedi** |
+| Dwell (lazeri hedefte tutma) | Balonda ateş taahhüdü (varsayılan 2 sn, lazer kutucuğundan ayarlanır) + körlükte yol izleme (24.09, §8) — **donanımda denenmedi** |
 | Mesafe ölçümü | **Balon çapından** kestirim (24.09): ⚙ "Balon çapı (cm)" sahada cetvelle ölçülüp girilmeli, 10 m'de etiketle doğrulanmalı. Girilmezse (0) A3 menzil kontrolü YOK. Çap yanlışsa A3'te hiç ateş edilmeyebilir |
 | Homing | Gerçek limit switch yok; `home()` = "0°'a dön" |
 | Doküman tutarsızlığı | `FINAL_ENTEGRASYON.md` hâlâ "pan ±90 yapısal" diyor; artık kodda sınır yok (23.09) |
@@ -254,6 +254,18 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **25.09.2026 · final_v12 (kullanıcı isteği: lazer süresi + nişangah ayarı)** — ATEŞ'in
+  ⚙'i ile açılan lazer kutucuğuna iki bölüm: (1) **Otonom atış süresi** kaydırıcısı 0.5–5 sn
+  (0.1 sn adım, varsayılan 2 sn `algi.VARSAYILAN_AYAR["otonom_ates_sure"]`); tur başında
+  okunur, süren turu değiştirmez. `balon_takip` imha penceresi artık tur + 1 sn (sabit 3 sn
+  4 sn'lik turda patlayan balonu saymıyordu). (2) **Nişangah** okları: 1 tık = kamera
+  karesinde 1 px, basılı tutunca sürekli; kutucuk açıkken artı ortası boş yeşil çizilir
+  (kırmızı lazer noktası görünsün). Otonom takip ve ateş kapısı bu noktayı kullanır (değişen
+  yalnız arayüz; `lazer_ofset_x/y` kare oranı olarak kalır). Eski %1 adımlı panel
+  kaydırıcıları (13 px atlıyordu) kaldırıldı. Güç kartın ayarı olduğu için taslak + onay;
+  süre ve nişangah anında uygulanır ve `ayarlar.json`'a yalnız kendi anahtarlarıyla yazılır
+  (atomik). Otonom BAŞLADIKTAN sonra nişangah değişmez; görüntü panelinin Sıfırla'sı bu
+  üçüne dokunmaz. 8 mutasyonun 8'i yakalandı. **Donanımda denenmedi.**
 - **25.09.2026 · final_v12 (saha: 15–17 m'de balonlar tanınmıyor)** — 17:26 oturumu, standda
   3 balon ~11–12 px. (1) **Pencere boyu:** model büyütmeye duyarlı; 11 px balon 128 px
   pencerede %61, 80–96 px'te %98. İz penceresi tabanı 128 → 80; leke turlarında sırayla 80 /
@@ -276,19 +288,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   hareket/merkez/zoom yok, kısayol ateşi yalnız keser. Eski hata: otonom başlarken süren
   merkeze alma DURMUYORDU (`_merkez_calisiyor` yalnız tek adımda True). 15 mutasyonun 15'i
   yakalandı. **Donanımda denenmedi.**
-- **24.09.2026 · final_v9 (saha: lazer atılıyor ama balon patlamıyor)** — Kayıt (21:20
-  oturumu): 21:27'den sonra uzak balona (12–36 px) 37 atışın **37'si ~0.2 sn'de** kesildi:
-  lazer yandıktan 3 kare sonra model balonu tanımıyor, kapı "hedef görünmüyor" deyip kesiyor,
-  0.4 sn sonra yeniden ateş (balon hiç ısınmadı). Halka kanıtı 13 px'te çalışmıyor (nokta
-  balonun yarısından büyük). **Ateş taahhüdü** (§1 kural 7 istisnası): balona başlamış ateş
-  aynı balon kilitliyken 2 sn hayalette de sürer; E-Stop/yasak açı/dost-menzil engeli/kilit
-  düşmesi/kilit başka hedefe geçmesi aynen keser. `balon_takip`: ateş edilen balonun izi lazer
-  süresince silinmez ve namluya bağlıdır (kamera kayması uygulanmaz); patladı mı kararı nokta
-  sönünce `KAYIP_S` içinde (geri gelmezse imha, gelirse aynı kimlikle yeniden ateş).
-  `EksenTakip.korluk`: körlükte kayıp sayılmaz, namlu son 1.5 sn'ye uydurulan doğruyu izler
-  (duran balonda bekler; eğim anlamsızsa koşmaz). Kapalı çevrim benzetim, 2 sn kör ateşte
-  namlu balonun üstünde: 0.3–4 der/sn kayan balon %11–35 → %83–95, duran %88 → %87, elde
-  sallanan yakın %92 → %97. Kayıt yeniden oynatma: 44 otonom atışın 39'unda kilit 2 sn aynı
-  balonda kaldı. 21:22'de 14 px balona 4 sn ateşte model balonu hep gördü → nokta büyük
-  olasılıkla balonda değildi (nişan 4 px kaçık, `lazer_ofset` 0): **uzakta boresight ayarı
-  şart**. 19 mutasyonun 19'u yakalandı. **Donanımda denenmedi.**
