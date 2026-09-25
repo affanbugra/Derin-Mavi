@@ -159,7 +159,17 @@ def takip_profili(profil, tavan):
 # SAHADAKI SONUC: 12.4 sabit kabul edilince 36-50 derecede kontrolcu kolun kendi
 # hareketini hedef hareketi sandi (kamera kolun 0.3-0.7'si kadar donuyor), kol
 # 35->53 derece firladi ve yuksek acida +-10 derece salindi.
-KAMERA_PPD_TABLO = [(0.0, 10.5), (5.0, 10.5), (12.0, 11.3), (20.0, 12.7), (28.0, 13.5),
+# ⚠ 25.09 SAHA (22:51 kaydi, orta/yakin balonda tilt 5-9 derece salindi, hedef SABITTI):
+# kol 25'in ALTINDA kamera tablonun dedigi kadardan FAZLA donuyor. 5 oturumun takip
+# kaydindan (816 ardisik olcum cifti: hedefin goruntudeki dikey kaymasi / kol degisimi)
+# px/kol-derece medyanlari: kol 5-10 24.2 (eski 10.8) · 10-12.5 17.4 (11.2) · 12.5-15
+# 16.4 (11.6) · 15-17.5 15.0 (12.0) · 17.5-20 15.4 (12.5) · 20-25 13.6 (13.0); kol 25+
+# eski tabloyla uyumlu (0.87-1.15), DOKUNULMADI. Dusuk tablo = kontrolcu her duzeltmeyi
+# 1.25-2.2 kat fazla yapiyordu; 110 ms gecikmeyle salinim. Belirsiz yerde YUKSEK deger
+# guvenli taraf (dongu biraz yavaslar, salinmaz). Yeni tabloyla kayittaki hedefin dunya
+# acisi en duz ppd 22.5 -> 19.0 (gercek 18.7). Kesin olcum: tilt_yon_testi.py ile.
+KAMERA_PPD_TABLO = [(0.0, 18.0), (5.0, 22.0), (9.0, 22.0), (12.0, 17.5), (15.0, 15.5),
+                    (19.0, 15.2), (22.0, 13.8), (28.0, 13.5),
                     (32.0, 10.0), (36.0, 9.1), (40.0, 7.6), (44.0, 5.3), (46.0, 5.4),
                     (60.0, 5.4)]
 # Kameranin GERCEK derece basina piksel sayisi: pan'da olculen (pan disli orani
@@ -2031,6 +2041,10 @@ if __name__ == "__main__":
     egim = lambda a: (kamera_acisi(a + 0.05) - kamera_acisi(a - 0.05)) / 0.1 * KAMERA_PPD_REF
     kol28, kol44 = aci_karsiligi(28.0), aci_karsiligi(44.0)
     assert abs(egim(kol28) - 13.5) < 0.2 and abs(egim(kol44) - 5.3) < 0.3, (egim(kol28), egim(kol44))
+    # 25.09 saha: kol 25'in altinda kamera tablonun eski degerinden 1.25-2.2 kat HIZLI donuyor
+    # (dusuk tablo = dongu kazanci yuksek = orta/yakin balonda 5-9 derece salinim).
+    kol7, kol17 = aci_karsiligi(7.0), aci_karsiligi(17.0)
+    assert egim(kol7) > 20.0 and 14.5 < egim(kol17) < 16.5, (egim(kol7), egim(kol17))
     assert all(kamera_acisi(a + 0.5) > kamera_acisi(a) for a in range(int(ACI_MIN), int(ACI_MAX)))
 
     # 14. PAN (ayni kart, GPIO10/11): PAN1 cozumu, P komutu, kademe, X ile durma

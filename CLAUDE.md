@@ -254,6 +254,17 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **25.09.2026 · final_v12 (saha 22:51: orta/yakında tilt salınımı)** — Kayıtta hedefin dünya
+  yükselişi SABİT (±0.3°), tilt 5–9° genlikle salınıyor; gecikme ve AI hızı salınımlı ve sakin
+  anlarda AYNI (111 ms, 16 FPS) → gecikme değil. Sebep `TS.KAMERA_PPD_TABLO`: kol 25°'nin
+  ALTINDA (namlu aşağı, alçak/yakın hedef) kamera tablonun dediğinden 1.25–2.2 kat fazla
+  dönüyor (5 oturum, 816 ölçüm çifti; kol 25+ tabloyla uyumlu). Döngü kazancı o kadar
+  yüksekti; hedef kaybında hatalı hız kestirimiyle 4–6° kaçtı. Tablo alt bölgede kayıttan
+  düzeltildi (kol 25+ aynı). Kapalı çevrim benzetim (gerçek takip kodu, 16 Hz, 100 ms):
+  saha mekaniği + eski tablo kol 9°'de 14.4°, kol 14°'te 7.5° salınım; yeni tabloyla 0,
+  hata ≤ 0.14°; düzeltme yanlışsa bile (eski mekanik + yeni tablo) ≤ 0.8°. Arayüzdeki
+  Kp/Kd sürekli takipte KULLANILMIYOR (yalnız geri bildirimsiz eski yol). Kesin ölçüm için
+  `tilt_yon_testi.py`. **Donanımda denenmedi.**
 - **25.09.2026 · final_v12 (saha: AI 10 FPS'e düştü)** — Ölçüm (gerçek modeller, kesintisiz
   saha kaydı + uygulamanın kendisi ekransız): Aşama 1 ~60–75 ms/kare, Aşama 2 ~33 ms. A1'in
   %40'ı kilit penceresi (kilitli uzak araç ana taramada görünmeyince HER kare, 2 pencere),
@@ -282,15 +293,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   süre ve nişangah anında uygulanır ve `ayarlar.json`'a yalnız kendi anahtarlarıyla yazılır
   (atomik). Otonom BAŞLADIKTAN sonra nişangah değişmez; görüntü panelinin Sıfırla'sı bu
   üçüne dokunmaz. 8 mutasyonun 8'i yakalandı. **Donanımda denenmedi.**
-- **25.09.2026 · final_v12 (saha: 15–17 m'de balonlar tanınmıyor)** — 17:26 oturumu, standda
-  3 balon ~11–12 px. (1) **Pencere boyu:** model büyütmeye duyarlı; 11 px balon 128 px
-  pencerede %61, 80–96 px'te %98. İz penceresi tabanı 128 → 80; leke turlarında sırayla 80 /
-  128 taban (uzakta leke balonla gövdeyi birleştirir, leke boyu balon boyunu söylemez). Tüm
-  hat, gerçek kareler (150 × 10 tekrar): serbest asılı balon ekranda 132 → 149, kilit 139 →
-  150; balonsuz zemin / insanlar / yakın stand aynı, süre aynı. (2) **Kalan:** direğe ve
-  makete bitişik balonlar (Şekil 3 dizilişi) 15–17 m'de her pencerede ve ön işlemede (kübik,
-  keskinleştirme, kontrast, TTA) 0; ~25 px'te üçü de 0.9. Aynı karelerde gövde rengi doğru
-  (mavi yıldızlı 149/149 Dost, kırmızı uçaklı 146/148 Düşman): A3 ayrımı çalışıyor, eksik
-  olan tespit. Renk+şekil bulucu denendi: cam yansıması, insan, duvar figürü, maketin kendisi
-  → ateşe dayanak olamaz. Çözüm yeniden eğitim (§7.2). 5 mutasyonun 5'i yakalandı.
-  **Donanımda denenmedi.**
