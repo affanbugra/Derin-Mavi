@@ -237,7 +237,7 @@ boyanınca 1904 karede kilit 0 — ama **gerçek mavi maketle denenmedi.**
 | Konu | Durum |
 |---|---|
 | Lazer | **Tek kart (24.09):** S3 GPIO 18, firmware yüklendi ve kartla doğrulandı (LZR1 yayını, STOP/START, güç) — **lazer takılı değilken; yakılarak denenmedi.** Doğrulanmadı: PWM frekansı sürücüyle uyumlu mu, 3.3 V/5 V mantık seviyesi, GPIO 18 ↔ GND 10 kΩ pull-down. Acil buton GPIO 15'e henüz bağlanmadı |
-| Balon modeli | **Kuruldu (24.09)**, kendi kameramızın koridor videosunda ölçüldü (ayrıntı: `git log -p CLAUDE.md`). Menzil içinde (balon ≥16 px) A2/A3 kilidi %96–100. ⚠ **Model, altında drone asılı ~18 m'deki balonu hiç görmüyor** (1080p'de de; 604–1145. kareler): bu videonun kareleri etiketlenip `bestb2` yeniden eğitilmeli. Araç modeli (`best.pt`) el yapımı drone/F16'yı neredeyse hiç okumuyor → A3 kartında **tip çoğunlukla yok**: operatör "Aranan" tipi seçerse tipsiz balon kilitlenmez; balon çapı girilirse tipsiz balona yalnız 10–15 m'de ateş (ortak bant). Hareketli namluda (bulanıklık) ve açık havada denenmedi. ⚠ 24.09 akşam: uzaktaki **pembe, çubuğa bağlı** balonları hiç tanımıyor (kayıtta 10 sn tespit 0; 96–320 px her pencere boyunda 48 denemede ≤7) — pencere ayarı değil, eğitim verisi |
+| Balon modeli | **Kuruldu (24.09)**, kendi kameramızın koridor videosunda ölçüldü (ayrıntı: `git log -p CLAUDE.md`). Menzil içinde (balon ≥16 px) A2/A3 kilidi %96–100. ⚠ **Model, altında drone asılı ~18 m'deki balonu hiç görmüyor** (1080p'de de; 604–1145. kareler): bu videonun kareleri etiketlenip `bestb2` yeniden eğitilmeli. Araç modeli (`best.pt`) el yapımı drone/F16'yı neredeyse hiç okumuyor → A3 kartında **tip çoğunlukla yok**: operatör "Aranan" tipi seçerse tipsiz balon kilitlenmez; balon çapı girilirse tipsiz balona yalnız 10–15 m'de ateş (ortak bant). Hareketli namluda (bulanıklık) ve açık havada denenmedi. ⚠ 24.09 akşam: uzaktaki **pembe, çubuğa bağlı** balonları hiç tanımıyor (kayıtta 10 sn tespit 0; 96–320 px her pencere boyunda 48 denemede ≤7) — pencere ayarı değil, eğitim verisi. ⚠ **25.09 (15–17 m, balon 11–12 px): direğe/makete bitişik balonları (Şekil 3 dizilişi) hiç görmüyor**, serbest asılı olanı görüyor; ~25 px'te üçünü de. Yeniden eğitim verisi: `app/veri_toplama/20260925_172654` (yerel, yüzlü — repoya girmez) |
 | Aşama-1 zarf sırası | Arayüzde sürükle-sırala var ama **hiçbir yer okumuyor**; ceza mantığı yok |
 | Dwell (lazeri hedefte tutma) | Balonda 2 sn ateş taahhüdü + körlükte yol izleme (24.09, §8) — **donanımda denenmedi** |
 | Mesafe ölçümü | **Balon çapından** kestirim (24.09): ⚙ "Balon çapı (cm)" sahada cetvelle ölçülüp girilmeli, 10 m'de etiketle doğrulanmalı. Girilmezse (0) A3 menzil kontrolü YOK. Çap yanlışsa A3'te hiç ateş edilmeyebilir |
@@ -254,6 +254,18 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **25.09.2026 · final_v12 (saha: 15–17 m'de balonlar tanınmıyor)** — 17:26 oturumu, standda
+  3 balon ~11–12 px. (1) **Pencere boyu:** model büyütmeye duyarlı; 11 px balon 128 px
+  pencerede %61, 80–96 px'te %98. İz penceresi tabanı 128 → 80; leke turlarında sırayla 80 /
+  128 taban (uzakta leke balonla gövdeyi birleştirir, leke boyu balon boyunu söylemez). Tüm
+  hat, gerçek kareler (150 × 10 tekrar): serbest asılı balon ekranda 132 → 149, kilit 139 →
+  150; balonsuz zemin / insanlar / yakın stand aynı, süre aynı. (2) **Kalan:** direğe ve
+  makete bitişik balonlar (Şekil 3 dizilişi) 15–17 m'de her pencerede ve ön işlemede (kübik,
+  keskinleştirme, kontrast, TTA) 0; ~25 px'te üçü de 0.9. Aynı karelerde gövde rengi doğru
+  (mavi yıldızlı 149/149 Dost, kırmızı uçaklı 146/148 Düşman): A3 ayrımı çalışıyor, eksik
+  olan tespit. Renk+şekil bulucu denendi: cam yansıması, insan, duvar figürü, maketin kendisi
+  → ateşe dayanak olamaz. Çözüm yeniden eğitim (§7.2). 5 mutasyonun 5'i yakalandı.
+  **Donanımda denenmedi.**
 - **25.09.2026 · final_v11 (saha: etiketler üst üste + hazırlıkta kontrol)** — Koridor
   ekranında yan yana üç maket + balonlarının iki satırlık etiketleri ("Dost / Balon %91")
   birbirini kapatıyordu. Etiket tek satır, taraf yalnız renkle; `etiket_yerlestir` adaylar
@@ -280,19 +292,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   balonda kaldı. 21:22'de 14 px balona 4 sn ateşte model balonu hep gördü → nokta büyük
   olasılıkla balonda değildi (nişan 4 px kaçık, `lazer_ofset` 0): **uzakta boresight ayarı
   şart**. 19 mutasyonun 19'u yakalandı. **Donanımda denenmedi.**
-- **24.09.2026 · final_v9 (saha: yakında titreme ↔ uzakta akıcılık dengesi)** — Kayıt
-  (19:42 oturumu + ekran kaydı): yakında (balon 40+ px) namlu duran balona saniyede 1.5–3.8
-  yön değiştiriyordu; kayıttan hesaplanan hedef dünya açısı 21.0 ± 0.3° **sabitti** —
-  salınımı kontrolcü üretiyordu (tilt ölçeği ve 40 ms gecikme kayıtla doğrulandı, doğruydu).
-  Kök nedenler: (1) tek sabit ayar — kutu gürültüsü balon boyunun ~%10'u (15.5 bin ölçüm),
-  uzağa göre eşikler yakında gürültüyü manevra sayıyordu; (2) kare→karar ~0.15 sn iken kayıp
-  eşiği 0.10 sn → **her tek kaçırılan karede namlu durup kalkıyordu**. `HK.SAHA_AYARI`:
-  balon 24 px'ten büyükse gürültü/hız eşikleri/ölü bant/filtre ivmesi boyla ölçeklenir (uzakta
-  aynen), kayıp eşiği 0.35 sn, kısa boşlukta duran hedefte namlu bekler. Arayüz yalnız
-  BALON kutusunun boyunu (1280'e göre) verir. Kapalı çevrim benzetim (kart yörünge kopyası,
-  0.15 sn gecikme, 17 Hz, %20 kayıp, 11 senaryo × 5 tohum): yakın 90 px yön 4.7→1.3/sn,
-  nişan balonda %53→%83; çok yakın 130 px %49→%82; uzak yürüyen hata 13→5.7 px (%13→%43);
-  uzak duran %88→%85. Gerçek ölçüm akışında yakın tilt komut yön değişimi 46→10 (‰). Elenen
-  adaylar (yalnız gürültü ölçekleme, kip geçişinde filtre sabitleme, boşluk histerezisi,
-  filtreli ölü bölge) `SAHA_AYARI` yorumunda. 12 mutasyonun 12'si yakalandı. Ekran kaydı
-  tespit ölçümüne uygun değil (balonun üstüne arayüz kutusu çizili). **Donanımda denenmedi.**

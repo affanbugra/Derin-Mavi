@@ -113,12 +113,21 @@ KUCUK_PX = 64            # bundan kucuk kilitli balon kilit penceresinde de tara
 #   128 px 28/30 (0.82). Balon modeli, arac modelinin tersine, BUYUTMEYI sever: balon 640
 #   girdide ~85 px olunca en iyi. Eski en kucuk pencere 213 px'ti.
 PENCERE_KAT = 7          # kilit/iz penceresi = balon boyunun 7 kati ...
-PENCERE_EN_AZ = 128      # ... en az 128 px (640 girdide 5x)
+# ... en az 80 px. 25.09 saha (15-17 m, balon 11-12 px): 128 px tabanda pencere balonu 5.5x
+# buyutuyor, model %61 goruyordu; 80-96 px'te %98. Yakin oturumlarin balonlari kucultulerek
+# (9-24 px, 132 ornek): iz penceresi 9 px %25 -> %46, 11 px %78 -> %85, 13 px %85 -> %95,
+# 16+ px ayni (7 x 18 px zaten 128'i asar).
+PENCERE_EN_AZ = 80
 PENCERE_EN_COK = 640
 # Kirmizi leke penceresi: lekenin 2.2 kati, en cok 320 px. Uzakta balon kirmizi govde ve
 # (videoda) tisortle TEK leke oluyor; eski kural (6x, en az 214) 320 px acip balonu
 # kaybediyordu. 2.2x birlesik lekeyi de kapsar, balon yine buyuk gorunur.
+# Leke boyu balon boyunu SOYLEMEZ (uzakta balon govdesiyle tek leke: 11 px balonun lekesi
+# 19-29 px). Tek taban ya uzagi ya orta mesafeyi kaybediyordu (80: 11 px %100 ama 20 px
+# %88; 128: tersi) -> leke turlarinda SIRAYLA 80 ve 128 px taban. Iz dogunca iz penceresi
+# (balon boyuna gore) devralir.
 ONERI_KAT = 2.2
+ONERI_EN_AZ = (80, 128)
 ONERI_EN_COK = 320
 PENCERE_AZAMI = 4        # kilit yokken kare basina en cok pencere (maliyet sabit kalsin)
 KIRMIZI_PERIYOT = 4      # kilit yokken kirmizi leke pencereleri bu kadar karede bir
@@ -509,8 +518,8 @@ def _pencereler(frame, araclar, kilitli_iz, simdi):
     H, W = frame.shape[:2]
     pen = []
 
-    def ekle(cx, cy, s, en_cok=PENCERE_EN_COK):
-        s = int(min(max(s, PENCERE_EN_AZ), en_cok, W, H))
+    def ekle(cx, cy, s, en_cok=PENCERE_EN_COK, en_az=PENCERE_EN_AZ):
+        s = int(min(max(s, en_az), en_cok, W, H))
         x1 = int(min(max(0, cx - s / 2), W - s))
         y1 = int(min(max(0, cy - s / 2), H - s))
         pen.append((x1, y1, x1 + s, y1 + s))
@@ -543,11 +552,13 @@ def _pencereler(frame, araclar, kilitli_iz, simdi):
             continue                     # bu aracin balonu zaten izleniyor
         ekle((x1 + x2) * 0.5, (y1 + y2) * 0.5, max(x2 - x1, y2 - y1))
     if _durum["sayac"] % KIRMIZI_PERIYOT == 0:
+        taban = ONERI_EN_AZ[(_durum["sayac"] // KIRMIZI_PERIYOT) % len(ONERI_EN_AZ)]
         for k in algi.kirmizi_oneri(frame, PENCERE_AZAMI):
             if len(pen) >= PENCERE_AZAMI:
                 break
             x1, y1, x2, y2 = k
-            ekle((x1 + x2) * 0.5, (y1 + y2) * 0.5, ONERI_KAT * max(x2 - x1, y2 - y1), ONERI_EN_COK)
+            ekle((x1 + x2) * 0.5, (y1 + y2) * 0.5, ONERI_KAT * max(x2 - x1, y2 - y1), ONERI_EN_COK,
+                 taban)
     return pen
 
 
@@ -1107,11 +1118,14 @@ if __name__ == "__main__":
     class SahteModel:
         """renkler: {bgr: guven} — model bu renkteki her lekeyi o guvenle "balon" sanir
         (gercek model de gri cami, yansimayi boyle buldu). kor=True: hicbir sey gormez."""
-        def __init__(self, tam_en_az=0, renkler=None):
+        def __init__(self, tam_en_az=0, renkler=None, olcek=None):
             self.tam_en_az, self.girdi_sayilari = tam_en_az, []
             self.renkler = renkler or {BALON_RENK: 0.9}
             self.kor = False
             self.boyutlar = []
+            # olcek=(alt, ust): balon 640 girdide bu boy araligindaysa gorulur (gercek model
+            # buyutmeye duyarli: 11 px balon 128 px pencerede %61, 80-96 px'te %98)
+            self.olcek = olcek
 
         def predict(self, girdiler, **kw):
             self.girdi_sayilari.append(len(girdiler))
@@ -1124,6 +1138,9 @@ if __name__ == "__main__":
                     n, _, ist, _ = cv2.connectedComponentsWithStats(m, 8)
                     for x, y, w, h, alan in ist[1:]:
                         if i == 0 and max(w, h) < self.tam_en_az:
+                            continue
+                        if self.olcek and not (self.olcek[0] <= max(w, h) * 640.0 / max(img.shape[:2])
+                                               <= self.olcek[1]):
                             continue
                         kutular.append(_Kutu((x, y, x + w, y + h), guven))
                 cikti.append(_Sonuc(kutular))
@@ -1707,9 +1724,9 @@ if __name__ == "__main__":
     assert a >= 0 and b[a]["tip"] == "Düşman", ("mavi gokyuzu dusmani dost yapti", b)
 
     # 26. PENCERE BOYU: tam karede gorulmeyen kucuk balon kirmizi leke penceresinden
-    #     bulunur; pencere kucuk balonda PENCERE_EN_AZ (buyutme 5x), govdeye yapisik
+    #     bulunur; pencere kucuk balonda taban (ONERI_EN_AZ sirayla), govdeye yapisik
     #     birlesik lekede lekenin ONERI_KAT kati (eski kural 320 acip balonu kaybediyordu).
-    for sahne_, en_cok in ((sahne([(640, 400, 14)]), PENCERE_EN_AZ),
+    for sahne_, en_cok in ((sahne([(640, 400, 14)]), 128),
                            (sahne([(640, 400, 14)], [((600, 330, 680, 394), KIRMIZI_ARAC)]),
                             200)):              # 80 px birlesik leke: 2.2x = 176 (eskisi 320)
         sifirla()
@@ -1718,6 +1735,26 @@ if __name__ == "__main__":
         assert any(d["kaynak"] == "pencere" for d in b), ("kucuk balon leke penceresinde yok", b)
         kenarlar = [h for cagri in mk.boyutlar for h, w in cagri[1:]]
         assert kenarlar and max(kenarlar) <= en_cok and min(kenarlar) >= PENCERE_EN_AZ, kenarlar
+
+    # 26c. UZAK BALON OLCEGI (25.09 saha, 15-17 m): model buyutmeye duyarli — 12 px balon
+    #      128 px pencerede (640 girdide 60 px) gorulmuyor, 80 px'te (96 px) goruluyor.
+    #      Leke turu 80 px tabaninda bulur, iz penceresi (7 x boy) tutar -> A2 kilidi.
+    #      Eski 128 px tabanla bu balon HIC bulunmuyordu.
+    sifirla()
+    mk = SahteModel(tam_en_az=20, olcek=(70, 130))
+    uzak = sahne([(640, 400, 12)])
+    b, a = kos(mk, uzak, n=KIRMIZI_PERIYOT * 2 + ONAY_KARE + 5)
+    assert a >= 0 and not b[a].get("hayalet"), ("uzak (12 px) balon bulunmadi/kilitlenmedi", b)
+    son = [h for cagri in mk.boyutlar[-3:] for h, w in cagri[1:]]
+    assert son and min(son) < 100, ("kilitli uzak balonun penceresi kucuk degil", son)
+    b, a = kos(mk, uzak, n=30)
+    assert a >= 0 and not b[a].get("hayalet"), ("uzak balonun kilidi surmedi", b)
+    #      Orta mesafe (24 px) 80 px tabanda fazla buyur (640 girdide 192 px): onu siradaki
+    #      128 px tabanli leke turu bulur. Tek taban 80 olsaydi hic bulunmazdi.
+    sifirla()
+    mk = SahteModel(tam_en_az=40, olcek=(70, 130))
+    b, a = kos(mk, sahne([(640, 400, 24)]), n=KIRMIZI_PERIYOT * 3 + ONAY_KARE + 5)
+    assert a >= 0 and not b[a].get("hayalet"), ("orta mesafe (24 px) balon bulunmadi", b)
 
     # 27. SURU (A2): kilitliyken diger UZAK balonun izi de surer (sirayla ek pencere);
     #     eskiden kilit disindaki kucuk balonlar pencere almayip siliniyordu.
