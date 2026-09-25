@@ -21,22 +21,22 @@ import tasarim as T
 # Satir: (tuslar, is, aciklama, Qt tuslari). Qt tuslari, testin arayuzun gercekten
 # dinledigi tuslarla karsilastirmasi icindir.
 KLAVYE = (
-    (("W", "↑"), "Yukarı", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("W", "↑"), "Yukarı", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Otonomda çalışmaz.",
      (Qt.Key_W, Qt.Key_Up)),
-    (("S", "↓"), "Aşağı", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("S", "↓"), "Aşağı", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Otonomda çalışmaz.",
      (Qt.Key_S, Qt.Key_Down)),
-    (("A", "←"), "Sola", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("A", "←"), "Sola", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Otonomda çalışmaz.",
      (Qt.Key_A, Qt.Key_Left)),
-    (("D", "→"), "Sağa", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Yalnız Manuel mod.",
+    (("D", "→"), "Sağa", "Tek dokunuş = HASSASİYET adımı, basılı tutunca sürekli. Otonomda çalışmaz.",
      (Qt.Key_D, Qt.Key_Right)),
     (("R",), "Merkeze al", "0° / 0°'a motor hızıyla kademeli döner; yön tuşu keser. "
-     "Yalnız Manuel mod.", (Qt.Key_R,)),
-    (("Space + B",), "Ateş aç / kes", "İkisi birlikte, her modda. Tek tuş bir şey yapmaz. "
-     "ACİL DURDUR'da ve atışa yasak alanda açılmaz.", (Qt.Key_Space, Qt.Key_B)),
-    (("Z",), "Yakınlaştır", "Basılı tuttukça, en çok 4×. Yalnız Manuel + Aşama 1; "
-     "yalnız ekran.", (Qt.Key_Z,)),
-    (("X",), "Uzaklaştır", "Basılı tuttukça, 1×'e (eski hâline) kadar. Yalnız Manuel + "
-     "Aşama 1.", (Qt.Key_X,)),
+     "Otonomda çalışmaz.", (Qt.Key_R,)),
+    (("Space + B",), "Ateş aç / kes", "İkisi birlikte. Tek tuş bir şey yapmaz. Otonomda "
+     "yalnız keser. ACİL DURDUR'da ve atışa yasak alanda açılmaz.", (Qt.Key_Space, Qt.Key_B)),
+    (("Z",), "Yakınlaştır", "Basılı tuttukça, en çok 4×. Yalnız ekran; otonomda "
+     "çalışmaz.", (Qt.Key_Z,)),
+    (("X",), "Uzaklaştır", "Basılı tuttukça, 1×'e (eski hâline) kadar. Otonomda "
+     "çalışmaz.", (Qt.Key_X,)),
     (("C",), "Hassasiyet", "Art arda 1 basış = Hassas, 2 = Orta, 3 = Hızlı (yarım saniye "
      "içinde).", (Qt.Key_C,)),
     (("Esc",), "ACİL DURDUR", "Her modda, her durumda; ateş de kesilir. Tekrar basınca devam "
@@ -48,19 +48,19 @@ KLAVYE = (
 # oldugunu denetler (ekranda yanan tus = tabloda yazan tus).
 KOL = (
     (("sol_cubuk",), "Sol joystick", "Yatay + dikey",
-     "Az itince çok yavaş, sonuna kadar HASSASİYET hızı. Yalnız Aşama 1 (Manuel)."),
+     "Az itince çok yavaş, sonuna kadar HASSASİYET hızı. Otonomda çalışmaz."),
     (("up", "down", "left", "right"), "D-pad", "Yön",
-     "Klavye gibi: tek basış = HASSASİYET adımı, basılı tutunca sürekli. Yalnız "
-     "Aşama 1 (Manuel)."),
+     "Klavye gibi: tek basış = HASSASİYET adımı, basılı tutunca sürekli. Otonomda "
+     "çalışmaz."),
     (("l2", "r2"), "L2 + R2", "Ateş aç / kes",
-     "İkisi birlikte, tek dokunuş. Tek tetik bir şey yapmaz."),
+     "İkisi birlikte, tek dokunuş. Tek tetik bir şey yapmaz. Otonomda yalnız keser."),
     (("l1", "r1"), "L1 + R1", "Merkeze al",
-     "İkisi birlikte; 0° / 0°'a kademeli. Yalnız Aşama 1 (Manuel)."),
+     "İkisi birlikte; 0° / 0°'a kademeli. Otonomda çalışmaz."),
     (("start",), "Options / Start", "ACİL DURDUR",
      "Tekrar basınca devam (durdurduktan en az 1 sn sonra). Donanım butonu basılıyken olmaz."),
     (("sag_cubuk",), "Sağ joystick", "Zoom",
-     "Yalnız Manuel + Aşama 1. Yukarı yakınlaştırır (en çok 4×), aşağı 1×'e kadar "
-     "uzaklaştırır. Yalnız ekran — gimbal'i ve otonomu etkilemez."),
+     "Yukarı yakınlaştırır (en çok 4×), aşağı 1×'e kadar uzaklaştırır. Yalnız ekran — "
+     "gimbal'i ve otonomu etkilemez. Otonomda çalışmaz (1×)."),
     (("capraz",), "Çarpı (Xbox: A)", "Hassasiyet",
      "Art arda 1 basış = Hassas, 2 = Orta, 3 = Hızlı (yarım saniye içinde)."),
     (("daire", "kare", "ucgen"), "Daire / Kare / Üçgen", None, ""),
@@ -71,8 +71,10 @@ EKRAN = (
     ("DEVAM ET", "ACİL DURDUR'dan çıkış — Esc / Options ile aynı kapı. Donanım butonu "
      "basılıyken olmaz."),
     ("ATEŞ butonu", "Aşama 1. Space + B ile aynı kapı."),
-    ("AŞAMA n'İ BAŞLAT", "Aşama 2/3'te ATEŞ'in yerinde. Aşama seçmek otonomu başlatmaz "
-     "(hazırlık: elle hareket yok, ayarlar yapılır); bu buton başlatır, tekrar basınca durdurur."),
+    ("AŞAMA n'İ BAŞLAT", "Aşama 2/3'te ATEŞ'in yerinde. Aşama seçmek otonomu başlatmaz: "
+     "hazırlıkta her şey Aşama 1'deki gibi elle kullanılır. Bu buton otonomu başlatır — "
+     "o andan sonra elle hareket, zoom ve ateş açma yok (ACİL DURDUR ve ateşi kesmek "
+     "serbest). Tekrar basınca durdurur, elle kontrol geri gelir."),
     ("HASSASİYET", "Hassas 0,1° · Orta 0,5° · Hızlı 1° tek dokunuş (15 m'de ≈ 3 / 13 / 26 cm). "
      "Basılı tutma ve joystick hızını da belirler. Klavye, D-pad ve kol birlikte."),
 )

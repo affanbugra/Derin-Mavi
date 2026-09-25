@@ -844,6 +844,46 @@ def kamera_kaymasi_px(fn, t0, t1, genislik):
     return -(a1[0] - a0[0]) * ppd, (a1[1] - a0[1]) * ppd
 
 
+def _kesisim(a, b):
+    """Iki dikdortgenin (x1, y1, x2, y2) ortak alani."""
+    return max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+
+
+def etiket_yerlestir(kutular, boyutlar, W, H, bosluk=2.0):
+    """Kutu etiketlerini BIRBIRININ USTUNE BINMEYECEK yere koyar. 25.09 saha: yan yana
+    duran maketlerin etiketleri hep kutunun sol ustune yazildigi icin birbirini kapatiyor,
+    okunmuyordu.
+
+    kutular: [(x1, y1, x2, y2)] ekran px; boyutlar: [(w, h)] ayni sirada. Sira ONCELIKTIR
+    (once gelen iyi yeri alir: kilitli hedef basa konmali). Her etiket icin adaylar:
+    kutunun ustu / alti (sola, saga, ortaya hizali), sagi, solu, ici; hepsi doluysa
+    ustte yukari ve altta asagi dogru istiflenir. Baska ETIKETIN ustune binmek en agir
+    cezadir, baska KUTUNUN (hedefin) ustune binmek ondan hafif, kendi kutusunun icine
+    yazmak en hafif. Doner: [(x, y)] sol ust koseler; etiket kare disina tasmaz."""
+    yerlesen, sonuc = [], []
+    for i, (k, (w, h)) in enumerate(zip(kutular, boyutlar)):
+        x1, y1, x2, y2 = k
+        ust, alt, orta = y1 - h - bosluk, y2 + bosluk, (x1 + x2 - w) / 2
+        adaylar = [(x1, ust), (x2 - w, ust), (x1, alt), (x2 - w, alt), (orta, ust),
+                   (orta, alt), (x2 + bosluk, y1), (x1 - w - bosluk, y1),
+                   (x1 + bosluk, y1 + bosluk)]
+        for n in range(1, 6):
+            adaylar += [(x1, ust - (h + bosluk) * n), (x1, alt + (h + bosluk) * n)]
+        en = None
+        for sira, (ax, ay) in enumerate(adaylar):
+            ax = min(max(ax, 0.0), max(0.0, W - w))
+            ay = min(max(ay, 0.0), max(0.0, H - h))
+            r = (ax, ay, ax + w, ay + h)
+            puan = (1e6 * sum(_kesisim(r, e) for e in yerlesen)
+                    + sum(_kesisim(r, b) for j, b in enumerate(kutular) if j != i)
+                    + 0.5 * _kesisim(r, k) + sira)
+            if en is None or puan < en[0]:
+                en = (puan, ax, ay)
+        yerlesen.append((en[1], en[2], en[1] + w, en[2] + h))
+        sonuc.append((en[1], en[2]))
+    return sonuc
+
+
 # =====================================================================
 #  Algilama (Inference) is parcacigi (Thread 2)
 # =====================================================================
@@ -2499,7 +2539,7 @@ class MainWindow(QMainWindow):
         self._merkez_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._merkez_timer.timeout.connect(self._merkez_tik)
         self._gp_ates_basili = False               # kolun iki tetigi su an basili mi
-        self._zoom = 1.0                           # goruntu zoom'u (sag cubuk; Manuel + A1)
+        self._zoom = 1.0                           # goruntu zoom'u (sag cubuk; otonomda yok)
         self._zoom_tuslar = set()                  # basili Z/X (klavye zoom'u)
         self._zoom_tus_t = 0.0
         self._zoom_timer = QTimer(self)
@@ -2986,8 +3026,8 @@ class MainWindow(QMainWindow):
         if d.ates_kenar:
             self._ates_kisayolu()                   # -> _ates_bas (tek kapi)
 
-        # Hazırlık/Otonom (A2/A3): koldan HAREKET ve MERKEZ yok (25.09). Zoom/ates/
-        # hassasiyet/E-Stop yukarida islendi.
+        # Otonom: koldan HAREKET ve MERKEZ yok (hazirlikta Asama 1 gibi serbest, 25.09).
+        # Zoom/ates/hassasiyet/E-Stop yukarida islendi.
         if not self._manuel_hareket_izni():
             if self._manuel_kaynak == "kol":
                 self._manuel_fren()
@@ -3079,19 +3119,19 @@ class MainWindow(QMainWindow):
     ZOOM_HIZ = 1.0          # tam sapmada saniyede e^1 ≈ 2.7 kat (1x -> 4x ~1.4 sn)
 
     def _zoom_acik(self):
-        """Zoom yalniz Manuel modda ve Asama 1'de gecerli (takim karari 24.09)."""
-        return (getattr(self, "mod", "") == "Manuel"
-                and getattr(self, "asama", None) == "Aşama 1")
+        """Zoom elle kontrolle ayni kosulda: Asama 1 ve A2/A3 hazirligi; otonomda YOK
+        (24.09'da yalniz A1'di; 25.09 aksam kullanici istegiyle hazirlikta da var)."""
+        return self._manuel_hareket_izni()
 
     def _zoom_katsayi(self):
-        """Ekrana uygulanacak zoom. Kosul disinda 1x'e doner ve SIFIRLANIR: Asama 1'e
-        geri donuldugunde eski yakinlik kendiliginden geri gelmesin."""
+        """Ekrana uygulanacak zoom. Kosul disinda 1x'e doner ve SIFIRLANIR: otonom
+        durdurulup hazirliga donuldugunde eski yakinlik kendiliginden geri gelmesin."""
         if not self._zoom_acik():
             self._zoom = 1.0
         return getattr(self, "_zoom", 1.0)
 
     # Klavye: [Z] yakinlastir, [X] uzaklastir — basili tuttukca, sag cubuk tam
-    # sapmadaki hizla (ayni `_zoom_guncelle`, ayni Manuel + A1 kosulu).
+    # sapmadaki hizla (ayni `_zoom_guncelle`, ayni `_zoom_acik` kosulu).
     ZOOM_TUSLARI = {Qt.Key_Z: 1.0, Qt.Key_X: -1.0}
 
     def _zoom_tusu(self, event, basildi):
@@ -3955,9 +3995,11 @@ class MainWindow(QMainWindow):
     # ================= OLAYLAR =================
     # MOD - ASAMA BAGI (25.09 takim karari; sartname: A1 manuel, A2/A3 otonom):
     #   Asama 1            -> mod "Manuel"   (operator surer ve ates eder)
-    #   Asama 2/3 secilince -> mod "Hazırlık" (otonom BASLAMAZ; operator yasak alan,
-    #                          hassasiyet, lazer gucunu ayarlar; elle HAREKET YOK)
-    #   "AŞAMA n'İ BAŞLAT"  -> mod "Otonom"   (tekrar basinca Hazırlık'a doner)
+    #   Asama 2/3 secilince -> mod "Hazırlık" (otonom BASLAMAZ; operator Asama 1'deki
+    #                          gibi surer, zoom yapar, yasak alan / hassasiyet / lazer
+    #                          gucunu ayarlar — 25.09 aksam kullanici istegi)
+    #   "AŞAMA n'İ BAŞLAT"  -> mod "Otonom"   (elle hareket, zoom ve elle ates ACMA biter;
+    #                          tekrar basinca Hazırlık'a doner)
     # Koddaki otonom denetimleri `mod == "Otonom"` diye bakar: Hazırlık otonom sayilmaz.
     ASAMA_IDX = {None: 0, "Aşama 1": 1, "Aşama 2": 2, "Aşama 3": 3}
     HAZIRLIK = "Hazırlık"
@@ -3973,9 +4015,10 @@ class MainWindow(QMainWindow):
             self._mod_gorunum()              # tiklanan sekme gorunumu bozmasin
 
     def _manuel_hareket_izni(self):
-        """Elle hareket (klavye, kol, ekrandaki D-pad, merkeze al) YALNIZ Manuel'de.
-        Hazırlık'ta ve Otonom'da gimbal'i yalniz otonom surer (25.09)."""
-        return getattr(self, "mod", "Manuel") == "Manuel"
+        """Elle kontrol (klavye, kol, ekrandaki D-pad, merkeze al, zoom) Manuel'de ve A2/A3
+        HAZIRLIGINDA serbest; otonom BASLAYINCA biter — gimbal'i yalniz otonom surer.
+        (25.09 ogle: hazirlikta da yoktu; aksam kullanici istegiyle Asama 1 gibi oldu.)"""
+        return getattr(self, "mod", "Manuel") in ("Manuel", self.HAZIRLIK)
 
     def _otonom_baslat(self):
         """ATEŞ'in yerindeki BAŞLAT / DURDUR butonu (yalniz Asama 2/3)."""
@@ -4026,11 +4069,12 @@ class MainWindow(QMainWindow):
             self._ates_kes("mod değişti")
         if getattr(self, "_acik_pencere", None) == "lazer":
             self._pencere_kapat()            # ⚙ ATEŞ <-> BAŞLAT arasinda yer degistirir
-        if ad != "Manuel":
+        if not self._manuel_hareket_izni():  # otonom basladi: elle kontrol biter
             if getattr(self, "_basili_yonler", None):
                 self._tekrar_durdur()        # basili tutulan yon tusu hareketi surdurmesin
-            if getattr(self, "_merkez_calisiyor", False):
-                self._merkez_durdur("otonom/hazırlık")
+            # Suren merkeze alma da durur (zamanlayici). Eskiden `_merkez_calisiyor`a
+            # bakiliyordu — o yalniz TEK ADIM surerken True: merkez otonomla yarisiyordu.
+            self._merkez_durdur("otonom başladı")
         # OTONOMDAN CIKIS: hareket kesilir ve ekran/kart hedefi kartin OLCTUGU konuma
         # cekilir. Otonom karta (konum, hiz) akitir; son komut hedefi gercek konumdan
         # derecelerce ayrisabilir. Ilk manuel tus o eski hedeften hesaplanirsa namlu
@@ -4058,7 +4102,7 @@ class MainWindow(QMainWindow):
     def _tus_yonu(self, event):
         """Klavye olayindan D-pad yonu. None = bizim tusumuz degil, Qt'ye birak.
         (Basma ve birakma AYNI haritayi okur — ikisi ayri yazilirsa biri unutulur.)"""
-        if getattr(self, "mod", "") != "Manuel" or not hasattr(self, "pan_aci"):
+        if not self._manuel_hareket_izni() or not hasattr(self, "pan_aci"):
             return None
         if event.isAutoRepeat():
             return None
@@ -4068,8 +4112,14 @@ class MainWindow(QMainWindow):
         """Gamepad A tusu — ATES butonuyla BIREBIR ayni sey (atesin tek kapisi `_ates_bas`).
 
         Buton devre disiysa (E-Stop) kisayol da gecmez: kisayolun butondan daha fazla
-        yetkisi olamaz, yoksa E-Stop klavyeden asilabilir olurdu."""
+        yetkisi olamaz, yoksa E-Stop klavyeden asilabilir olurdu.
+        OTONOMDA elle ates ACILMAZ, yalniz KESILIR (25.09 kullanici karari: BAŞLAT'tan
+        sonra kontrol otonomdadir; lazeri kesmek ise her zaman serbest kalmali)."""
         if not hasattr(self, "fire_btn") or not self.fire_btn.isEnabled():
+            return
+        if not self.fire_btn.isChecked() and getattr(self, "mod", "Manuel") == "Otonom":
+            self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;Otonomda elle ateş '
+                                f'açılmaz — önce OTONOMU DURDUR')
             return
         self.fire_btn.setChecked(not self.fire_btn.isChecked())
         self._ates_bas()
@@ -4087,8 +4137,9 @@ class MainWindow(QMainWindow):
 
     def _ates_tusu(self, event, basildi):
         """[Space] + [B] birlikte: atesi AC/KES. Ikinci tusun basildigi AN bir kez
-        tetiklenir; basili tutmak tekrarlamaz, tek tus hicbir sey yapmaz. HER MODDA
-        calisir — ATES butonu Otonom'da gorunmez ama klavye yolu moda bagli olmamalidir."""
+        tetiklenir; basili tutmak tekrarlamaz, tek tus hicbir sey yapmaz. Hazirlikta da
+        calisir (ATES butonunun yerinde BAŞLAT var); Otonom'da yalniz KESER
+        (`_ates_kisayolu`)."""
         if event.key() not in self.ATES_TUSLARI:
             return False
         if event.isAutoRepeat():
@@ -4612,7 +4663,7 @@ class MainWindow(QMainWindow):
     # ================= KARE GELDI =================
     def _kare_geldi(self, qimg, data):
         try:
-            # ZOOM (sag cubuk, Manuel + A1): kare LAZER NISANGAHININ cevresinden
+            # ZOOM (sag cubuk, otonomda yok): kare LAZER NISANGAHININ cevresinden
             # kirpilir ki buyutunce nisangah hedefin ustunde kalsin. Kirpma kare
             # disina tasmaz. Tum cizimler (kutu, balon, nisan) ayni (ox, oy, olcek)
             # donusumuyle yapilir — zoom 1x'te eskisiyle birebir aynidir.
@@ -4646,17 +4697,25 @@ class MainWindow(QMainWindow):
             pen = painter.pen()
             pen.setWidth(2)
             
+            # ETIKETLER kutulardan SONRA, etiket_yerlestir'le birbirinin ustune binmeyecek
+            # yere yazilir. Dost / Dusman YAZILMAZ: kutunun ve etiketin rengi soyler (mavi
+            # = dost, kirmizi = dusman, yesil = hedef). 25.09 saha: yan yana maketlerde iki
+            # satirlik etiketler birbirini kapatiyordu.
+            etiketler = []                 # (kutu, metin, zemin rengi | None, yazi rengi)
+            aktif_etiket = None
+            balon_rengi = QColor(60, 200, 235)
             for bx in data.get("balonlar", []):
                 x1, y1, x2, y2 = bx
                 rx1, ry1 = (x1 - bx0) * scale_x, (y1 - by0) * scale_y
                 rx2, ry2 = (x2 - bx0) * scale_x, (y2 - by0) * scale_y
-                pen.setColor(QColor(60, 200, 235))
+                pen.setColor(balon_rengi)
                 painter.setPen(pen)
                 painter.drawRect(QRectF(rx1, ry1, rx2 - rx1, ry2 - ry1))
-                painter.drawText(QPointF(rx1, max(12.0, ry1 - 4)), "BALON")
-                
+                etiketler.append(((rx1, ry1, rx2, ry2), "BALON", None, balon_rengi))
+
             active_idx = data.get("active_idx", -1)
             estop = data.get("estop", False)
+            nisangah = None                # (renk, nisan noktasi, govde merkezi)
             for i, d in enumerate(data.get("dets", [])):
                 # Etiket rengi: Dost ise Mavi, Düşman ise Kırmızı, aksi halde (Aşama 1/2) Yeşil
                 if d.get("tip") == "Düşman":
@@ -4684,34 +4743,17 @@ class MainWindow(QMainWindow):
                     pen.setStyle(Qt.SolidLine)
                     painter.setPen(pen)
 
-                tip_cv = {"Düşman": "Dusman", "Dost": "Dost"}.get(d["tip"])
                 ad_cv = "?" if d["cls"] == "belirsiz" else algi.goster_ad_cv(d["cls"], d.get("ham", d["cls"]))
-
-                txt1 = f"{tip_cv}" if tip_cv else ""
                 # Hayalet: gercek bir tespit DEGIL, son bilinen konum. Guveni yapay
                 # olarak 1 oldugu icin "%1" yazmak yanilticiydi (operator zayif ama
                 # gercek bir tespit sanabilir) — acikca soyluyoruz.
                 if d.get("hayalet") and not d.get("balon"):
-                    txt2 = f"{ad_cv} · KAYIP"
+                    metin = f"{ad_cv} · KAYIP"
                 else:
-                    txt2 = f"{ad_cv} %{d['conf']}"
-                
-                fm = painter.fontMetrics()
-                tw = max(fm.horizontalAdvance(txt1) if txt1 else 0, fm.horizontalAdvance(txt2))
-                th = fm.height()
-                
-                toplam_h = th * (2 if txt1 else 1)
-                # Kutunun biraz uzerinden baslasin (cok yukardaysa sifira yapissin)
-                y_bg = max(ry1 - 5 - toplam_h, 0.0)
-                
-                painter.fillRect(QRectF(rx1, y_bg, tw + 8, toplam_h + 4), color)
-                
-                painter.setPen(QColor(255, 255, 255))
-                if txt1:
-                    painter.drawText(QPointF(rx1 + 4, y_bg + fm.ascent() + 2), txt1)
-                    painter.drawText(QPointF(rx1 + 4, y_bg + th + fm.ascent() + 2), txt2)
-                else:
-                    painter.drawText(QPointF(rx1 + 4, y_bg + fm.ascent() + 2), txt2)
+                    metin = f"{ad_cv} %{d['conf']}"
+                if i == active_idx:
+                    aktif_etiket = len(etiketler)
+                etiketler.append(((rx1, ry1, rx2, ry2), metin, color, QColor(255, 255, 255)))
                 if i == active_idx and not estop:
                     # Nisangah KUTU MERKEZINE degil, gimbalin gercekten nisan aldigi
                     # NOKTAYA cizilir: nisan noktasi balondur (maketin ALTINDA), govde
@@ -4720,19 +4762,50 @@ class MainWindow(QMainWindow):
                     # yeri YANLIS gosterirdi ve operator kalibrasyonu (balon_ofset)
                     # neye gore cevirecegini goremezdi.
                     hx, hy = algi.det_nisan_noktasi(d, data.get("nisan_balonlar", []))
-                    cx, cy = (hx - bx0) * scale_x, (hy - by0) * scale_y
-                    pen.setColor(color)
+                    nisangah = (QColor(color), ((hx - bx0) * scale_x, (hy - by0) * scale_y),
+                                ((rx1 + rx2) / 2, (ry1 + ry2) / 2))
+
+            # Kilitli hedefin etiketi en iyi yeri alir; sonra geri kalanlar sirayla.
+            sira = sorted(range(len(etiketler)), key=lambda j: j != aktif_etiket)
+            fm = painter.fontMetrics()
+            boy = {j: (fm.horizontalAdvance(etiketler[j][1]) + 8, fm.height() + 4) for j in sira}
+            yerler = etiket_yerlestir([etiketler[j][0] for j in sira], [boy[j] for j in sira],
+                                      pix.width(), pix.height())
+            # Once baglar (etiketlerin ALTINDA kalsin, baska etiketin yazisini cizmesin)
+            pen.setWidth(1)
+            for j, (ex, ey) in zip(sira, yerler):
+                (kx1, ky1, kx2, ky2), metin, zemin, yazi = etiketler[j]
+                ew, eh = boy[j]
+                if ey + eh < ky1 - 4 or ey > ky2 + 4 or ex + ew < kx1 - 4 or ex > kx2 + 4:
+                    # kutusundan uzakta kaldi (istif): hangi kutunun oldugu belli olsun
+                    pen.setColor(zemin or yazi)
                     painter.setPen(pen)
-                    painter.drawEllipse(QPointF(cx, cy), 16, 16)
-                    painter.drawLine(QPointF(cx - 22, cy), QPointF(cx + 22, cy))
-                    painter.drawLine(QPointF(cx, cy - 22), QPointF(cx, cy + 22))
-                    # Govde merkezinden nisan noktasina ince bir bag: operator artinin
-                    # HANGI hedefe ait oldugunu govdeden ayrik dururken de gorsun.
-                    gcx, gcy = (rx1 + rx2) / 2, (ry1 + ry2) / 2
-                    pen.setWidth(1)
-                    painter.setPen(pen)
-                    painter.drawLine(QPointF(gcx, gcy), QPointF(cx, cy))
-                    pen.setWidth(2)
+                    if ey >= ky2:                      # altta: etiketin ustu -> kutunun alti
+                        painter.drawLine(QPointF(ex + 2, ey), QPointF(kx1 + 2, ky2))
+                    else:
+                        painter.drawLine(QPointF(ex + 2, ey + eh), QPointF(kx1 + 2, ky1))
+            pen.setWidth(2)
+            for j, (ex, ey) in zip(sira, yerler):
+                _, metin, zemin, yazi = etiketler[j]
+                ew, eh = boy[j]
+                if zemin is not None:
+                    painter.fillRect(QRectF(ex, ey, ew, eh), zemin)
+                painter.setPen(yazi)
+                painter.drawText(QPointF(ex + 4, ey + fm.ascent() + 2), metin)
+
+            if nisangah is not None:
+                renk, (cx, cy), (gcx, gcy) = nisangah
+                pen.setColor(renk)
+                painter.setPen(pen)
+                painter.drawEllipse(QPointF(cx, cy), 16, 16)
+                painter.drawLine(QPointF(cx - 22, cy), QPointF(cx + 22, cy))
+                painter.drawLine(QPointF(cx, cy - 22), QPointF(cx, cy + 22))
+                # Govde merkezinden nisan noktasina ince bir bag: operator artinin
+                # HANGI hedefe ait oldugunu govdeden ayrik dururken de gorsun.
+                pen.setWidth(1)
+                painter.setPen(pen)
+                painter.drawLine(QPointF(gcx, gcy), QPointF(cx, cy))
+                pen.setWidth(2)
 
             # --- Lazer Referans Nisangahi ---
             # Kare merkezi DEGIL: kamera-lazer boresight/paralaks ofseti kalibre

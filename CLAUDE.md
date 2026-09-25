@@ -177,20 +177,25 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
   harekete yasak, **kırmızı** = atışa yasak, **soluk yeşil** = atış izni.
 - Klavye: `W/A/S/D` veya oklar = yön · `R` = merkez · **`Space`+`B` birlikte = ateş** (tek tuş boş) · `Z`/`X` = zoom yakın/uzak · `C` (art arda 1/2/3) = hassasiyet ·
   **`Esc` = ACİL DURDUR aç/kapa** (tekrar basış ≥1 sn sonra devam). Kol: D-pad + **sol joystick (yatay + dikey)**, **sağ joystick Y = görüntü zoom'u**
-  (yalnız Manuel + Aşama 1, en çok 4×, yalnız ekran — komut üretmez) ·
+  (otonomda yok, en çok 4×, yalnız ekran — komut üretmez) ·
   **Options/Start = ACİL DURDUR aç/kapa** · Çarpı/A (art arda 1/2/3) = hassasiyet · L2+R2 birlikte = ateş · **L1+R1 birlikte** = merkez.
   Acil durdurmadan çıkış: DEVAM ET butonu ya da aynı kısayol; donanım butonu basılıyken olmaz.
 - **Mod = aşama (25.09):** Aşama 1 = Manuel (kendiliğinden seçili). Aşama 2/3 seçilince
-  **hazırlık** (`mod == "Hazırlık"`): otonom başlamaz, klavye/kol/ekran D-pad/merkez hareket
-  ETTİRMEZ (`_manuel_hareket_izni`); yasak alan, hassasiyet, lazer ayarlanır. ATEŞ'in yerindeki
-  **AŞAMA n'İ BAŞLAT** otonomu açar/kapatır. Sağ kolon her aşamada aynı; aşamaya özel olan
-  (A1 zarf / A2-A3 takip-nişan-aranan) alt satırda. Mod değişince elle açılmış ateş kesilir.
+  **hazırlık** (`mod == "Hazırlık"`): otonom başlamaz; elle kontrol **Aşama 1'deki gibi**
+  (klavye/kol/ekran D-pad, merkez, zoom, Space+B — 25.09 akşam kullanıcı isteği). ATEŞ'in
+  yerindeki **AŞAMA n'İ BAŞLAT** otonomu açar: o andan **elle hareket, merkez, zoom ve elle
+  ateş AÇMA biter** (`_manuel_hareket_izni`; kısayol otonomda ateşi yalnız KESER), süren
+  merkeze alma durur. Tekrar basış hazırlığa döndürür. Sağ kolon her aşamada aynı; aşamaya
+  özel olan (A1 zarf / A2-A3 takip-nişan-aranan) alt satırda. Mod değişince elle açılmış ateş kesilir.
 - **HASSASİYET** (D-pad altında): Hassas 0,1° / Orta 0,5° (açılış) / Hızlı 1° tek dokunuş;
   basılı tutma 3 / 10 / 40 °/sn. 15 m'de 1° ≈ 26 cm. Kol D-pad'i de tek dokunuş atar,
   joystick karesel. Tablo: `MainWindow.HASSASIYET`. Merkeze alma/otonom etkilenmez.
 - **Ekrandaki kutular (25.09 video):** kutu algı thread'inin eski karesinden gelir; çizilirken
   kart açı geçmişiyle kameranın o andan beri dönüşü kadar kaydırılır (`kamera_kaymasi_px`,
   kart bağlı değilse telafi yok). Oturmuş balon izi kısa kaçırmada kesikli kutuyla kalır.
+  Etiket **tek satır** (`F-16 %93`, `Balon %91`): dost/düşman yazılmaz, **renk söyler** (mavi
+  dost, kırmızı düşman, yeşil hedef). `etiket_yerlestir` etiketleri birbirinin ve başka
+  hedefin üstüne bindirmez; kilitli hedefinki önce yer seçer, istiflenen ince çizgiyle bağlı.
 - **Bir tuşu değiştiren `kontroller.py`'yi de değiştirir** (üst çubuktaki "Kontroller" paneli oradan
   okur). Ayrışırsa `kontroller.py` / `kapi_testleri_arayuz.py` kırmızıya düşer.
 
@@ -200,7 +205,7 @@ sınır mekaniğin kendisidir (kol aralığı + firmware kırpması).
 
 ```bash
 python app/kapi_testleri.py        # birleşik arayüz (gerçek pencere açar)
-python app/kapi_testleri_arayuz.py # GÜVENLİK KAPILARI, pencere AÇMADAN (31 test)
+python app/kapi_testleri_arayuz.py # GÜVENLİK KAPILARI, pencere AÇMADAN (36 test)
 python app/bolge.py            # yasak alan matematiği
 python app/protokol.py         # komut üretimi + sabit tutarlılığı
 python app/kontrol.py          # mock cihazla uçtan uca
@@ -249,6 +254,16 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **25.09.2026 · final_v11 (saha: etiketler üst üste + hazırlıkta kontrol)** — Koridor
+  ekranında yan yana üç maket + balonlarının iki satırlık etiketleri ("Dost / Balon %91")
+  birbirini kapatıyordu. Etiket tek satır, taraf yalnız renkle; `etiket_yerlestir` adaylar
+  (üst/alt/yan/iç, yukarı-aşağı istif) arasından önce başka etiketle, sonra başka hedefle
+  çakışmayanı seçer, kilitli hedef önce. Gerçek `_kare_geldi` aynı dizilişle çizildi: eski
+  6 etiket üst üste, yeni çakışma 0, her etiket kutusuna ≤ bir etiket boyu. A2/A3
+  **hazırlıkta elle kontrol Aşama 1 gibi** (kullanıcı isteği); BAŞLAT'tan sonra elle
+  hareket/merkez/zoom yok, kısayol ateşi yalnız keser. Eski hata: otonom başlarken süren
+  merkeze alma DURMUYORDU (`_merkez_calisiyor` yalnız tek adımda True). 15 mutasyonun 15'i
+  yakalandı. **Donanımda denenmedi.**
 - **24.09.2026 · final_v9 (saha: lazer atılıyor ama balon patlamıyor)** — Kayıt (21:20
   oturumu): 21:27'den sonra uzak balona (12–36 px) 37 atışın **37'si ~0.2 sn'de** kesildi:
   lazer yandıktan 3 kare sonra model balonu tanımıyor, kapı "hedef görünmüyor" deyip kesiyor,
@@ -281,21 +296,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   adaylar (yalnız gürültü ölçekleme, kip geçişinde filtre sabitleme, boşluk histerezisi,
   filtreli ölü bölge) `SAHA_AYARI` yorumunda. 12 mutasyonun 12'si yakalandı. Ekran kaydı
   tespit ölçümüne uygun değil (balonun üstüne arayüz kutusu çizili). **Donanımda denenmedi.**
-- **24.09.2026 · final_v9 (saha: lazer balonu patlatmıyor + sert takip)** — Kayıt
-  (`app/loglar`): lazer ayarlandıktan sonra HER otonom atış ~0.2 sn'de kesildi (%7'de de
-  %55'te de): lazer noktası balona değince model balonu tanımıyor, iz hayalete düşüyor,
-  kapı ateşi kesiyordu. Koridor videosunun 122 balonuna yapay nokta: yarıçap 0.15 boy →
-  model 105/122, kenarda 58/122. **Lazer altında** (`balon_takip`, yalnız gerçek lazerle
-  otonom ateş süresince + 0.35 sn): (1) balon hâlâ yerindeyse nokta modele verilmeden
-  doldurulur; (2) model yine kaçırırsa iz **o karedeki halka kanıtıyla** tutulur (nokta
-  hariç balon dairesi kırmızı, dış halka kırmızı DEĞİL). İz sürme 105 → 121/122, kenarda
-  58 → 121; boş yerde (patlamış balon) yanlış kanıt 1/244, balon uydurma yok. Nokta balonun
-  yarısını kaplarsa karar yok → ateş kesilir (kameranın pozlamasını düşürmek yardım eder).
-  `OTONOM_ATES_SURE` 1 → **2 sn** (balon patlarsa kaybolur, hemen kesilir), `IMHA_S` 3 sn,
-  `_ates_kes` → `balon_takip.ates_bitti()`. Test 24e değişti: "ateş altında renk yok"
-  sağlam balonu da öldürüyordu; artık gövde/kırmızı arka plan/boş yer ayrı sınanıyor.
-  **Yumuşak takip**: kayıtta namlu 1-2 der/sn'lik asılı balona kademenin tam ivmesiyle
-  (400/500) ileri-geri fırlıyordu (%95 150-380 der/sn²). Otonomda ivme tavanı
-  `TS.TAKIP_IVME` 200 / `PAN_TAKIP_IVME` 250 (`_mod_sec` → `kontrol.takip_kipi`); tepe hız
-  ve manuel değişmez. Kart yörünge kopyası benzetim: tepe ivme yarıya, takip hatası
-  değişmez. 12 mutasyonun 12'si yakalandı. **Donanımda denenmedi.**

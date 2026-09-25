@@ -1021,9 +1021,10 @@ def test_odunc_kapilar_gercek_pencerede_de_metot():
     assert not bozuk, f"gercek pencerede metot OLMAYAN kapilar: {bozuk}"
 
 
-def test_sag_cubuk_zoom_yalniz_manuel_asama1():
-    """Sağ joystick Y = görüntü zoom'u; yalnız Manuel + Aşama 1'de (24.09). Zoom
-    gimbal'e HİÇ komut göndermez; koşul dışında 1×'e döner ve sıfırlanır."""
+def test_sag_cubuk_zoom_otonomda_yok():
+    """Sağ joystick Y = görüntü zoom'u; Aşama 1'de ve A2/A3 HAZIRLIĞINDA var, otonom
+    BAŞLAYINCA yok (25.09; önce yalnız A1'di). Zoom gimbal'e HİÇ komut göndermez;
+    koşul dışında 1×'e döner ve sıfırlanır."""
     w = SahtePencere()
     w.thread = A.VideoThread(None, None, None)
     w.asama = "Aşama 1"
@@ -1046,11 +1047,14 @@ def test_sag_cubuk_zoom_yalniz_manuel_asama1():
     kol(-1.0, adim=100)
     assert w._zoom_katsayi() == 1.0, "asagi 1x'e donmedi / 1x altina indi"
 
-    # Otonom'da ya da baska asamada zoom YOK
-    for mod, asama in (("Otonom", "Aşama 1"), ("Manuel", "Aşama 2"), ("Manuel", None)):
-        w.mod, w.asama, w._zoom = mod, asama, 1.0
+    # A2/A3 hazirliginda zoom VAR (Asama 1 gibi); otonom baslayinca YOK
+    for asama in ("Aşama 2", "Aşama 3"):
+        w.mod, w.asama, w._zoom = w.HAZIRLIK, asama, 1.0
         kol(1.0)
-        assert w._zoom_katsayi() == 1.0, f"{mod}/{asama}'da zoom calisti"
+        assert w._zoom_katsayi() > 2.0, f"{asama} hazirliginda zoom calismadi: {w._zoom}"
+        w.mod, w._zoom = "Otonom", 1.0
+        kol(1.0)
+        assert w._zoom_katsayi() == 1.0, f"{asama} otonomda zoom calisti"
 
     # Klavye: [Z] basili yakinlastirir, [X] uzaklastirir; gimbal oynamaz
     Qt = A.Qt
@@ -1075,13 +1079,13 @@ def test_sag_cubuk_zoom_yalniz_manuel_asama1():
     assert w._zoom_katsayi() == 1.0, "Otonom'da [Z] zoom yapti"
     w.mod = "Manuel"
 
-    # Kosuldan cikinca sifirlanir; geri donunce eski yakinlik gelmez
-    w.mod, w.asama = "Manuel", "Aşama 1"
+    # Otonoma gecince sifirlanir; hazirliga donunce eski yakinlik gelmez
+    w.mod, w.asama = w.HAZIRLIK, "Aşama 2"
     kol(1.0)
-    w.asama = "Aşama 2"
+    w.mod = "Otonom"
     assert w._zoom_katsayi() == 1.0
-    w.asama = "Aşama 1"
-    assert w._zoom_katsayi() == 1.0, "Asama 1'e donunce eski zoom geri geldi"
+    w.mod = w.HAZIRLIK
+    assert w._zoom_katsayi() == 1.0, "hazirliga donunce eski zoom geri geldi"
 
 
 def test_hassasiyet_tek_dokunus_ve_hiz():
@@ -1166,11 +1170,13 @@ def test_hassasiyet_kisayolu_ve_kutu_kaymasi():
     assert A.kamera_kaymasi_px(fn, None, 2.0, 1280) is None
 
 
-def test_mod_asama_bagi_ve_hazirlikta_elle_hareket_yok():
+def test_mod_asama_bagi_hazirlikta_elle_kontrol_otonomda_yok():
     """25.09: Manuel = Aşama 1 (kendiliğinden seçili). Aşama 2/3 seçilince HAZIRLIK:
-    otonom BAŞLAMAZ ve klavye / kol / ekrandaki D-pad / merkeze al HAREKET ETTİRMEZ.
-    Otonom yalnız BAŞLAT ile başlar, tekrar basınca hazırlığa döner. Mod değişince
-    elle açılmış ateş kesilir; ACİL DURDUR'dayken BAŞLAT reddedilir."""
+    otonom BAŞLAMAZ; klavye / kol / ekrandaki D-pad / merkeze al Aşama 1'deki gibi
+    ÇALIŞIR (25.09 akşam kullanıcı isteği; öğlen hazırlıkta hareket yoktu). Otonom yalnız
+    BAŞLAT ile başlar: o an elle hareket ve zoom BİTER, süren merkeze alma DURUR, elle
+    ateş AÇILMAZ (kesmek serbest). Tekrar basınca hazırlığa döner, elle kontrol geri
+    gelir. Mod değişince elle açılmış ateş kesilir; ACİL DURDUR'dayken BAŞLAT reddedilir."""
     Qt = A.Qt
     import types
     w = SahtePencere()
@@ -1183,46 +1189,84 @@ def test_mod_asama_bagi_ve_hazirlikta_elle_hareket_yok():
     w.baslat_btn = SahteButon()
     w.sb_mod = SahteEtiket()
 
+    def yollar():
+        """Her elle kontrol yolunu ayri dener. Doner: {yol: calisti mi}."""
+        s = {}
+        for ad, yap in (("ekran D-pad", lambda: (w._dpad_press("right"), w._dpad_release("right"))),
+                        ("klavye", lambda: (w._tus_bas(SahteTus(Qt.Key_W)),
+                                            w._tus_birak(SahteTus(Qt.Key_W))))):
+            once = (w.pan_aci, w.tilt_aci)
+            yap()
+            s[ad] = (w.pan_aci, w.tilt_aci) != once
+        once = (w.pan_aci, w.tilt_aci)
+        w.gamepad = SahteGamepad(pan=1.0)
+        w._gp_son_t = time.time() - 0.1
+        w._gamepad_tik()
+        s["kol cubugu"] = (w.pan_aci, w.tilt_aci) != once
+        w.gamepad = SahteGamepad()
+        w._gamepad_tik()                                   # cubuk birakildi
+        for ad, yap in (("klavye merkez", lambda: w._tus_bas(SahteTus(Qt.Key_R))),
+                        ("kol merkez", lambda: (setattr(w, "gamepad", SahteGamepad(basili=("l1", "r1"))),
+                                                w._gamepad_tik()))):
+            w._merkez_timer.stop()
+            yap()
+            s[ad] = w._merkez_timer.isActive()
+            w._merkez_timer.stop()
+        w._tus_birak(SahteTus(Qt.Key_R))
+        return s
+
     # Manuel sekmesi -> Asama 1; Otonom sekmesi -> A2 HAZIRLIK (otonom baslamaz)
     w._mod_sec("Manuel")
     assert (w.mod, w.asama) == ("Manuel", "Aşama 1")
+    assert all(yollar().values()), "Asama 1'de elle kontrol calismiyor"
     w._mod_sec("Otonom")
     assert (w.mod, w.asama) == (w.HAZIRLIK, "Aşama 2"), (w.mod, w.asama)
     assert w.mod_btns["Otonom"].isChecked() and not w.baslat_btn.isChecked()
+    assert not w.inference_thread.otonom, "hazirlikta otonom nisan dongusu acildi"
 
-    # Hazirlikta elle hareket YOK: ekran D-pad, klavye, kol (yon + merkez)
-    pan0, tilt0 = w.pan_aci, w.tilt_aci
-    w._dpad_press("right"); w._dpad_release("right")
-    w._dpad_press("center")
-    w._tus_bas(SahteTus(Qt.Key_W)); w._tus_birak(SahteTus(Qt.Key_W))
-    w.gamepad = SahteGamepad(pan=1.0)
-    w._gp_son_t = time.time() - 0.1
-    w._gamepad_tik()
-    w.gamepad = SahteGamepad(basili=("l1", "r1"))
-    w._gamepad_tik()
-    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "hazirlikta elle hareket gecti"
-    assert not w._merkez_timer.isActive(), "hazirlikta merkeze alma basladi"
+    # Hazirlikta elle kontrol Asama 1 gibi: her yol calisir
+    s = yollar()
+    assert all(s.values()), f"hazirlikta calismayan elle yol: {[k for k, v in s.items() if not v]}"
 
-    # BASLAT -> Otonom; yine elle hareket yok; tekrar -> Hazirlik
+    # BASLAT -> Otonom: SUREN merkeze alma durur, zoom 1x'e doner, elle kontrol biter
+    w._aci_reset()
+    assert w._merkez_timer.isActive()
+    w._zoom = 3.0
     w._otonom_baslat()
     assert w.mod == "Otonom" and w.baslat_btn.isChecked()
     assert w.inference_thread.otonom, "BASLAT otonom nisan dongusunu acmadi"
-    w._dpad_press("left"); w._dpad_release("left")
-    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "otonomda elle hareket gecti"
+    assert not w._merkez_timer.isActive(), "otonom basladi ama merkeze alma suruyor"
+    assert w._zoom_katsayi() == 1.0, "otonomda zoom kaldi"
+    s = yollar()
+    assert not any(s.values()), f"otonomda gecen elle yol: {[k for k, v in s.items() if v]}"
+    # Otonomda elle ates ACILMAZ; otonomun actigi atesi KESMEK serbest
+    for ac in (lambda: w._ates_kisayolu(),
+               lambda: (w._tus_bas(SahteTus(Qt.Key_Space)), w._tus_bas(SahteTus(Qt.Key_B)))):
+        ac()
+        assert not w.kontrol.mock.lazer and not w.fire_btn.isChecked(), "otonomda elle ates acildi"
+        w._tus_birak(SahteTus(Qt.Key_Space)); w._tus_birak(SahteTus(Qt.Key_B))
+    w.fire_btn.setChecked(True)
+    w._ates_bas()                                # otonomun atesi (ayni tek kapi)
+    assert w.kontrol.mock.lazer is True
+    w._ates_kisayolu()
+    assert w.kontrol.mock.lazer is False and not w.fire_btn.isChecked(), \
+        "otonomda kisayol atesi kesmedi"
+    # DURDUR -> Hazirlik: elle kontrol geri gelir
     w._otonom_baslat()
     assert w.mod == w.HAZIRLIK and not w.baslat_btn.isChecked()
     assert not w.inference_thread.otonom, "DURDUR otonom dongusunu kapatmadi"
+    assert all(yollar().values()), "otonom durdurulunca elle kontrol geri gelmedi"
 
     # Asama degisirse calisan otonom durur (yeni asama onaysiz baslamaz)
     w._otonom_baslat()
     w._asama_sec("Aşama 3")
     assert w.mod == w.HAZIRLIK, "asama degisince otonom surdu"
-    # Asama 3 ayni mantik: hazirlik, elle hareket yok, kendi BAŞLAT'i
+    # Asama 3 ayni mantik: hazirlikta elle kontrol, kendi BAŞLAT'i, otonomda yok
     assert "AŞAMA 3" in w.baslat_btn._metin and "BAŞLAT" in w.baslat_btn._metin, w.baslat_btn._metin
-    w._dpad_press("right"); w._dpad_release("right")
-    assert (w.pan_aci, w.tilt_aci) == (pan0, tilt0), "A3 hazirlikta elle hareket gecti"
+    assert all(yollar().values()), "A3 hazirlikta elle kontrol calismiyor"
     w._otonom_baslat()
     assert w.mod == "Otonom" and "DURDUR" in w.baslat_btn._metin
+    assert not any(yollar().values()), "A3 otonomda elle hareket gecti"
     w._otonom_baslat()
 
     # ACIL DURDUR'dayken BASLAT reddedilir
@@ -1231,16 +1275,59 @@ def test_mod_asama_bagi_ve_hazirlikta_elle_hareket_yok():
     assert w.mod == w.HAZIRLIK, "E-Stop'ta otonom basladi"
     w.kontrol.estop(False)
 
-    # Asama 1 -> Manuel: hareket geri gelir; manuel ates mod degisince kesilir
+    # Asama 1 -> Manuel: hareket surer; manuel ates mod degisince kesilir
     w._asama_sec("Aşama 1")
     assert w.mod == "Manuel"
-    w._dpad_press("right"); w._dpad_release("right")
-    assert w.pan_aci != pan0, "Manuel'de hareket calismiyor"
+    assert all(yollar().values()), "Manuel'de elle kontrol calismiyor"
     w._ates_kisayolu()
     assert w.kontrol.mock.lazer is True
     w._asama_sec("Aşama 2")
     assert w.kontrol.mock.lazer is False and not w.fire_btn.isChecked(), \
         "Manuel'de acilan ates hazirliga gecince kesilmedi"
+
+
+def test_kutu_etiketleri_ust_uste_binmez():
+    """25.09 saha: yan yana üç maket + altlarındaki balonlar — etiketler hep kutunun sol
+    üstüne yazıldığı için birbirini kapatıyordu. `etiket_yerlestir`: hiçbir etiket başka
+    etiketin ve (yer varken) başka bir hedefin kutusunun üstüne binmez, kare dışına taşmaz;
+    tek başına duran kutunun etiketi eskisi gibi sol üstte kalır."""
+    ew, eh = 84.0, 20.0
+
+    def kesisir(a, b):
+        return A._kesisim(a, b) > 0
+
+    def dortgen(yer):
+        return (yer[0], yer[1], yer[0] + ew, yer[1] + eh)
+
+    # Ekran goruntusundeki dizilis: bitisik uc maket, her birinin hemen altinda balonu.
+    kutular = []
+    for x in (600.0, 640.0, 680.0):
+        kutular.append((x, 440.0, x + 40.0, 480.0))              # maket
+        kutular.append((x + 5.0, 482.0, x + 35.0, 505.0))        # balon
+    boy = [(ew, eh)] * len(kutular)
+    eski = [dortgen((k[0], k[1] - eh - 2.0)) for k in kutular]
+    assert any(kesisir(a, b) for i, a in enumerate(eski) for b in eski[i + 1:]), \
+        "senaryo eski yerlesimde bile cakismiyor — test bir sey olcmuyor"
+    yer = [dortgen(y) for y in A.etiket_yerlestir(kutular, boy, 1280.0, 720.0)]
+    for i, a in enumerate(yer):
+        for j, b in enumerate(yer[i + 1:], i + 1):
+            assert not kesisir(a, b), f"etiket {i} ile {j} ust uste: {a} {b}"
+        for j, k in enumerate(kutular):
+            assert j == i or not kesisir(a, k), f"etiket {i} baska hedefin ({j}) kutusunu kapatiyor"
+        assert 0 <= a[0] and a[2] <= 1280 and 0 <= a[1] and a[3] <= 720, f"kare disi: {a}"
+        k = kutular[i]                           # kendi kutusundan en cok bir etiket boyu uzakta
+        uzak = max(k[1] - a[3], a[1] - k[3], k[0] - a[2], a[0] - k[2], 0.0)
+        assert uzak <= eh + 2.0 + 2.0, f"etiket {i} kutusundan {uzak:.0f} px uzakta: {a} {k}"
+
+    # Tek kutu: etiket eskisi gibi kutunun sol ustunde (alisilmis gorunum bozulmaz)
+    assert A.etiket_yerlestir([(100.0, 200.0, 180.0, 260.0)], [(ew, eh)], 1280, 720) == \
+        [(100.0, 200.0 - eh - 2.0)]
+    # Karenin tepesindeki kutu: etiket kare disina cikmaz, kutunun altina iner
+    (x, y), = A.etiket_yerlestir([(100.0, 0.0, 180.0, 60.0)], [(ew, eh)], 1280, 720)
+    assert y >= 0 and not kesisir(dortgen((x, y)), (100.0, 0.0, 180.0, 60.0)), (x, y)
+    # Oncelik: ilk etiket (kilitli hedef) en iyi yeri alir
+    ilk = A.etiket_yerlestir(kutular[2:4] + kutular[:2], boy[:4], 1280, 720)[0]
+    assert ilk == (kutular[2][0], kutular[2][1] - eh - 2.0), ilk
 
 
 def test_kontroller_listesi_gercek_tuslarla_ayni():
@@ -1302,10 +1389,11 @@ if __name__ == "__main__":
     test_lazer_gucu_onaysiz_degismez()
     test_odunc_kapilar_gercek_pencerede_de_metot()
     test_kontroller_listesi_gercek_tuslarla_ayni()
-    test_sag_cubuk_zoom_yalniz_manuel_asama1()
+    test_sag_cubuk_zoom_otonomda_yok()
     test_hassasiyet_tek_dokunus_ve_hiz()
     test_hassasiyet_kisayolu_ve_kutu_kaymasi()
-    test_mod_asama_bagi_ve_hazirlikta_elle_hareket_yok()
+    test_mod_asama_bagi_hazirlikta_elle_kontrol_otonomda_yok()
+    test_kutu_etiketleri_ust_uste_binmez()
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
