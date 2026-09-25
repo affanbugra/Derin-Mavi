@@ -691,6 +691,12 @@ AYAR_TANIM_TESPIT = [
      "aracı hiç okunmamış balona ATEŞ YOK. Ateş edilen balon kaybolursa imha sayılır.\n\n"
      "KAPALI: eski yol — araca kilitlenilir, balon gövdeden kestirilir (balon_ofset). "
      "Balon modeli sahada yanlış çalışırsa kaçış kapısı."),
+    ("hizli_cikarim", "Hızlı çıkarım (FP16)", "anahtar", 0, 1,
+     "AÇIK (önerilen): modeller ekran kartında yarım hassasiyetle çalışır — AI daha hızlı.\n\n"
+     "Ölçüldü (25.09, gerçek kareler): Aşama 1 kare süresi %14 kısa; tespitler aynı "
+     "(balon 1083/1083, araç 527/532 — farklar yalnız eşiğin sınırında), güven farkı "
+     "≤ 0.012, kutu ≤ 1.5 px, sınıf değişimi yok.\n\n"
+     "KAPALI: eski tam hassasiyet (FP32). Ekran kartı yoksa zaten etkisizdir."),
     ("balon_esik", "Balon güven eşiği", "yuzde", 5, 95,
      "Balon modelinin bir kutuyu 'balon adayı' sayması için gereken güven.\n\n"
      "Aday kilitlenmeden önce 3 karede görülmek zorunda; tek karelik zayıf kutu zararsızdır.\n\n"
@@ -5347,7 +5353,38 @@ class MainWindow(QMainWindow):
             QApplication.instance().setStyleSheet(qss)
 
 
+def windows_kisitlamasini_kapat():
+    """Windows GUC KISITLAMASI (EcoQoS) bu surec icin KAPALI. 25.09 olculdu (i7-12700H):
+    ayni AI dongusu kisitlanirsa 147 ms/kare (6.8 fps), kisitlanmazsa 53 ms; yalniz verimli
+    (E) cekirdeklerde 89 ms. Windows kisitlamayi pille calisirken ve pencere arka plandayken
+    uygular — sahada o gun pille calisilan araliklar vardi. Belgelenmis API
+    (SetProcessInformation / ProcessPowerThrottling), YALNIZ bu sureci etkiler; sistem ayari
+    degistirmez. Kisitlama yoksa hiz degismez (olculdu). Windows disinda / hata: sessizce gecer."""
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _Kisitlama(ctypes.Structure):
+            _fields_ = [("Version", wintypes.ULONG), ("ControlMask", wintypes.ULONG),
+                        ("StateMask", wintypes.ULONG)]
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetProcessInformation.argtypes = [wintypes.HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                              wintypes.DWORD]
+        k32.SetProcessInformation.restype = wintypes.BOOL
+        # Version 1, ControlMask = EXECUTION_SPEED, StateMask = 0 -> bu surec kisitlanmaz
+        k = _Kisitlama(1, 0x1, 0x0)
+        return bool(k32.SetProcessInformation(k32.GetCurrentProcess(), 4,   # ProcessPowerThrottling
+                                              ctypes.byref(k), ctypes.sizeof(k)))
+    except Exception:
+        return False
+
+
 def main():
+    if not windows_kisitlamasini_kapat() and sys.platform == "win32":
+        print("[UYARI] Windows guc kisitlamasi kapatilamadi — pille / arka planda AI yavaslayabilir")
     app = QApplication(sys.argv)
     app.setFont(T.uygulama_fontu())      # SF Pro varsa o, yoksa en yakın karşılığı
     w = MainWindow()

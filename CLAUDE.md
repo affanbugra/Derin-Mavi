@@ -254,6 +254,22 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
 
 ## 8. Değişiklik günlüğü (yalnız son 3 madde tutulur)
 
+- **25.09.2026 · final_v12 (saha: AI 10 FPS'e düştü)** — Ölçüm (gerçek modeller, kesintisiz
+  saha kaydı + uygulamanın kendisi ekransız): Aşama 1 ~60–75 ms/kare, Aşama 2 ~33 ms. A1'in
+  %40'ı kilit penceresi (kilitli uzak araç ana taramada görünmeyince HER kare, 2 pencere),
+  kalanı araç + balon modeli; GPU %23 dolu — darboğaz model çağrısı başına Python yükü.
+  **Asıl bulgu:** Windows güç kısıtlaması (EcoQoS) açıkken aynı döngü **147 ms** (6.8 FPS),
+  yalnız E çekirdeklerde 89 ms (0.66×, sahadaki düşüş oranı ~0.64); o gün 16:47–16:54 ve
+  21:03–21:22 **pille** çalışılmış (Kernel-Power 105). Yapılan: (1) `main()` süreç için güç
+  kısıtlamasını kapatır (`windows_kisitlamasini_kapat`, belgeli API, sistem ayarı değil;
+  kısıtlama yokken hız aynı). (2) Tüm model çağrıları FP16 (`algi.cikarim_ayari`, ayar
+  "hizli_cikarim"): A1 −%15 (3 tur sıralı A/B), A2 fark yok; tespitler aynı (balon
+  1083/1083, araç 527/532 — farklar eşiğin ±0.01 sınırında, kutu ≤ 1.5 px, sınıf 0). (3)
+  `kirmizi_oneri` aynı kare nesnesinde bir kez. Elenen: yalın çıkarım (Predictor'sız, sonuç
+  birebir ama kazanç < 1 ms), iki modeli paralel koşturmak (−%16 ölçüldü, çekirdek döngü
+  değişir — ekip kararı), TensorRT (paket kurulumu gerekir). **Sahada şart: şarj kablosu
+  takılı, Windows güç modu "En iyi performans".** 9 mutasyonun 9'u yakalandı. **Donanımda
+  denenmedi.**
 - **25.09.2026 · final_v12 (kullanıcı isteği: lazer süresi + nişangah ayarı)** — ATEŞ'in
   ⚙'i ile açılan lazer kutucuğuna iki bölüm: (1) **Otonom atış süresi** kaydırıcısı 0.5–5 sn
   (0.1 sn adım, varsayılan 2 sn `algi.VARSAYILAN_AYAR["otonom_ates_sure"]`); tur başında
@@ -278,13 +294,3 @@ Aşama-2'de ayrı "3 tur üst üste = 0" kuralı **yok** · video yetenekleri 6 
   olan tespit. Renk+şekil bulucu denendi: cam yansıması, insan, duvar figürü, maketin kendisi
   → ateşe dayanak olamaz. Çözüm yeniden eğitim (§7.2). 5 mutasyonun 5'i yakalandı.
   **Donanımda denenmedi.**
-- **25.09.2026 · final_v11 (saha: etiketler üst üste + hazırlıkta kontrol)** — Koridor
-  ekranında yan yana üç maket + balonlarının iki satırlık etiketleri ("Dost / Balon %91")
-  birbirini kapatıyordu. Etiket tek satır, taraf yalnız renkle; `etiket_yerlestir` adaylar
-  (üst/alt/yan/iç, yukarı-aşağı istif) arasından önce başka etiketle, sonra başka hedefle
-  çakışmayanı seçer, kilitli hedef önce. Gerçek `_kare_geldi` aynı dizilişle çizildi: eski
-  6 etiket üst üste, yeni çakışma 0, her etiket kutusuna ≤ bir etiket boyu. A2/A3
-  **hazırlıkta elle kontrol Aşama 1 gibi** (kullanıcı isteği); BAŞLAT'tan sonra elle
-  hareket/merkez/zoom yok, kısayol ateşi yalnız keser. Eski hata: otonom başlarken süren
-  merkeze alma DURMUYORDU (`_merkez_calisiyor` yalnız tek adımda True). 15 mutasyonun 15'i
-  yakalandı. **Donanımda denenmedi.**

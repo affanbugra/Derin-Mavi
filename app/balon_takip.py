@@ -570,7 +570,8 @@ def _tespit_et(model, frame, pencereler, esik, araclar):
     girdiler = [frame] + [frame[y1:y2, x1:x2] for x1, y1, x2, y2 in pencereler]
     ofset = [(0, 0, "tam")] + [(x1, y1, "pencere") for x1, y1, _, _ in pencereler]
     en_dusuk = min(esik, IZ_ESIK)
-    sonuclar = model.predict(girdiler, conf=en_dusuk, imgsz=640, verbose=False)
+    sonuclar = model.predict(girdiler, conf=en_dusuk, imgsz=640, verbose=False,
+                             **algi.cikarim_ayari(model))
     ham = []
     for (ox, oy, kaynak), r in zip(ofset, sonuclar):
         for b in (r.boxes if r.boxes is not None else []):
@@ -1136,6 +1137,7 @@ if __name__ == "__main__":
             self.olcek = olcek
 
         def predict(self, girdiler, **kw):
+            self.son_kw = kw
             self.girdi_sayilari.append(len(girdiler))
             self.boyutlar.append([img.shape[:2] for img in girdiler])
             cikti = []
@@ -1187,6 +1189,8 @@ if __name__ == "__main__":
     assert a >= 0 and b[a]["balon"] and b[a]["tip"] == "Hedef", (b, a)
     nx, ny = algi.det_nisan_noktasi(b[a])
     assert abs(nx - 640) <= 1 and abs(ny - 400) <= 1, (nx, ny)     # govde ofseti YOK
+    # HIZLI CIKARIM (FP16, 25.09): balon modeli de ayarin "half"ini alir.
+    assert m.son_kw.get("half") == (bool(int(algi.AYAR["hizli_cikarim"])) and algi._gpu_var()), m.son_kw
 
     # 2. A1 (manuel) ve E-Stop: balon GOSTERILIR ama kilit YOK.
     b, a = kos(m, kare, asama=1)

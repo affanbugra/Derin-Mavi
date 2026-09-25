@@ -11,6 +11,7 @@ import os
 import time
 import tempfile
 import threading
+import weakref
 import cv2
 
 # SAHI (Slicing Aided Hyper Inference): uzak/kucuk nesneler icin dilimli cikarim.
@@ -242,6 +243,11 @@ VARSAYILAN_AYAR = {
     # kilit ve nisan BALONA kurulur, arac yalniz kimlik kanitidir. 0 = eski yol (arac
     # kilidi + govdeden balon kestirimi) — balon modeli sahada saparsa kacis kapisi.
     "balon_takip": 1,
+    # HIZLI CIKARIM (FP16, yalniz GPU'da): tum model cagrilari yarim hassasiyetle. 25.09
+    # olculdu (RTX 3050 Ti, gercek kareler): Asama 1 kare suresi %14 kisa (kilit penceresi
+    # 25 -> 19 ms); tespitler ayni — balon 1083/1083, arac 527/532 (farklar esigin +-0.01
+    # siniri), guven farki <= 0.012, kutu <= 1.5 px, sinif degisimi 0. 0 = eski FP32.
+    "hizli_cikarim": 1,
     # Balon modelinin aday esigi. Iz ONAY_KARE karede gorulmeden kilitlenmez; tek
     # karelik dusuk guvenli kutu bu yuzden zararsizdir.
     "balon_esik": 0.30,
@@ -298,7 +304,7 @@ AYAR_SINIR = {
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),
     "arama_cozunurluk": (320, 1920), "uzak_tarama": (0, 1), "uzak_tarama_periyot": (1, 30), "uzak_kirmizi": (0, 1), "zor_ornek": (0, 1),
     "uzak_onay_esigi": (0.10, 0.99), "renk_takip": (0, 1),
-    "balon_takip": (0, 1), "balon_esik": (0.05, 0.95),
+    "balon_takip": (0, 1), "balon_esik": (0.05, 0.95), "hizli_cikarim": (0, 1),
     "balon_cap_cm": (0, 100), "menzil_kontrol": (0, 1),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
     "kamera_fps": (5, 120),
@@ -1191,7 +1197,7 @@ def _roi_bul(m, frame, son_det, esik):
         oy = int(min(max(0, cy - s / 2), H - s))
         pencereler.append((ox, oy, s))
     sonuclar = m.predict([frame[oy:oy + s, ox:ox + s] for ox, oy, s in pencereler],
-                         conf=esik, imgsz=640, verbose=False)
+                         conf=esik, imgsz=640, verbose=False, **cikarim_ayari(m))
     # SECIM: en GUVENLI degil, son kutuya en TUTARLI kutu (boyut + konum), guven
     # yalniz esitlik bozar. 23.09 arayuz kaydi (5 m): iki olcek/iki kutu arasinda
     # "en guvenli" secimi kutu genisligini 61 <-> 100 px oynatti, merkez ardisik
@@ -1325,6 +1331,22 @@ def _gpu_var():
         except Exception:
             _gpu_durumu = False
     return _gpu_durumu
+
+
+def cikarim_ayari(m):
+    """Her model cagrisinin ortak ek parametreleri: {"half": FP16 mi} (ayar "hizli_cikarim"
+    + GPU). ultralytics yarim hassasiyeti YALNIZ tahminci kurulurken uygular — ayar
+    degisince modelin tahmincisi birakilir, sonraki cagri yeniden kurar (arac modelinde
+    ByteTrack izleri bir kez sifirlanir; ayar elle degisir, kare akisinda degil)."""
+    yarim = bool(int(AYAR.get("hizli_cikarim", 1))) and _gpu_var()
+    if getattr(m, "_dm_yarim", None) != yarim:
+        if getattr(m, "_dm_yarim", None) is not None and getattr(m, "predictor", None) is not None:
+            m.predictor = None
+        try:
+            m._dm_yarim = yarim
+        except Exception:
+            pass
+    return {"half": yarim}
 UZAK_ADAY_ESIK = 0.35          # karo taramasinda aday sayilma guveni
 UZAK_ADAY_OMUR = 5             # dogrulanamayan aday bu kadar kare sonra birakilir
 _uzak = {"aday": None, "iyi": 0, "kotu": 0, "sayac": 0, "sonraki_id": -1}
@@ -1349,6 +1371,7 @@ KIRMIZI_ONERI_S, KIRMIZI_ONERI_V = 60, 40    # HSV doygunluk/parlaklik tabani
 KIRMIZI_ONERI_EN_AZ = 4                      # px^2; daha kucugu gurultudur
 KIRMIZI_ONERI_SAYI = 12                      # kare basina en cok pencere
 KIRMIZI_ONERI_PENCERE = 214                  # px; 640'a buyutulunce ~3x
+_oneri_onbellek = [None, None]               # (son kare zayif ref, tum siralama)
 
 
 def _kirmizi_bilesenler(img):
@@ -1400,7 +1423,15 @@ def kirmizi_oneri(frame, sayi=KIRMIZI_ONERI_SAYI):
     doygunluk duser. S>=60 / V>=40 + hafif bulaniklastirma ile %88.
 
     Skor = dolgunluk x sqrt(alan): kirmizi tisort/kutu gibi BUYUK ve dagilmis
-    yuzeyler degil, kucuk kompakt cisimler one cikar."""
+    yuzeyler degil, kucuk kompakt cisimler one cikar.
+
+    AYNI KARE TEK HESAP (25.09): uzak arac taramasi ve balon_takip leke penceresi ayni
+    karede bu tam kare taramasini ikiser kez yapiyordu (~3 ms). Son karenin TUM siralamasi
+    tutulur; ayni kare NESNESI (zayif referans, kimlik karsilastirmasi) yeniden gelirse
+    hesaplanmaz. Yeni kare yeni nesnedir: bayat sonuc donemez."""
+    ref, tam = _oneri_onbellek
+    if ref is not None and ref() is frame:
+        return tam[:max(1, int(sayi))]
     adaylar = []
     for x, y, w, h, alan in _kirmizi_bilesenler(frame):
         if alan < KIRMIZI_ONERI_EN_AZ or max(w, h) > 240:
@@ -1409,7 +1440,12 @@ def kirmizi_oneri(frame, sayi=KIRMIZI_ONERI_SAYI):
             continue
         adaylar.append((alan / float(w * h) * (alan ** 0.5), (x, y, x + w, y + h)))
     adaylar.sort(key=lambda t: -t[0])
-    return [b for _, b in adaylar[:max(1, int(sayi))]]
+    tam = [b for _, b in adaylar]
+    try:
+        _oneri_onbellek[:] = [weakref.ref(frame), tam]
+    except TypeError:                      # zayif referans almayan girdi: onbelleksiz
+        _oneri_onbellek[:] = [None, None]
+    return tam[:max(1, int(sayi))]
 
 
 def _oneri_penceresi(frame, kutu, kat=6.0, en_az=KIRMIZI_ONERI_PENCERE):
@@ -1458,7 +1494,7 @@ def _uzak_tara(m, frame, dets, esik, a=None):
     kesitler = [k for k in kesitler if k.size]
     if not kesitler:
         return None
-    sonuclar = m.predict(kesitler, conf=esik, imgsz=640, verbose=False)
+    sonuclar = m.predict(kesitler, conf=esik, imgsz=640, verbose=False, **cikarim_ayari(m))
     en_iyi = None
     for (ox, oy, _, _), r in zip(pencereler, sonuclar):
         for b in (r.boxes if r.boxes is not None else []):
@@ -1863,6 +1899,7 @@ def analiz_et(model, frame, estop=False, asama=None, kilit=True):
         "tracker": _TRACKER_YAML,
         "verbose": False,
         "imgsz": secilen_imgsz,
+        **cikarim_ayari(model),
     }
 
     try:
@@ -2481,8 +2518,10 @@ if __name__ == "__main__":
         def __init__(self):
             self.kutular = [_SahteKutu(0, 0.95, (100, 100, 200, 180), 1)]
             self.son_imgsz = None
+            self.son_kw = {}
         def track(self, frame, **kw):
             self.son_imgsz = kw.get("imgsz")
+            self.son_kw = kw
             return [_SahteSonuc(self.kutular, {0: "f16"})]
 
     import numpy as _np
@@ -2496,6 +2535,8 @@ if __name__ == "__main__":
     assert ilk_aktifler[:2] == [-1, -1], "onaysiz tek-kare kutuya erken nisan alindi"
     assert aktif >= 0, "gercek tespitte kilit kurulmadi"
     assert not dets[aktif].get("hayalet"), "gercek tespit hayalet isaretlenmemeli"
+    # HIZLI CIKARIM (FP16, 25.09): model cagrisina "half" gider (ayar + GPU).
+    assert sahte.son_kw.get("half") == (bool(int(AYAR["hizli_cikarim"])) and _gpu_var()), sahte.son_kw
 
     sahte.kutular = []                      # hedef kayboldu -> hayalet devreye girer
     dets, _b, aktif = analiz_et(sahte, kare, asama=1)
@@ -2524,6 +2565,7 @@ if __name__ == "__main__":
         def predict(self, kirpik, **kw):
             liste = kirpik if isinstance(kirpik, list) else [kirpik]
             self.son_boyut = liste[0].shape[:2]
+            self.son_kw = kw
             return [_SahteSonuc(self.kutular, {0: "f16"}) for _ in liste]
 
     son_kutu = _takip_durumlari[2]["son_det"]["box"]            # (150,100,250,180)
@@ -2533,6 +2575,7 @@ if __name__ == "__main__":
     sahte.kutular = []
     dets, _b, aktif = analiz_et(sahte, kare, asama=1)
     assert roi_m.son_boyut == (480, 480), roi_m.son_boyut          # 6 x 100 px, kare yuksekligi sinir
+    assert roi_m.son_kw.get("half") == (bool(int(AYAR["hizli_cikarim"])) and _gpu_var()), roi_m.son_kw
     assert aktif >= 0 and dets[aktif].get("roi") and not dets[aktif].get("hayalet"), dets
     assert dets[aktif]["id"] == 2 and dets[aktif]["box"] == (170, 100, 270, 180), dets[aktif]
     roi_m.kutular = [_SahteKutu(0, 0.9, (5, 5, 60, 60), None)]     # kilitten uzak kutu
@@ -2593,7 +2636,10 @@ if __name__ == "__main__":
     # adayi bulur, kilit penceresi 3 karede dogrular, kilit kurulur ve hedef yalniz
     # pencereyle izlense de `kararlilik`tan uzun sure kilit DUSMEZ.
     class _ParlakModel:                                 # beyaz piksel kumesini "drone" bulur
+        yarimlar = []
+
         def predict(self, girdi, **kw):
+            self.yarimlar.append(kw.get("half"))
             tek = not isinstance(girdi, list)
             out = []
             for k in ([girdi] if tek else girdi):
@@ -2621,6 +2667,8 @@ if __name__ == "__main__":
     assert kilit_kare is not None and kilit_kare <= 8, kilit_kare     # tarama + 3 dogrulama
     assert _kilitli_track_id is not None and _kilitli_track_id < 0
     assert bos_model.son_imgsz == 640, bos_model.son_imgsz            # kilit varken normal
+    # uzak tarama + kilit penceresi cagrilari da FP16 ayarini alir
+    assert _ParlakModel.yarimlar and set(_ParlakModel.yarimlar) == {bool(int(AYAR["hizli_cikarim"]))},         set(_ParlakModel.yarimlar)
     # Asama 3: rengi okunamayan (beyaz) hedef DUSMAN sayilmaz -> kilit KURULMAZ
     takip_sifirla()
     arama_boyutlari = []
@@ -2798,6 +2846,26 @@ if __name__ == "__main__":
     # Renk kapatilinca eski esit karo taramasina donulur
     assert _uzak_pencereler(kare, {"uzak_kirmizi": 1})[1]
     assert not _uzak_pencereler(kare, {"uzak_kirmizi": 0})[1]
+    # AYNI KARE TEK HESAP (25.09): ayni kare NESNESI yeniden sorulursa tam kare leke
+    # taramasi tekrarlanmaz (uzak tarama + balon_takip ayni kareye bakar); YENI kare
+    # yeniden hesaplanir — bayat oneri donmez.
+    _say, _asil = [0], _kirmizi_bilesenler
+
+    def _sayan(img):
+        _say[0] += 1
+        return _asil(img)
+    globals()["_kirmizi_bilesenler"] = _sayan
+    try:
+        kare2 = kare.copy()
+        a1, a2 = kirmizi_oneri(kare2, 1), kirmizi_oneri(kare2, 12)
+        assert _say[0] == 1 and a2[:1] == a1, ("ayni karede leke taramasi tekrarlandi", _say, a1, a2)
+        kare3 = kare2.copy()
+        kare3[300:312, 500:521] = 60
+        kare3[400:412, 700:721] = (30, 30, 210)                 # leke yer degistirdi
+        a3 = kirmizi_oneri(kare3)
+        assert _say[0] == 2 and a3 and 695 <= a3[0][0] <= 705, ("yeni karede bayat oneri", a3)
+    finally:
+        globals()["_kirmizi_bilesenler"] = _asil
     # KACIRMA: leke var, onu kapsayan tespit yok -> isaret. Kapsayan tespit varsa yok.
     assert _kacirma_mi(kare, [], {}) is not None
     assert _kacirma_mi(kare, [{"box": (500, 300, 521, 312)}], {}) is None
@@ -3002,6 +3070,19 @@ if __name__ == "__main__":
     _gpu_durumu = _eski_gpu
     takip_sifirla()
 
+    # FP16 ayari degisince modelin tahmincisi birakilir (ultralytics yarim hassasiyeti yalniz
+    # kurulumda uygular); ayar degismezse BIRAKILMAZ (her karede yeniden kurulum olmasin).
+    class _Tahmincili:
+        predictor = None
+    mm, eski_h = _Tahmincili(), AYAR["hizli_cikarim"]
+    cikarim_ayari(mm)
+    mm.predictor = "kurulu"
+    cikarim_ayari(mm)
+    assert mm.predictor == "kurulu", "ayar degismeden tahminci birakildi"
+    if _gpu_var():
+        ayar_guncelle(hizli_cikarim=1 - eski_h)
+        assert cikarim_ayari(mm)["half"] == bool(1 - eski_h) and mm.predictor is None,             "FP16 ayari degisti, tahminci yeniden kurulmadi (eski hassasiyet surerdi)"
+    ayar_guncelle(hizli_cikarim=eski_h)
     print("algi testleri OK — sinif adi, ayar kirpma, tracker yaml, A3 taraf guveni, "
           "kesin tanima (histerezis/coklu hedef/onay bozulma), cakisan kutu temizligi, "
           "hayalet/dost kilidi korumasi + yuksek-cozunurluk yeniden bulma, "

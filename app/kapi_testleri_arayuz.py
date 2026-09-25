@@ -1330,6 +1330,17 @@ def test_kutu_etiketleri_ust_uste_binmez():
     assert ilk == (kutular[2][0], kutular[2][1] - eh - 2.0), ilk
 
 
+def test_windows_guc_kisitlamasi_kapanir():
+    """25.09 saha: AI saniyede ~10 kareye dustu. Windows guc kisitlamasi (EcoQoS) acikken
+    ayni dongu 147 ms/kare, kapaliyken 53 ms (olculdu) — pille ve arka planda uygulanir.
+    Uygulama acilisinda (main) bu surec icin kapatilir; API cagrisi Windows'ta basarili."""
+    import inspect
+    import sys
+    assert "windows_kisitlamasini_kapat()" in inspect.getsource(A.main), "main kisitlamayi kapatmiyor"
+    if sys.platform == "win32":
+        assert A.windows_kisitlamasini_kapat() is True, "SetProcessInformation basarisiz"
+
+
 def test_kontroller_listesi_gercek_tuslarla_ayni():
     """Arayüzdeki "Kontroller" paneli (kontroller.py) ile arayüzün GERÇEKTEN dinlediği
     klavye tuşları aynı olmalı. Bir tuş eklenir/değişir de liste unutulursa operatör
@@ -1389,6 +1400,7 @@ if __name__ == "__main__":
     test_lazer_gucu_onaysiz_degismez()
     test_odunc_kapilar_gercek_pencerede_de_metot()
     test_kontroller_listesi_gercek_tuslarla_ayni()
+    test_windows_guc_kisitlamasi_kapanir()
     test_sag_cubuk_zoom_otonomda_yok()
     test_hassasiyet_tek_dokunus_ve_hiz()
     test_hassasiyet_kisayolu_ve_kutu_kaymasi()
