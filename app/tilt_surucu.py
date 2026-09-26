@@ -168,9 +168,21 @@ def takip_profili(profil, tavan):
 # 1.25-2.2 kat fazla yapiyordu; 110 ms gecikmeyle salinim. Belirsiz yerde YUKSEK deger
 # guvenli taraf (dongu biraz yavaslar, salinmaz). Yeni tabloyla kayittaki hedefin dunya
 # acisi en duz ppd 22.5 -> 19.0 (gercek 18.7). Kesin olcum: tilt_yon_testi.py ile.
+# ⚠ GUVENLI TARAF = TABLO YUKSEK (26.09 aksam benzetim, sahaya kalibre): gercek donus tablonun
+# g kati olsun. g < 1 (tablo fazla): tilt biraz uyusuk, KARARLI (g 0.5: balonda %84 -> %78).
+# g > 1 (tablo az): g 1.3 sinirda, g 1.6'da takip KARARSIZ (surekli salinim, balonda %25). Bu
+# yuzden tablo olcumle yalniz YUKSELTILIR. 26.09 aksam dogrudan olcum (tilt_yon_testi egri,
+# sabit sahne, 1280x720, TEK YON 2 derece; olcek pan ile baglandi: bu modda 16.9 px/der, uygulama
+# 18.7 -> x1.11; app/loglar/tilt_egri_20260926_213443_1280_tekyon.json): kol 21-49'da kamera uzak
+# koridora bakar, olcum guvenilir -> kol 35-49'da gercek tablonun 1.1-1.4 kati cikti, tablo
+# olcume YUKSELTILDI; 21-33'te olcum tablonun altinda (guvenli taraf, dokunulmadi). Kol 0-20'de
+# kamera 1-3 m'deki zemine bakar: kol donerken kamera yayda yer de degistirir, yakin zeminde bu
+# kayma donusu bozar (olcum 7-10 px, en altta ters isaret) — GUVENILMEZ; 19:59 saha kaydi ayni
+# bolgede daha yuksek donus gosteriyor. Oradaki 25.09 degerleri korundu. Kol 50+ olculemedi.
 KAMERA_PPD_TABLO = [(0.0, 18.0), (5.0, 22.0), (9.0, 22.0), (12.0, 17.5), (15.0, 15.5),
                     (19.0, 15.2), (22.0, 13.8), (28.0, 13.5),
-                    (32.0, 10.0), (36.0, 9.1), (40.0, 7.6), (44.0, 5.3), (46.0, 5.4),
+                    (32.0, 10.0), (35.0, 9.8), (37.0, 10.9), (39.0, 9.7), (41.0, 7.8),
+                    (43.0, 5.9), (45.0, 5.9), (47.0, 6.4), (49.0, 6.5), (50.0, 5.4),
                     (60.0, 5.4)]
 # Kameranin GERCEK derece basina piksel sayisi: pan'da olculen (pan disli orani
 # sabit, 90 derece sahada dogrulandi). Kare pikseller -> dikeyde de ayni.
@@ -393,6 +405,32 @@ def lazer_durum_coz(satir):
     return dict(acik=bool(acik), guc=guc, acil=bool(acil), buton=bool(buton), pwm=bool(pwm))
 
 
+# ---- BUZZER SARKILARI (ayni kart, GPIO12; bkz. esp32_ws_test/muzik.h) ----
+# MZ<n> n. sarkiyi calar (kart engellemez), MZ0 susturur. Kart 10 Hz'de
+# MZK1,<calan>,<sarki adedi>,<buzzer hazir> yayinlar. Bu yayini GORMEYEN PC (eski firmware)
+# MZ YOLLAMAZ: eski firmware bilinmeyen komutu tilt hareket yoluna sokar ve SUREN tilt
+# yorungesini keser (otonom takipte namlu sarsilirdi).
+MUZIK_DURUM_ASIMI_S = 1.0
+
+
+def muzik_komutu(no):
+    return f"MZ{max(0, min(99, int(no)))}\n"
+
+
+def muzik_durum_coz(satir):
+    """MZK1,<calan>,<adet>,<hazir> -> sozluk; bozuksa None."""
+    parts = satir.split(',')
+    if len(parts) != 4 or parts[0] != 'MZK1':
+        return None
+    try:
+        calan, adet, hazir = (int(p) for p in parts[1:])
+    except ValueError:
+        return None
+    if calan < 0 or adet < 0 or hazir not in (0, 1) or calan > adet:
+        return None
+    return dict(calan=calan, adet=adet, hazir=bool(hazir))
+
+
 def yorunge(derece, hiz):
     """Y<derece>,<derece/sn>: tilt YORUNGE kipi (otonom takip). Kart referansi
     derece + hiz*t olarak kendisi ilerletir; 150 ms yeni komut gelmezse yumusak durur."""
@@ -488,6 +526,9 @@ HATALAR = {
     'ESTOP': 'Kart ACİL DURDURMADA — hareket ve ateş reddedildi (DEVAM ET gerekir).',
     'LASER_PWM': 'Kart lazer PWM\'ini kuramadı (GPIO 18) — lazer ÇALIŞMAZ.',
     'BAD_POWER': 'Lazer gücü %0–100 arasında olmalı.',
+    'NO_SONG': 'Kartta bu numarada şarkı yok.',
+    'NO_BUZZER': 'Kart buzzer\'ı kuramadı (GPIO 12) — şarkı çalmaz.',
+    'BAD_SONG': 'Şarkı komutu bozuk.',
 }
 
 
@@ -544,6 +585,12 @@ class MockTiltKart:
         self.acil = False
         self.buton = False
         self.metin = []             # kartin kendiliginden yazdigi satirlar (ilerlet'te cikar)
+        # Buzzer sarkilari (yeni firmware, MZK1 yayini). muzik_destek=False eski firmware'i
+        # taklit eder: MZ bilinmeyen komuttur ve tilt yorungesini KESER (gercek kartta oldugu gibi).
+        self.muzik_destek = True
+        self.muzik_adet = 2
+        self.muzik_hazir = True
+        self.muzik_calan = 0
 
     # --- kalibrasyon tablosu (dogrusal varsayim; mock icin yeterli) ---
     def _aci(self, darbe):
@@ -562,6 +609,8 @@ class MockTiltKart:
             cevap = self._lazer_islet(s, simdi)
             if cevap is not False:
                 return cevap
+        if self.muzik_destek and s.startswith("MZ"):
+            return self._muzik_islet(s)
         if s == "YQ":
             return "OK,YQ" if self.yorunge_destek else "ERR,YQ,UNKNOWN_COMMAND"
         if s.startswith("Y") and self.yorunge_destek:
@@ -715,8 +764,32 @@ class MockTiltKart:
             return f"ERR,{s},ESTOP"
         return False
 
+    def _muzik_islet(self, s):
+        """esp32_ws_test.ino:muzikKomutu ile ayni kurallar (hareket yoluna girmez)."""
+        try:
+            no = int(s[2:])
+        except ValueError:
+            return f"ERR,{s},BAD_SONG"
+        if not 0 <= no <= 99:
+            return f"ERR,{s},BAD_SONG"
+        if no == 0:
+            self.muzik_calan = 0
+            return f"OK,{s}"
+        if self.acil:
+            return f"ERR,{s},ESTOP"
+        if no > self.muzik_adet:
+            return f"ERR,{s},NO_SONG"
+        if not self.muzik_hazir:
+            return f"ERR,{s},NO_BUZZER"
+        self.muzik_calan = no
+        return f"OK,{s}"
+
+    def mzk1(self):
+        return f"MZK1,{self.muzik_calan},{self.muzik_adet},{int(self.muzik_hazir)}"
+
     def _acil_durdur(self, sebep):
         self.lazer_acik = False
+        self.muzik_calan = 0
         self.hedef, self.bekleyen = self.pos, None
         self.pan_hedef = self.pan_pos
         self.yor_tilt = self.yor_pan = None
@@ -836,6 +909,8 @@ class MockTiltKart:
                 satirlar.extend(self.metin)
                 self.metin.clear()
                 satirlar.append(self.lzr1())
+            if self.muzik_destek:
+                satirlar.append(self.mzk1())
         return satirlar
 
     def state3(self):
@@ -920,6 +995,10 @@ class TiltSurucu:
         self.lazer_son_t = 0.0
         self.lazer_guc_istek = 40
         self._lazer_guc_gonderim_t = 0.0
+        # BUZZER SARKILARI (yeni firmware MZK1 yayinlar). Eski firmware'de None -> sarki yok.
+        self.muzik_durum = None
+        self.muzik_son_t = 0.0
+        self.muzik_hata = None         # son MZ reddi (tilt kartinin hatasi DEGIL: self.hata'ya yazilmaz)
 
         if self.kaynak.lower() == "off":
             return
@@ -1197,6 +1276,14 @@ class TiltSurucu:
         """t: satirin karttan GELDIGI tahmini an (verilmezse simdi)."""
         if t is None:
             t = self._saat()
+        if s.startswith("MZK1,"):
+            mz = muzik_durum_coz(s)
+            if mz is not None:
+                if mz != self.muzik_durum:
+                    self._kara_kutu_yaz("<<", s)       # 10 Hz: yalniz degisim kaydedilir
+                self.muzik_durum = mz
+                self.muzik_son_t = self._saat()
+            return
         if s.startswith("LZR1,"):
             lz = lazer_durum_coz(s)
             if lz is not None:
@@ -1291,6 +1378,9 @@ class TiltSurucu:
             sebep = s.split(',')[-1]
             if s.startswith("ERR,Q,"):
                 self.yeniden_planlama = False       # eski firmware: hata DEGIL
+                return
+            if s.startswith("ERR,MZ"):
+                self.muzik_hata = HATALAR.get(sebep, f"Şarkı çalınamadı: {sebep}")
                 return
             # ESKI FIRMWARE: "Z" komutu yok. Hiz kademesi calismaz ama hareketin
             # geri kalani calisir (G/E/H/X/D eski surumde de var). Bir kez soylenir
@@ -1585,6 +1675,23 @@ class TiltSurucu:
             return
         self._lazer_guc_gonderim_t = simdi
         self._yaz(lazer_guc(self.lazer_guc_istek))
+
+    # ---- BUZZER SARKILARI (tek kart, GPIO12) ----
+    @property
+    def muzik_destekli(self):
+        """Kart sarki calabiliyor mu? (MZK1 yayini TAZE, buzzer hazir, en az bir sarki)"""
+        d = self.muzik_durum
+        return bool(self.bagli and d is not None and d["hazir"] and d["adet"] > 0
+                    and (self._saat() - self.muzik_son_t) <= MUZIK_DURUM_ASIMI_S)
+
+    def muzik_cal(self, no):
+        """MZ<no>: no. sarkiyi cal, 0 susturur. Kart desteklemiyorsa YOLLANMAZ (eski firmware
+        bilinmeyen komutla tilt yorungesini keserdi — bkz. MUZIK_DURUM_ASIMI_S notu)."""
+        no = int(no)
+        if not self.muzik_destekli or no < 0 or no > self.muzik_durum["adet"]:
+            return False
+        self.muzik_hata = None
+        return self._yaz(muzik_komutu(no))
 
     def acil(self, aktif):
         """STOP (kart kilitlenir) / START. Kartta lazer yoksa (eski firmware) gonderilmez:
@@ -2040,11 +2147,16 @@ if __name__ == "__main__":
     assert kamera_acisi(ACI_MIN) == 0.0, "kamera olceginin sifiri kolun EN ALTI"
     egim = lambda a: (kamera_acisi(a + 0.05) - kamera_acisi(a - 0.05)) / 0.1 * KAMERA_PPD_REF
     kol28, kol44 = aci_karsiligi(28.0), aci_karsiligi(44.0)
-    assert abs(egim(kol28) - 13.5) < 0.2 and abs(egim(kol44) - 5.3) < 0.3, (egim(kol28), egim(kol44))
+    assert abs(egim(kol28) - 13.5) < 0.2 and abs(egim(kol44) - 5.9) < 0.3, (egim(kol28), egim(kol44))
     # 25.09 saha: kol 25'in altinda kamera tablonun eski degerinden 1.25-2.2 kat HIZLI donuyor
     # (dusuk tablo = dongu kazanci yuksek = orta/yakin balonda 5-9 derece salinim).
     kol7, kol17 = aci_karsiligi(7.0), aci_karsiligi(17.0)
     assert egim(kol7) > 20.0 and 14.5 < egim(kol17) < 16.5, (egim(kol7), egim(kol17))
+    # 26.09 aksam GUVENLI TARAF: tablo, kameranin uzak sahneyi gordugu bolgede (kol 35-49) DOGRUDAN
+    # olcumun altinda kalmaz (tablo az -> g > 1 -> benzetimde g 1.6'da takip kararsiz).
+    olcum = {35.0: 9.8, 37.0: 10.9, 39.0: 9.7, 41.0: 7.8, 45.0: 5.9, 47.0: 6.4, 49.0: 6.5}
+    assert all(egim(aci_karsiligi(k)) >= v - 0.05 for k, v in olcum.items()), \
+        {k: round(egim(aci_karsiligi(k)), 2) for k in olcum}
     assert all(kamera_acisi(a + 0.5) > kamera_acisi(a) for a in range(int(ACI_MIN), int(ACI_MAX)))
 
     # 14. PAN (ayni kart, GPIO10/11): PAN1 cozumu, P komutu, kademe, X ile durma
@@ -2154,6 +2266,43 @@ if __name__ == "__main__":
     h = len([c for c in r3.mock.kayit if c == "H"]) - once
     assert h >= 8, f"1.2 sn'de yalniz {h} H (en fazla ~150 ms aralik bekleniyor)"
     assert CANLILIK_MS + YOKLAMA_MS <= ZAMAN_ASIMI_MS / 2
+
+    # 15. BUZZER SARKILARI (MZ / MZK1): yayini gorunce MZ gider, kartin hatasi tilt hatasi
+    #     sayilmaz; ESKI firmware'e (MZK1 yok) MZ HIC gitmez — orada bilinmeyen komut tilt
+    #     yorungesini keserdi (sahte kart da gercek kart gibi keser, asagida gosterilir).
+    assert muzik_durum_coz("MZK1,1,2,1") == {"calan": 1, "adet": 2, "hazir": True}
+    for bozuk in ("MZK1,1,2", "MZK1,3,2,1", "MZK1,a,2,1", "MZK1,0,2,2", "LZR1,0,2,1"):
+        assert muzik_durum_coz(bozuk) is None, bozuk
+    assert muzik_komutu(2) == "MZ2\n" and muzik_komutu(0) == "MZ0\n"
+    m1 = yeni_kart(); kos(m1, 0.3)
+    assert m1.muzik_destekli and m1.muzik_durum == {"calan": 0, "adet": 2, "hazir": True}
+    assert m1.muzik_cal(2) and "MZ2" in m1.mock.kayit
+    kos(m1, 0.2)
+    assert m1.muzik_durum["calan"] == 2 and m1.hata is None
+    assert not m1.muzik_cal(3) and "MZ3" not in m1.mock.kayit      # kartta yok: yollanmaz
+    assert m1.muzik_cal(0) and "MZ0" in m1.mock.kayit
+    kos(m1, 0.2)
+    assert m1.muzik_durum["calan"] == 0
+    m1.muzik_cal(1); kos(m1, 0.2)
+    assert m1.acil(True); kos(m1, 0.2)
+    assert m1.muzik_durum["calan"] == 0, "acil durdur sarkiyi susturmadi"
+    assert m1.muzik_cal(1) is True; kos(m1, 0.2)                   # kart reddeder (ESTOP) ...
+    assert m1.muzik_hata and "ACİL" in m1.muzik_hata and m1.hata is None   # ... tilt hatasi degil
+    # Buzzer kurulamadiysa (lazerle ayni zamanlayici) destek YOK
+    m2 = yeni_kart(); m2.mock.muzik_hazir = False; kos(m2, 0.3)
+    assert not m2.muzik_destekli and not m2.muzik_cal(1)
+    # ESKI firmware: MZK1 yok -> MZ gonderilmez (gonderilseydi tilt yorungesi kesilirdi)
+    m3 = yeni_kart(); m3.mock.muzik_destek = False; kos(m3, 0.3)
+    assert not m3.muzik_destekli and not m3.muzik_cal(1)
+    assert not any(c.startswith("MZ") for c in m3.mock.kayit)
+    m3.mock.acik = True; m3.mock.yor_tilt = (0, 0.0, m3.mock.t)
+    assert m3.mock.islet("MZ1") == "ERR,MZ1,UNKNOWN_COMMAND" and m3.mock.yor_tilt is None
+    m4 = yeni_kart(); kos(m4, 0.3)                                  # yeni firmware: kesmez
+    m4.mock.acik = True; m4.mock.yor_tilt = (0, 0.0, m4.mock.t)
+    assert m4.mock.islet("MZ1") == "OK,MZ1" and m4.mock.yor_tilt is not None
+    # Yayin kesilirse (kart resetleniyor / kablo) destek bayatlar
+    saat[0] += MUZIK_DURUM_ASIMI_S + 0.2
+    assert not m1.muzik_destekli
 
     print("tilt_surucu testleri OK — G bicimi, STATE3 cozumu, en-taze-hedef kuyrugu, "
           "canlilik kilidi, kalibrasyon kapisi, kirpma, kart reset tespiti")

@@ -3,6 +3,7 @@
 #include "motion_core.h"
 #include "pan_core.h"
 #include "yorunge_core.h"
+#include "muzik.h"        // GPIO12 buzzer sarkilari (notalar yerel sarkilar.h, repoda yok)
 #if !ARDUINO_USB_CDC_ON_BOOT
 #error "Enable USB CDC On Boot (CDCOnBoot=cdc); firmware supports both native USB and UART0."
 #endif
@@ -36,6 +37,9 @@ constexpr uint32_t STEP_HIGH_US=20, DIR_SETUP_US=20;
 //   START  kilidi kaldir (buton basiliyken REDDEDILIR). Bilincli eylem: buton birakilinca
 //          kendiliginden kalkmaz.
 // Durum yayini (50 Hz): LZR1,<lazer acik>,<guc %>,<acil kilit>,<buton basili>,<pwm hazir>
+//   MZ<n>  n. sarkiyi GPIO12 buzzer'da cal (engellemez); MZ0 sustur. Acil kilitte reddedilir,
+//          STOP/buton susturur. Hareket yoluna girmez (tilt yorungesini KESMEZ).
+// Durum yayini (10 Hz): MZK1,<calan sarki, 0 = sus>,<sarki adedi>,<buzzer hazir>
 constexpr int LAZER_PIN=18, ESTOP_PIN=15;
 constexpr int LAZER_PWM_FREK=1000, LAZER_PWM_COZ=8;
 constexpr uint32_t ATES_ZAMAN_ASIMI_MS=1000, ESTOP_DEBOUNCE_MS=30;
@@ -153,6 +157,7 @@ void herPortaYaz(const char* s) {for(Stream* io:links) io->println(s);}
 void acilDurdur(const char* sebep) {
   lazerYaz(false);
   motion.stop(); pan.stop(); yorTilt.durdur(); yorPan.durdur();
+  muzik::durdur();                        // acilde buzzer da susar
   acilKilit=true;
   char s[96]; snprintf(s,sizeof(s),"SISTEM DURDURULDU %s",sebep); herPortaYaz(s);
 }
@@ -196,6 +201,17 @@ bool lazerKomutu(const char* c,const char*& err,bool& sessiz) {
   }
   return false;
 }
+// Buzzer sarkilari (muzik.h). Doner: true = MZ komutu (err ayarlanir). Hareket yolundaki
+// else dalina hic ulasmaz: oradaki her komut tilt yorungesini keser (otonom takip sarsilirdi).
+bool muzikKomutu(const char* c,const char*& err) {
+  if(c[0]!='M' || c[1]!='Z') return false;
+  char* e; long n=strtol(c+2,&e,10);
+  if(e==c+2 || *e || n<0 || n>99) {err="BAD_SONG"; return true;}
+  if(n==0) {muzik::durdur(); return true;}
+  if(acilKilit) {err="ESTOP"; return true;}
+  err=muzik::baslat((int)n,millis());
+  return true;
+}
 void readSerial(int port) {
   Stream& io=*links[port];
   PortInput& rx=inputs[port];
@@ -217,6 +233,7 @@ void readSerial(int port) {
           err="OTHER_PORT_ACTIVE";
         }
         if(!err && lazerKomutu(command,err,sessiz)) {}
+        else if(!err && muzikKomutu(command,err)) {}
         else if(!err && acilKilit && hareketKomutu(command)) err="ESTOP";
         else if(!err && !strcmp(command,"YQ")) {}
         else if(!err && command[0]=='P') err=panCommand(command,micros());
@@ -267,6 +284,7 @@ void setup() {
   if(!lazerPwmHazir) herPortaYaz("ERR,LASER_PWM,GPIO18");
   // Acilista buton zaten basiliysa kart KILITLI baslar (reset sonrasi hareket/ates yok).
   if(digitalRead(ESTOP_PIN)==LOW) {estopButon=true; acilDurdur("(ACIL STOP BUTONU - acilista basili)");}
+  muzik::kur(LAZER_PIN);                  // lazer PWM'inden SONRA (ortak zamanlayici denetimi)
 }
 // Tek fiziksel darbe (yon degisiminde DIR once oturur). Doner: yukselen kenar ani.
 uint32_t tiltDarbe(int d) {
@@ -293,6 +311,7 @@ uint32_t panDarbe(int d) {
 }
 void loop() {
   estopButonuOku();                       // donanim acil stop: her seyden ONCE
+  muzik::tik(millis());                   // engellemeyen buzzer sarkisi
   // Olu adam anahtari: PC L1 tazelemesini kesmisse (kablo, cokme, donma) lazer kart
   // tarafinda soner — "kes" komutunun gidebilecegine guvenilmez.
   if(lazerAcik && uint32_t(millis()-sonAtesMs)>ATES_ZAMAN_ASIMI_MS) {
@@ -342,6 +361,16 @@ void loop() {
       lazerAcik,lazerYuzde,acilKilit,estopButon,lazerPwmHazir);
     if(n>0 && n<(int)sizeof(out)) {
       for(Stream* io:links) if(io->availableForWrite()>=n) io->write((uint8_t*)out,n);
+    }
+    // Buzzer durumu 10 Hz (5 yayinda bir): PC "kart sarki calabiliyor mu / ne caliyor"
+    // bilgisini buradan alir; bu satiri gormeyen PC (eski firmware) MZ komutu YOLLAMAZ.
+    static uint8_t muzikSayac=0;
+    if(++muzikSayac>=5) {
+      muzikSayac=0;
+      n=snprintf(out,sizeof(out),"MZK1,%d,%d,%d\n",muzik::calan,SARKI_ADEDI,muzik::hazir);
+      if(n>0 && n<(int)sizeof(out)) {
+        for(Stream* io:links) if(io->availableForWrite()>=n) io->write((uint8_t*)out,n);
+      }
     }
     last=millis();
   }

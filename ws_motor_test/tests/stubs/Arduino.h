@@ -23,7 +23,11 @@ extern bool ledcBasarili;
 inline void digitalWrite(int pin,int level){if(pin==4 && level==HIGH)++physicalPulses;if(pin==10 && level==HIGH)++panPulses;if(pin==11)panDirLevel=level;if(pin==16)panEnLevel=level;if(pin==18)lazerCikis=level?256:0;}
 inline int digitalRead(int pin){return pin==15?estopSeviye:LOW;}
 inline bool ledcAttach(int,int,int){return ledcBasarili;}
-inline void ledcWrite(int pin,int duty){if(pin==18)lazerCikis=duty;}
+// Buzzer GPIO12 (muzik.h) — buzzerFrek = calan ton (0 = sessiz), tonDegisimi = ledcWriteTone sayisi
+extern int buzzerFrek,buzzerZamanlayici,tonDegisimi;
+inline void ledcWrite(int pin,int duty){if(pin==18)lazerCikis=duty;if(pin==12&&duty==0)buzzerFrek=0;}
+inline unsigned ledcWriteTone(int pin,unsigned f){if(pin==12){buzzerFrek=(int)f;++tonDegisimi;}return f;}
+inline bool ledcDetach(int){return true;}
 class Stream {
  public:
   std::string incoming,out;

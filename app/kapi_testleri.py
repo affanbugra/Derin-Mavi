@@ -351,8 +351,21 @@ def _otonom_veri(gorunuyor=True):
             "kirmizi_kaniti": True}
 
 
-def _dwell_doldu(w):
+def _dwell_doldu(w, bid=None):
+    """Arac hedefinde dwell dolu; BALONDA nisan kapisi (HK.AtesKapisi) dolu: `bid` balonu
+    iki karede balonun tam ortasinda goruldu, takip su an icin de ortada kestiriyor."""
     w._otonom_hedef_merkezde_t = time.time() - A.OTONOM_DWELL_SURE - 1
+    t = time.time()
+    for geri in (0.10, 0.04):
+        w._ates_kapisi.kare(t - geri, t, bid, 0.0, 0.0, 10.0, (0.0, 0.0), takipli=True)
+
+
+def _parca_bitir(w, yakilan):
+    """Yanan balon parcasini `yakilan` sn yanmis olarak bitirmeye hazirla (gercek saat):
+    bir sonraki _otonom_ates_kontrol parcayi bitirir ve turun yakilan suresine ekler."""
+    t = time.time()
+    w._parca_bas_t = t - yakilan - 0.01
+    w._otonom_ates_bitis_t = t - 0.001
 
 
 def test_otonom_ates_gorunen_hedefe(w):
@@ -525,6 +538,10 @@ def test_yakin_balonda_takip_boya_gore_yumusar(w):
     for e in (w._pan_takip, w._tilt_takip):
         assert e.olcek_ref_px == HK_.SAHA_AYARI["olcek_ref_px"], "takipci saha ayariyla kurulmadi"
         assert e.kayip_dur_s == HK_.SAHA_AYARI["kayip_dur_s"] and e.kayipta_tut
+        assert e.olu == HK_.SAHA_AYARI["olu"], "takipci eski (0.5 derece) olu bantla kuruldu"
+        # 26.09: salinim EKF'si ayarla (varsayilan acik) — takip_ekf 0 ise eski Kalman
+        assert isinstance(e.kestirici, HK_.KarmaKestirici) == bool(algi.AYAR["takip_ekf"]), \
+            "takipci EKF ayarina uymuyor"
     _otonomu_baslat(w)
     saat = w._test_saat
 
@@ -588,27 +605,30 @@ def test_balon_atesi_imha_dogrulamasina_bildirilir(w):
     A.algi.hedef_vuruldu = lambda s, simdi=None: cagri.append(("vuruldu", s))
     S = A.otonom_ates_suresi()
 
+    # 26.09: tur S sn'lik TOPLAM yakmadir; parca surekli yakmada turun kalani, parcalida en
+    # fazla ates_parca_suresi() (A.balon_parca_suresi).
+    P = A.balon_parca_suresi(S)
+
     def ates_turu():
         w._otonom_ates_aktif = False
         _dwell_doldu(w)
         w._otonom_ates_kontrol(_balon_veri(), False)
         assert w._otonom_ates_aktif, "kurulum: balona otonom ates baslamadi"
-        w._otonom_ates_bitis_t = time.time() - 0.01
+        _parca_bitir(w, w._tur_butce)                 # parca turun tamamini yakmis gibi
         w._otonom_ates_kontrol(_balon_veri(), False)
     try:
         ates_turu()
-        assert [c for c in cagri if c != ("bitti",)] == [("basladi", False, S), ("tamam", False)], cagri
+        assert [c for c in cagri if c != ("bitti",)] == [("basladi", False, P), ("tamam", False)], cagri
         cagri.clear()
         w.kontrol.__class__ = type("GercekLazerli", (w.kontrol.__class__,),
                                    {"lazer_gercek": property(lambda s: True)})
         ates_turu()
-        assert [c for c in cagri if c != ("bitti",)] == [("basladi", True, S), ("tamam", True)], \
+        assert [c for c in cagri if c != ("bitti",)] == [("basladi", True, P), ("tamam", True)], \
             f"gercek lazerde balon atesi bildirilmedi / arac yasagi kullanildi: {cagri}"
-        assert ("bitti",) in cagri[cagri.index(("basladi", True, S)):], \
+        assert ("bitti",) in cagri[cagri.index(("basladi", True, P)):], \
             f"ates kesildi, balon_takip'e bildirilmedi (lazer altinda onlemleri surer): {cagri}"
-        # 25.09: sure lazer kutucugundan ayarlanir. Tur (lazerin acik kalacagi an) ve
-        # balon_takip'e giden sure (imha penceresi, lazer altinda onlemleri) onu izler;
-        # SUREN tur degismez (tur basinda okunur).
+        # 25.09: sure lazer kutucugundan ayarlanir. Turun toplami onu, parca (lazerin acik
+        # kalacagi an, balon_takip'e giden sure) parca ayarini izler; SUREN tur degismez.
         eski_sure = algi.AYAR["otonom_ates_sure"]
         try:
             algi.ayar_guncelle(otonom_ates_sure=3.5)
@@ -617,12 +637,13 @@ def test_balon_atesi_imha_dogrulamasina_bildirilir(w):
             _dwell_doldu(w)
             t0 = time.time()
             w._otonom_ates_kontrol(_balon_veri(), False)
-            assert ("basladi", True, 3.5) in cagri, f"ayarlanan sure balon_takip'e gitmedi: {cagri}"
-            assert abs(w._otonom_ates_bitis_t - t0 - 3.5) < 0.2, "atis turu ayarlanan sureyi izlemiyor"
-            bitis = w._otonom_ates_bitis_t
+            P2 = A.balon_parca_suresi(3.5)
+            assert ("basladi", True, P2) in cagri, f"parca suresi balon_takip'e gitmedi: {cagri}"
+            assert w._tur_butce == 3.5, "tur toplami ayarlanan sureyi izlemiyor"
+            assert abs(w._otonom_ates_bitis_t - t0 - P2) < 0.2, "parca ayarlanan sureyi izlemiyor"
             algi.ayar_guncelle(otonom_ates_sure=1.0)
             w._otonom_ates_kontrol(_balon_veri(), False)
-            assert w._otonom_ates_aktif and w._otonom_ates_bitis_t == bitis, "suren tur degisti"
+            assert w._otonom_ates_aktif and w._tur_butce == 3.5, "suren tur degisti"
         finally:
             algi.ayar_guncelle(otonom_ates_sure=eski_sure)
     finally:
@@ -655,7 +676,7 @@ def test_balon_atesi_lazer_altinda_suruyor(w):
     import balon_takip
     w.mod, w.asama = "Otonom", "Aşama 2"
     # Sahte lazerde nokta yok -> model kor olmaz: kayip gercek kayiptir, takip korlugu ACILMAZ.
-    _dwell_doldu(w)
+    _dwell_doldu(w, "B1")
     w._otonom_ates_kontrol(_balon_veri(id="B1"), False)
     assert w.kontrol.mock.lazer is True, "kurulum: sahte lazerde ates acilmadi"
     assert w._pan_takip.kor_bitis is None and w._tilt_takip.kor_bitis is None, \
@@ -668,18 +689,18 @@ def test_balon_atesi_lazer_altinda_suruyor(w):
     balon_takip.ates_basladi = lambda g, simdi=None, sure=None: cagri.append("basladi")
     balon_takip.ates_tamamlandi = lambda g, simdi=None: cagri.append("tamam")
     balon_takip.ates_bitti = lambda simdi=None: cagri.append("bitti")
-    pay = balon_takip.LAZER_GECIKME_S + balon_takip.KAYIP_S
+    pay = 0.0          # 26.09: takip korlugu parcayla (lazerle) biter; bkz. _takip_korlugu
     takip = (w._pan_takip, w._tilt_takip)
 
     def baslat(bid="B1"):
         w._otonom_ates_aktif = False
-        _dwell_doldu(w)
+        _dwell_doldu(w, bid)
         w._otonom_ates_kontrol(_balon_veri(id=bid), False)
         assert w.kontrol.mock.lazer is True and w._otonom_ates_aktif, "kurulum: balona ates acilmadi"
 
     try:
         w._otonom_ates_aktif = False
-        _dwell_doldu(w)
+        _dwell_doldu(w, "B1")
         w._otonom_ates_kontrol(_balon_veri(id="B1", hayalet=True), False)
         assert w.kontrol.mock.lazer is False, "gorunmeyen balona ates BASLADI"
         baslat()
@@ -689,7 +710,7 @@ def test_balon_atesi_lazer_altinda_suruyor(w):
             w._otonom_ates_kontrol(_balon_veri(id="B1", hayalet=True), False)
         assert w.kontrol.mock.lazer is True and w._otonom_ates_aktif, \
             "lazer altinda gorunmeyen balona ates KESILDI (21:27: 37/37 atis 0.2 sn)"
-        w._otonom_ates_bitis_t = time.time() - 0.01                 # tur doldu, balon hala kor
+        _parca_bitir(w, w._tur_butce)                               # tur doldu, balon hala kor
         w._otonom_ates_kontrol(_balon_veri(id="B1", hayalet=True), False)
         assert w.kontrol.mock.lazer is False and "tamam" in cagri, f"tur bitmedi: {cagri}"
         assert all(e.kor_bitis <= time.time() + pay + 0.05 for e in takip), \
@@ -751,7 +772,10 @@ def test_balon_modunda_kilit_ve_nisan_balonda():
             self.boxes, self.names = kutular, adlar
 
     class AracModeli:
+        n = 0
+
         def track(self, frame, **kw):
+            AracModeli.n += 1
             return [Sonuc([Kutu((600, 300, 680, 360), tid=1)], {0: "f16"})]
 
     class BalonModeli:
@@ -779,6 +803,17 @@ def test_balon_modunda_kilit_ve_nisan_balonda():
         assert algi.kilitli_hedef() is None, "balon modunda arac kilidi de kuruldu"
         hx, hy = algi.det_nisan_noktasi(dets[aktif])
         assert abs(hx - 640) <= 1 and abs(hy - 400) <= 1, (hx, hy)
+        # 26.09 gece: A2 "yalniz balon" (varsayilan) -> arac modeli HIC calismaz; A3'te calisir;
+        # ayar kapaliyken A2'de de calisir.
+        assert algi.VARSAYILAN_AYAR["a2_yalniz_balon"] == 1 and AracModeli.n == 0, \
+            ("A2'de arac modeli calisti", AracModeli.n)
+        th.asama = 3
+        th._algila(kare)
+        assert AracModeli.n == 1, "A3'te arac modeli calismadi"
+        th.asama = 2
+        algi.ayar_guncelle(a2_yalniz_balon=0)
+        th._algila(kare)
+        assert AracModeli.n == 2, "ayar kapaliyken A2'de arac modeli calismadi"
         algi.ayar_guncelle(balon_takip=0)
         for _ in range(6):
             dets, _b, aktif = th._algila(kare)
@@ -787,7 +822,8 @@ def test_balon_modunda_kilit_ve_nisan_balonda():
         assert not any(d.get("balon") for d in dets), "balon takibi kapaliyken balon tarandi"
     finally:
         algi.ayar_guncelle(balon_takip=algi.VARSAYILAN_AYAR["balon_takip"],
-                           zor_ornek=algi.VARSAYILAN_AYAR["zor_ornek"])
+                           zor_ornek=algi.VARSAYILAN_AYAR["zor_ornek"],
+                           a2_yalniz_balon=algi.VARSAYILAN_AYAR["a2_yalniz_balon"])
         algi.takip_sifirla()
         balon_takip.sifirla()
 
@@ -1050,8 +1086,9 @@ def _takip_kos(yorunge, hedef_pan=10.0, hedef_tilt=-5.0, sure=5.0, pan_hiz=0.0, 
         # sinif varsayilani (1.5) kullaniliyordu — arayuzden iki kat sert bir bosluk
         # varsayimi; test gercek kurulumu olcmuyordu.
         b = algi.AYAR.get("takip_bosluk", 0.8) if bosluk is None else bosluk
-        w._pan_takip = HK.EksenTakip(isaret=+1.0, bosluk=b, **HK.SAHA_AYARI)
-        w._tilt_takip = HK.EksenTakip(isaret=-1.0, bosluk=b, **HK.SAHA_AYARI)
+        ekf = bool(int(algi.AYAR.get("takip_ekf", algi.VARSAYILAN_AYAR["takip_ekf"])))
+        w._pan_takip = HK.EksenTakip(isaret=+1.0, bosluk=b, ekf=ekf, **HK.SAHA_AYARI)
+        w._tilt_takip = HK.EksenTakip(isaret=-1.0, bosluk=b, ekf=ekf, **HK.SAHA_AYARI)
         w._nisan_mesgul_ta = 0.0
         for _ in range(6):
             saat[0] += 0.05
@@ -1105,6 +1142,212 @@ def _takip_kos(yorunge, hedef_pan=10.0, hedef_tilt=-5.0, sure=5.0, pan_hiz=0.0, 
                                   and c != "YQ")
         return ozet
     finally:
+        A.time = gercek
+        if w is not None:
+            w.close()
+
+
+def test_balon_nisan_kapisi_kanitla_acilir():
+    """26.09 saha ("lazeri acip vurmuyor, cok bekliyor"): balona ates eskiden 0.5 sn
+    KESINTISIZ olu bolge istiyordu; her kacirilan/hayalet kare sayaci sifirliyordu (24-26.09
+    kilitlerinin %36'sinda hic ates yok). Artik HK.AtesKapisi, _takip_olcum_geldi'den
+    beslenir:
+      * modelin gordugu IKI iyi karede ates (eski kapi ~8 kesintisiz kare isterdi),
+      * aradaki gorulmeyen/hayalet kare kaniti SILMEZ, ama hayalet karede ates BASLAMAZ,
+      * renkle surdurulen kare kanit DEGIL (kural 7: o karede modelce gorulen hedef),
+      * balon disina dusen kare pencerede oldukca ates yok,
+      * kilit baska balona gecince kanit sifirdan."""
+    saat = _SahteZaman.simdi
+    gercek = A.time
+    A.time = _SahteZaman
+    w = None
+    try:
+        w = pencere()
+        k = kontrol_mod.Kontrol("mock", tilt_kaynak="mock")
+        k.tilt._saat = lambda: saat[0]
+        k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+        k.tilt.mock.lazer_destek = False        # lazer sahte ESKI kartta (k.mock.lazer)
+        w.kontrol = k
+        for _ in range(6):
+            saat[0] += 0.05
+            k.oku()
+        w._acilis_yukselisi_bekliyor = False
+        w._acilis_hizala()
+        for _ in range(20):
+            saat[0] += 0.05
+            k.oku()
+        w.mod, w.asama = "Otonom", "Aşama 2"
+        assert w._surekli_takip_mi(), "kurulum: surekli takip yok"
+
+        def olc(bid, ex=0.0, ey=0.0, kaynak="balon_pencere"):
+            saat[0] += 1 / 16.0
+            k.oku()
+            w._takip_olcum_geldi({"var": True, "t": saat[0], "ex": ex, "ey": ey, "olu_x": 5.0,
+                                  "olu_y": 5.0, "w": 1280, "id": bid, "kaynak": kaynak,
+                                  "box": (630, 350, 650, 370)})          # yaricap 10 px
+
+        def gorulmedi():
+            saat[0] += 1 / 16.0
+            k.oku()
+            w._takip_olcum_geldi({"var": False, "t": saat[0]})
+
+        def ates(bid, hayalet=False):
+            w._otonom_ates_kontrol(_balon_veri(id=bid, hayalet=hayalet), False)
+            return k.mock.lazer is True
+
+        def kes():
+            w._otonom_turu_kes("test")
+
+        olc("B1")
+        assert not ates("B1"), "tek karede ates"
+        olc("B1")
+        assert ates("B1"), "balon iki karede nisanda, ates ACILMADI (eski kapi 0.5 sn beklerdi)"
+        kes()
+        olc("B2")
+        gorulmedi()                                        # model bir kare kacirdi
+        assert not ates("B2", hayalet=True), "HAYALET karede ates basladi"
+        olc("B2")
+        assert ates("B2"), "gorulmeyen kare kaniti sildi"
+        kes()
+        olc("B3", kaynak="balon_renk")
+        olc("B3", kaynak="balon_renk")
+        assert not ates("B3"), "yalniz RENKLE izlenen balona ates"
+        kes()
+        olc("B4")
+        olc("B4", ex=15.0)                                 # lazer balonun disinda (1.5 yaricap)
+        olc("B4")
+        assert not ates("B4"), "lazer az once balonun disindaydi, ates acildi"
+        kes()
+        olc("B5")
+        olc("B6")
+        assert not ates("B6"), "onceki balonun kaniti yeni kilide sayildi"
+    finally:
+        A.time = gercek
+        if w is not None:
+            w.close()
+
+
+def test_balon_parcali_yakma():
+    """26.09 kullanici istegi + saha (01:32: mavi lazer balonu mora boyuyor, model lazer
+    altinda balonu goremiyor, 2 sn'lik kor atista namlu 5 derece kacti). BALONDA ates turu
+    PARCALI: parca en fazla ates_parca_suresi() yanar; lazer yandiktan SONRA cekilen 2 karede
+    balon gorulmezse HEMEN kesilir; hayalet karede yeni parca BASLAMAZ; AYNI balon yeniden
+    gorulup nisan kapisi acilinca yeni parca; turun toplami otonom_ates_suresi() dolunca tur
+    biter (balon_takip.ates_tamamlandi). Ayar ates_kayipta_kes=0 kesmeyi kapatir. Operator
+    yanan parcayi elle keserse tur biter, ELLE_KESME_BEKLE_S yeni tur yok."""
+    import balon_takip
+    saat = _SahteZaman.simdi
+    gercek = A.time
+    A.time = _SahteZaman
+    w = None
+    eski_bt = (balon_takip.ates_basladi, balon_takip.ates_bitti, balon_takip.ates_tamamlandi)
+    eski_ayar = {k: algi.AYAR[k] for k in ("otonom_ates_sure", "ates_parca_sure", "ates_kayipta_kes",
+                                           "ates_parcali")}
+    cagri = []
+    try:
+        balon_takip.ates_basladi = lambda g, simdi=None, sure=None: cagri.append(("basladi", round(sure, 3)))
+        balon_takip.ates_bitti = lambda simdi=None: cagri.append(("bitti",))
+        balon_takip.ates_tamamlandi = lambda g, simdi=None: cagri.append(("tamam",))
+        w = pencere()                              # (kullanicinin ayarlar.json'unu yukler)
+        algi.ayar_guncelle(otonom_ates_sure=1.0, ates_parca_sure=0.5, ates_kayipta_kes=1, ates_parcali=1)
+        k = kontrol_mod.Kontrol("mock", tilt_kaynak="mock")
+        k.tilt._saat = lambda: saat[0]
+        k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+        k.tilt.mock.lazer_destek = False        # lazer sahte ESKI kartta (k.mock.lazer)
+        w.kontrol = k
+        for _ in range(6):
+            saat[0] += 0.05
+            k.oku()
+        w._acilis_yukselisi_bekliyor = False
+        w._acilis_hizala()
+        for _ in range(20):
+            saat[0] += 0.05
+            k.oku()
+        w.mod, w.asama = "Otonom", "Aşama 2"
+
+        def olc(bid="B1", var=True, kaynak="balon_pencere"):
+            saat[0] += 1 / 16.0
+            k.oku()
+            d = {"var": var, "t": saat[0]}
+            if var:
+                d.update({"ex": 0.0, "ey": 0.0, "olu_x": 5.0, "olu_y": 5.0, "w": 1280, "id": bid,
+                          "kaynak": kaynak, "box": (630, 350, 650, 370)})
+            w._takip_olcum_geldi(d)
+
+        def kontrol(bid="B1", hayalet=False):
+            w._otonom_ates_kontrol(_balon_veri(id=bid, hayalet=hayalet), False)
+            return k.mock.lazer is True
+
+        olc(); olc()
+        assert kontrol(), "kurulum: nisan kapisi acildi, parca baslamadi"
+        assert w._parca_acik and w._tur_butce == 1.0 and cagri[-1] == ("basladi", 0.5), cagri
+        # 0) lazer YANMADAN once cekilip gec gelen kareler (model o an kacirmis) kayip degil
+        for geri in (0.12, 0.08, 0.05):
+            w._takip_olcum_geldi({"var": False, "t": w._parca_bas_t - geri})
+        saat[0] += 0.2
+        assert kontrol(hayalet=True), "lazerden ONCE cekilen kareler parcayi kesti"
+        saat[0] -= 0.2
+        # 1) lazer altinda balon gorulmedi -> parca HEMEN kesilir, tur surer
+        olc(var=False); olc(var=False)
+        assert kontrol(hayalet=True), "parca en az surusunden once kesildi"
+        olc(var=False)
+        assert not kontrol(hayalet=True), "lazer altinda balon gorulmedi, parca KESILMEDI (kor surus)"
+        assert w._otonom_ates_aktif and not w._parca_acik and ("bitti",) in cagri
+        assert 0.15 <= w._tur_yakilan <= 0.25, w._tur_yakilan
+        # 2) hayalet karede yeni parca yok (kural 7) — nisan kapisi acik olsa bile; ayni balon
+        #    2 karede gorulunce yeni parca
+        assert not kontrol(hayalet=True), "gorunmeyen balona parca basladi"
+        olc(); olc()
+        assert w._ates_kapisi.hazir(saat[0], "B1"), "kurulum: kapi acik olmali"
+        assert not kontrol(hayalet=True), "kapi acikken HAYALET karede parca basladi (kural 7)"
+        assert kontrol(), "ayni balon yeniden goruldu, yeni parca baslamadi"
+        assert w._parca_no == 2
+        # 3) balon gorunurken parca tam sure yanar, sonra yeni kanitla devam eder. Lazer altinda
+        #    balonu yalniz LAZER ALTI UZMAN modeli gorduyse ("balon_uzman") de goruldu sayilir.
+        t0 = saat[0]
+        i = 0
+        while saat[0] + 1 / 16.0 - t0 < 0.45:             # olc saati bir kare ilerletir
+            olc(kaynak=("balon_pencere", "balon_uzman", "balon_uzman",
+                        "balon_pencere", "balon_uzak", "balon_uzak")[i % 6])
+            i += 1
+            assert kontrol(), "gorunen balonda parca erken kesildi"
+        olc(); olc()
+        kontrol()
+        assert not w._parca_acik or w._parca_no == 3, "parca suresi dolmadi"
+        # 4) tur toplami (1.0 sn) dolunca tur biter: ates_tamamlandi
+        for _ in range(40):
+            olc()
+            kontrol()
+            if not w._otonom_ates_aktif:
+                break
+        assert not w._otonom_ates_aktif and ("tamam",) in cagri and k.mock.lazer is False, \
+            ("tur toplami dolunca tur bitmedi", w._tur_yakilan, cagri)
+        assert 0.95 <= w._tur_yakilan <= 1.1, w._tur_yakilan
+        # 5) ates_kayipta_kes=0: gorulmeyen karede parca suresi dolana kadar yanar
+        algi.ayar_guncelle(ates_kayipta_kes=0)
+        olc(); olc()
+        assert kontrol()
+        for _ in range(4):
+            olc(var=False)
+        assert kontrol(hayalet=True), "ates_kayipta_kes=0 iken parca kesildi"
+        w._otonom_turu_kes("test")
+        algi.ayar_guncelle(ates_kayipta_kes=1)
+        # 6) operator yanan parcayi keserse tur biter, ELLE_KESME_BEKLE_S yeni tur yok
+        olc(); olc()
+        assert kontrol()
+        w._ates_kisayolu()                         # otonomda kisayol yalniz KESER
+        assert not kontrol() and not w._otonom_ates_aktif, "elle kesilen tur surdu"
+        olc(); olc()
+        assert not kontrol(), "elle kesmeden hemen sonra otonom yeniden yakti"
+        t0 = saat[0]
+        while saat[0] - t0 < A.ELLE_KESME_BEKLE_S:
+            olc()
+            kontrol()
+        olc(); olc()
+        assert kontrol(), "elle kesme beklemesinden sonra otonom ates donmedi"
+    finally:
+        balon_takip.ates_basladi, balon_takip.ates_bitti, balon_takip.ates_tamamlandi = eski_bt
+        algi.ayar_guncelle(**eski_ayar)
         A.time = gercek
         if w is not None:
             w.close()
@@ -1334,6 +1577,114 @@ def test_kol_cubugu_yorunge_ve_birakinca_fren():
         A.time = gercek
 
 
+def test_balon_surekli_yakma():
+    """26.09 aksam kullanici karari (19:26 kaydi: lazer altindaki balon artik goruluyor):
+    "parcali atesi kapatalim; nisangah balonun ustundeyse lazer acik olsun, balon patlayinca
+    kapansin". Varsayilan SUREKLI (ates_parcali=0): parca turun tamamidir (0.5 sn'de
+    sonmez); balon lazerden sonra 2 karede gorulmezse (patladi) HEMEN sonar; modelin gordugu
+    NISAN_DISARI_KARE (5) ARDISIK karede nisan balon merkezinden 1.5 yaricaptan uzaksa sonar
+    (26.09 gece kullanici: "genislet"; daha az kare / 1.5 yaricap icindeki kare yetmez, lazer
+    halkasi karesi olcum sayilmaz); nisan balona donup kapi acilinca AYNI turda yeniden yanar."""
+    import balon_takip
+    saat = _SahteZaman.simdi
+    gercek = A.time
+    A.time = _SahteZaman
+    w = None
+    eski_bt = (balon_takip.ates_basladi, balon_takip.ates_bitti, balon_takip.ates_tamamlandi)
+    eski_ayar = {k: algi.AYAR[k] for k in ("otonom_ates_sure", "ates_parca_sure", "ates_kayipta_kes",
+                                           "ates_parcali")}
+    cagri = []
+    try:
+        balon_takip.ates_basladi = lambda g, simdi=None, sure=None: cagri.append(("basladi", round(sure, 3)))
+        balon_takip.ates_bitti = lambda simdi=None: cagri.append(("bitti",))
+        balon_takip.ates_tamamlandi = lambda g, simdi=None: cagri.append(("tamam",))
+        w = pencere()
+        algi.ayar_guncelle(otonom_ates_sure=3.0, ates_parca_sure=0.5, ates_kayipta_kes=1, ates_parcali=0)
+        assert algi.VARSAYILAN_AYAR["ates_parcali"] == 0, "parcali yakma varsayilan olarak acik"
+        k = kontrol_mod.Kontrol("mock", tilt_kaynak="mock")
+        k.tilt._saat = lambda: saat[0]
+        k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+        k.tilt.mock.lazer_destek = False
+        w.kontrol = k
+        for _ in range(6):
+            saat[0] += 0.05
+            k.oku()
+        w._acilis_yukselisi_bekliyor = False
+        w._acilis_hizala()
+        for _ in range(20):
+            saat[0] += 0.05
+            k.oku()
+        w.mod, w.asama = "Otonom", "Aşama 2"
+
+        def olc(var=True, ex=0.0, kaynak="balon_pencere"):
+            saat[0] += 1 / 16.0
+            k.oku()
+            d = {"var": var, "t": saat[0]}
+            if var:
+                d.update({"ex": ex, "ey": 0.0, "olu_x": 5.0, "olu_y": 5.0, "w": 1280, "id": "B1",
+                          "kaynak": kaynak, "box": (630, 350, 650, 370)})     # yaricap 10 px
+            w._takip_olcum_geldi(d)
+
+        def kontrol(hayalet=False):
+            w._otonom_ates_kontrol(_balon_veri(id="B1", hayalet=hayalet), False)
+            return k.mock.lazer is True
+
+        olc(); olc()
+        assert kontrol(), "kurulum: nisan kapisi acildi, ates baslamadi"
+        assert cagri[-1] == ("basladi", 3.0), ("surekli yakmada parca turun tamami degil", cagri)
+        # 1) nisan balondayken 0.5 sn'den cok yanar (parca yok)
+        t0 = saat[0]
+        while saat[0] - t0 < 1.0:
+            olc(ex=3.0)
+            assert kontrol(), "nisan balondayken lazer sondu"
+        # 2) N-1 kare disarida: surer; 1.3 yaricap (balonun hemen yani) disari sayilmaz; lazer
+        #    halkasi karesi (olcum degil) disarida sayilmaz
+        assert A.NISAN_DISARI_KARE >= 4 and A.NISAN_DISARI_ORAN >= 1.4, "tolerans daraldi"
+        for _ in range(A.NISAN_DISARI_KARE - 1):
+            olc(ex=20.0)
+            assert kontrol(), "N-1 kare disarida lazeri sondurdu"
+        olc(ex=13.0)
+        assert kontrol(), "1.3 yaricap disari sayildi"
+        for _ in range(A.NISAN_DISARI_KARE - 1):
+            olc(ex=20.0)
+        olc(ex=20.0, kaynak="balon_lazer")
+        assert kontrol(), "lazer halkasi karesi nisan olcumu sayildi"
+        olc(ex=3.0)
+        # 3) N ARDISIK karede nisan balondan 1.5 yaricaptan uzak -> soner, tur surer
+        for _ in range(A.NISAN_DISARI_KARE):
+            olc(ex=20.0)
+        assert not kontrol(), "nisan balondan cikti, lazer SONMEDI"
+        assert w._otonom_ates_aktif and not w._parca_acik and ("bitti",) in cagri
+        # 4) nisan balona donunce (kapi: temiz kareler + takipcinin su anki kestirimi oturunca,
+        #    en gec ~0.6 sn) ayni turda yeniden yanar
+        for _ in range(10):
+            olc()
+            if kontrol():
+                break
+        assert k.mock.lazer is True, "nisan balona dondu, lazer yeniden yanmadi"
+        assert w._parca_no == 2 and w._tur_butce == 3.0
+        t0 = saat[0]
+        while saat[0] - t0 < 0.4:
+            olc(ex=3.0)
+            assert kontrol(), "yeniden yanan lazer nisan balondayken sondu (eski disari sayaci)"
+        # 5) balon patladi (lazerden sonra 2 karede yok) -> hemen soner
+        olc(var=False); olc(var=False); olc(var=False)
+        assert not kontrol(hayalet=True), "balon gorunmuyor (patladi), lazer SONMEDI"
+        # 6) parcali ayar acilinca eski davranis: parca en fazla ates_parca_suresi()
+        w._otonom_turu_kes("test")
+        algi.ayar_guncelle(ates_parcali=1)
+        w._otonom_ates_aktif = False
+        olc(); olc()
+        assert kontrol() and cagri[-1] == ("basladi", 0.5), cagri
+        w._otonom_turu_kes("test")
+    finally:
+        balon_takip.ates_basladi, balon_takip.ates_bitti, balon_takip.ates_tamamlandi = eski_bt
+        algi.ayar_guncelle(**eski_ayar)
+        A.time = gercek
+        if w is not None:
+            w.close()
+
+
 def test_lazer_kutucugu_sure_ve_nisangah(w):
     """25.09 kullanici istegi: (1) otonom lazer suresi lazer kutucugundaki (ATEŞ'in ⚙'i)
     kaydiricidan; (2) nisangah — otonom takibin lazer noktasi — oklarla PIKSEL PIKSEL
@@ -1348,13 +1699,21 @@ def test_lazer_kutucugu_sure_ve_nisangah(w):
     w._ayar_dosya = lambda: yol                  # GERCEK ayarlar.json'a yazilmasin
     eski = dict(algi.AYAR)
     try:
-        algi.ayar_guncelle(lazer_ofset_x=0.0, lazer_ofset_y=0.0, otonom_ates_sure=2.0)
+        algi.ayar_guncelle(lazer_ofset_x=0.0, lazer_ofset_y=0.0, otonom_ates_sure=2.0,
+                           ates_parca_sure=0.5, ates_parcali=0)
         w._kare_wh = (1280, 720)
         w._lazer_sayfasi_ac()
         assert w._acik_pencere == "lazer" and w.nisangah_lbl.text() == "merkez"
         # (1) sure: kaydirici 0.1 sn birimli
         w.ates_sure_sl.setValue(35)
         assert A.otonom_ates_suresi() == 3.5 and w.ates_sure_lbl.text() == "3.5 sn"
+        # (1b) 26.09 aksam: balonda SUREKLI yakma varsayilan, parca suresi kapaliyken kilitli;
+        #      anahtar parcali yakmayi acar. Parca suresi 0.1 sn birim.
+        assert not A.ates_parcali() and not w.parcali_sw.isChecked() and not w.parca_sure_sl.isEnabled()
+        w.parcali_sw.setChecked(True)
+        assert A.ates_parcali() and w.parca_sure_sl.isEnabled()
+        w.parca_sure_sl.setValue(8)
+        assert A.ates_parca_suresi() == 0.8 and w.parca_sure_lbl.text() == "0.8 sn"
         # (2) nisangah: 1 tik = kamera karesinde 1 px
         for _ in range(3):
             w.nisangah_btns["up"].click()
@@ -1375,10 +1734,12 @@ def test_lazer_kutucugu_sure_ve_nisangah(w):
             d = json.load(f)
         assert d["cozunurluk"] == 960 and d["kd"] == 0.1, d
         assert d["otonom_ates_sure"] == 3.5 and round(d["lazer_ofset_x"] * 1280) == 2 \
-            and round(d["lazer_ofset_y"] * 720) == -3, d
+            and round(d["lazer_ofset_y"] * 720) == -3 and d["ates_parca_sure"] == 0.8 \
+            and d["ates_parcali"] == 1, d
         # goruntu isleme panelinin Sifirla'si lazer kalibrasyonuna dokunmaz
         w._ayar_sifirla()
         assert A.otonom_ates_suresi() == 3.5 and round(algi.AYAR["lazer_ofset_x"] * 1280) == 2
+        assert A.ates_parca_suresi() == 0.8 and A.ates_parcali(), "Sifirla parca ayarlarini sildi"
         # OTONOM BASLADI: kontrol yetkisi otonomda — nisangah degismez
         _otonomu_baslat(w)
         w._lazer_sayfasi_ac()
@@ -1424,6 +1785,9 @@ TAKIP_TESTLERI = [
     test_klavye_ve_kol_acil_durdurur_tekrar_basinca_devam,
     test_panel_aktif_hedefi_hayalet_ve_balon_bilgisi_tasir,
     test_balon_modunda_kilit_ve_nisan_balonda,
+    test_balon_nisan_kapisi_kanitla_acilir,
+    test_balon_parcali_yakma,
+    test_balon_surekli_yakma,
     test_surekli_takip_konum_kipi,
     test_surekli_takip_yorunge_kipi,
     test_surekli_takip_bosluk_buyuk_sanilirsa,

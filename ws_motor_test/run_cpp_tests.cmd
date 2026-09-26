@@ -7,3 +7,7 @@ if errorlevel 1 exit /b 1
 cl /nologo /EHsc /std:c++17 /W4 /Itests\stubs tests\test_firmware.cpp /Fe:tests\test_firmware.exe /Fo:tests\test_firmware.obj
 if errorlevel 1 exit /b 1
 tests\test_firmware.exe
+if errorlevel 1 exit /b 1
+cl /nologo /EHsc /std:c++17 /W4 /Itests\stubs tests\test_muzik.cpp /Fe:tests\test_muzik.exe /Fo:tests\test_muzik.obj
+if errorlevel 1 exit /b 1
+tests\test_muzik.exe

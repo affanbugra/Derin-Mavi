@@ -166,10 +166,22 @@ VARSAYILAN_AYAR = {
     "lazer_ofset_x": 0.0,   # + : lazer, kamera eksenine gore SAGA vuruyor
     "lazer_ofset_y": 0.0,   # + : lazer, kamera eksenine gore ASAGI vuruyor
     # (25.09) Ikisi de lazer kutucugundaki (ATEŞ'in ⚙'i) oklarla PIKSEL PIKSEL ayarlanir.
-    # OTONOM ATES TURU (sn): dwell dolunca lazer bu kadar acik kalir; balonda hayalet
-    # kesmez (CLAUDE.md §1 kural 7 istisnasi). 24.09 saha: 1 sn %55 guc balonu
-    # patlatmadi -> 2 sn. Lazer kutucugundaki kaydiricidan ayarlanir (25.09 kullanici istegi).
+    # OTONOM ATES TURU (sn): bir turda lazerin TOPLAM yanacagi sure. 24.09 saha: 1 sn %55
+    # guc balonu patlatmadi -> 2 sn. Lazer kutucugundaki kaydiricidan ayarlanir.
     "otonom_ates_sure": 2.0,
+    # PARCALI YAKMA (26.09 kullanici istegi, BALONDA): tur, en fazla bu kadar suren parcalara
+    # bolunur. Mavi lazer balonu mora boyuyor, model lazer altinda balonu goremiyor; tek uzun
+    # atista namlu kor kalip kaciyordu (01:33 kaydi: 2 sn'de 5 derece, balon 9 yaricap
+    # uzakta). Parca biter -> ayni balon yeniden gorulup nisan dogrulaninca yeni parca.
+    # Benzetim (hareketli balon, lazer altinda kor): lazer yanarken balonda %37 -> %72.
+    "ates_parca_sure": 0.5,
+    # 1: lazer yandiktan sonra cekilen 2 karede balon gorulmezse parca HEMEN kesilir.
+    # 0: parca suresi dolana kadar yanar (balon patlamiyorsa sahada denenecek secenek).
+    "ates_kayipta_kes": 1,
+    # PARCALI ATES (balon): 0 = SUREKLI (26.09 aksam kullanici karari; lazer alti modeliyle
+    # balon lazer altinda da goruluyor) — nisan balondayken yanar, balon gorulmezse (patladi)
+    # ya da nisan balondan cikinca kesilir. 1 = eski parcali yakma (ates_parca_sure'lik parcalar).
+    "ates_parcali": 0,
     # Balon nisan ofseti: nisan noktasi kutunun ALT KENARINDAN bu kadar asagi kayar,
     # birim = HEDEF KUTUSUNUN YUKSEKLIGI. Model balonu goremedigi icin (best.pt 4
     # sinif, balon YOK) balonun yeri maketten GEOMETRIK olarak kestirilir.
@@ -199,6 +211,15 @@ VARSAYILAN_AYAR = {
     # Disli boslugu baslangic tahmini (derece). Olculen: tilt 0.1-0.9, pan 0.2-0.7.
     # Kontrolcu calisirken kendisi ogrenir (EksenTakip.bosluk_kest).
     "takip_bosluk": 0.8,
+    # SALINIM EKF'si (hedef_kestirici.KarmaKestirici): 1 = sabit hizli Kalman'in yaninda
+    # salinim modelli EKF de calisir, hangisi hedefi 0.25 sn ileriye daha iyi tahmin
+    # ediyorsa o kullanilir (sallanan balon / rayin dalgasi). 0 = yalniz eski Kalman.
+    # Program acilirken okunur. Ayrinti ve olcumler: CLAUDE.md §8 (26.09).
+    # VARSAYILAN KAPALI (26.09 aksam, 19:59 saha kaydi, hareketli balon): EKF'nin secildigi
+    # karelerde nisan hatasi iki kat (pan 0.61 -> 1.08, tilt 0.62 -> 1.24 yaricap; balon disi
+    # %32 -> %53 / %40 -> %60); kullanici "tilt agresif, asiyor" dedi. Kayittan cikarilan balon
+    # yollariyla benzetimde EKF hicbir sahnede kazandirmadi (balonda %43 / %43).
+    "takip_ekf": 0,
     # Kare kameradan OKUNDUGUNDA zaten bu kadar eskidir (pozlama + USB + decode).
     # Olcum, eksenin karenin CEKILDIGI andaki acisiyla eslenir; okunma ani
     # kullanilirsa hareket halinde hedef aci bu sure x eksen hizi kadar kayar.
@@ -243,6 +264,17 @@ VARSAYILAN_AYAR = {
     # kilit ve nisan BALONA kurulur, arac yalniz kimlik kanitidir. 0 = eski yol (arac
     # kilidi + govdeden balon kestirimi) — balon modeli sahada saparsa kacis kapisi.
     "balon_takip": 1,
+    # LAZER ALTI UZMAN balon modeli (26.09, models/lazer_uzman/bestb3_lazer.pt): yalniz lazer
+    # kilitli balondayken o balonun penceresinde bestb2'nin gormedigi balonu ekler (bkz.
+    # balon_takip.UZMAN_DOSYA). 0 = yalniz bestb2 (eski davranis birebir).
+    "lazer_uzman": 1,
+    # UZAK BALON (26.09 gece): ayni ikinci model, bestb2'nin bos dondugu kucuk pencerelerde de
+    # calisir — bestb2 makete bitisik uzak (12-18 px) balonu hic gormuyor (balon_takip._uzak_tespit).
+    # 0 = uzak aramada yalniz bestb2.
+    "uzak_uzman": 1,
+    # ASAMA 2 YALNIZ BALON (26.09 gece kullanici karari): A2'de dost yok, tip beklenmez (sartname)
+    # -> arac modeli A2'de hic calismaz, kare ~16 ms kisalir. 0 = A2'de de arac tanima. A3 etkilenmez.
+    "a2_yalniz_balon": 1,
     # HIZLI CIKARIM (FP16, yalniz GPU'da): tum model cagrilari yarim hassasiyetle. 25.09
     # olculdu (RTX 3050 Ti, gercek kareler): Asama 1 kare suresi %14 kisa (kilit penceresi
     # 25 -> 19 ms); tespitler ayni — balon 1083/1083, arac 527/532 (farklar esigin +-0.01
@@ -298,13 +330,14 @@ AYAR_SINIR = {
     "fov": (20.0, 140.0),
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
     "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
-    "otonom_ates_sure": (0.5, 5.0),
+    "otonom_ates_sure": (0.5, 5.0), "ates_parca_sure": (0.2, 5.0), "ates_kayipta_kes": (0, 1), "ates_parcali": (0, 1),
     "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60), "nisan_govde": (0, 1),
     "takip_ppd_pan": (4.0, 60.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
+    "takip_ekf": (0, 1),
     "roi_tespit": (0, 1), "roi_esik": (0.05, 0.95),
     "arama_cozunurluk": (320, 1920), "uzak_tarama": (0, 1), "uzak_tarama_periyot": (1, 30), "uzak_kirmizi": (0, 1), "zor_ornek": (0, 1),
     "uzak_onay_esigi": (0.10, 0.99), "renk_takip": (0, 1),
-    "balon_takip": (0, 1), "balon_esik": (0.05, 0.95), "hizli_cikarim": (0, 1),
+    "balon_takip": (0, 1), "lazer_uzman": (0, 1), "uzak_uzman": (0, 1), "a2_yalniz_balon": (0, 1), "balon_esik": (0.05, 0.95), "hizli_cikarim": (0, 1),
     "balon_cap_cm": (0, 100), "menzil_kontrol": (0, 1),
     "onay_esigi": (0.10, 0.99), "onay_tekrari": (1, 10),
     "kamera_fps": (5, 120),

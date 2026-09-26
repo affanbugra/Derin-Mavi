@@ -135,6 +135,21 @@ class Kontrol:
         """Dikey eksen ayri kartta mi? (yonlendirmenin tek kosulu)"""
         return self.tilt.bagli
 
+    # ---- BUZZER SARKILARI (ESP32-S3, GPIO12; bkz. tilt_surucu MZ / MZK1) ----
+    @property
+    def muzik_destekli(self):
+        """S3 kartinin firmware'i sarki caliyor mu? (MZK1 yayini taze, buzzer hazir)"""
+        return bool(self.tilt_ayri and self.tilt.muzik_destekli)
+
+    @property
+    def muzik_durumu(self):
+        """{"calan", "adet", "hazir"} ya da None (kart yok / eski firmware)."""
+        return self.tilt.muzik_durum if self.tilt_ayri else None
+
+    def muzik_cal(self, no):
+        """no. sarkiyi cal (0 = sustur). Kart desteklemiyorsa HICBIR SEY yollanmaz."""
+        return bool(self.tilt_ayri and self.tilt.muzik_cal(no))
+
     @property
     def pan_ayri(self):
         """Pan ekseni tilt karti uzerinden mi suruluyor?

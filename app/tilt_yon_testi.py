@@ -218,16 +218,33 @@ if __name__ == "__main__":
         tarama()
         raise SystemExit(0)
     if len(sys.argv) > 1 and sys.argv[1] == "egri":
-        # Olcer ve app/tilt_egri.json'a KAYDEDER; otonom takip bu dosyayi kullanir.
-        # Mekanizma, kamera montaji ya da kalibrasyon degisirse YENIDEN calistirilmali.
-        import tilt_egri
-        noktalar = egri()
-        e = tilt_egri.KameraEgrisi(noktalar)
-        e.kaydet(not_=f"tilt_yon_testi.py egri, {time.strftime('%Y-%m-%d %H:%M')}, "
-                      f"FOV {algi.AYAR.get('fov')}")
-        lo, hi = e.gecerli_aralik
-        print(f"\nKAYDEDILDI: {tilt_egri.VARSAYILAN_DOSYA}")
-        print(f"gecerli aralik {lo:.0f}-{hi:.0f} derece komut "
-              f"(kamera {e.kamera(lo):+.1f} .. {e.kamera(hi):+.1f} derece)")
+        # KAMERA_PPD_TABLO DOGRULAMASI (26.09): kolu adim adim gezdirir, her adimda kameranin
+        # GERCEKTEN ne kadar dondugunu olcer, takibin kullandigi tabloyla yan yana yazar ve
+        # app/loglar/tilt_egri_<zaman>.json'a kaydeder (tablo bu olcumle elle guncellenir).
+        # Desenli, SABIT bir sahneye bakarak calistirin (hareketli kisi/ekran olcumu bozar).
+        import json
+        import os
+        adim = float(sys.argv[2]) if len(sys.argv) > 2 else 3.0
+        noktalar = egri(adim=adim)
+        w = 1280.0
+        dpp = nisan.derece_per_piksel(int(w), algi.AYAR.get("fov", 60.0))
+        satirlar = []
+        print("\n  kol derece   olculen px/kol-derece   tablo   olculen/tablo   guven")
+        for (a0, k0, _), (a1, k1, g) in zip(noktalar, noktalar[1:]):
+            if abs(a1 - a0) < 0.5:
+                continue
+            kol = 0.5 * (a0 + a1) + T.KULLANICI_SIFIR
+            olculen = (k1 - k0) / dpp / (a1 - a0)          # 1280 px karede piksel / kol derecesi
+            tablo = T._ppd_kol(kol)
+            satirlar.append(dict(kol=round(kol, 2), olculen=round(olculen, 2), tablo=round(tablo, 2),
+                                 guven=round(g, 3)))
+            print(f"  {kol:9.1f}   {olculen:21.1f}   {tablo:5.1f}   {olculen / tablo:13.2f}   {g:5.2f}"
+                  + ("   <- guven dusuk" if g < 0.1 else ""))
+        yol = os.path.join(os.path.dirname(os.path.abspath(__file__)), "loglar",
+                           f"tilt_egri_{time.strftime('%Y%m%d_%H%M%S')}.json")
+        os.makedirs(os.path.dirname(yol), exist_ok=True)
+        with open(yol, "w", encoding="utf-8") as f:
+            json.dump(dict(fov=algi.AYAR.get("fov"), adim=adim, noktalar=noktalar, satirlar=satirlar), f, indent=1)
+        print(f"\nKAYDEDILDI: {yol}")
         raise SystemExit(0)
     raise SystemExit(main(float(sys.argv[1]) if len(sys.argv) > 1 else 8.0))
