@@ -1685,6 +1685,42 @@ def test_balon_surekli_yakma():
             w.close()
 
 
+def test_ayar_bilgi_kutusu_ipucu():
+    """27.09 saha: ayarlardaki "i" kutulari "calismiyor". Kutu TIKLANINCA ve fareyle ustunde
+    beklenince (gorunum -> sahne yolu; arayuz QGraphicsView icinde) aciklamayi gostermeli;
+    aciklama satirlara sarilir (Qt max-width'i tanimaz, tek satir ekrandan tasiyordu)."""
+    from PySide6.QtCore import QPoint, QEvent, Qt
+    from PySide6.QtGui import QHelpEvent
+    from PySide6.QtWidgets import QToolTip, QLabel
+    from PySide6.QtTest import QTest
+    w = pencere()
+    try:
+        w.show()
+        QTest.qWait(100)
+        w._ayar_toggle()
+        QTest.qWait(150)
+        kutular = [x for x in A.QApplication.allWidgets() if isinstance(x, QLabel)
+                   and x.objectName() == "ayarinfo" and x.isVisible() and not x.visibleRegion().isEmpty()]
+        assert kutular, "ayarlarda gorunen 'i' kutusu yok"
+        k = kutular[0]
+        assert "<table width=" in k.toolTip(), "aciklama satirlara sarilmiyor"
+        QToolTip.hideText()
+        QTest.mouseClick(k, Qt.LeftButton)
+        QTest.qWait(50)
+        assert QToolTip.isVisible() and QToolTip.text() == k.toolTip(), "tiklaninca aciklama acilmadi"
+        QToolTip.hideText()
+        QTest.qWait(50)
+        merkez = k.mapTo(w.content, QPoint(k.width() // 2, k.height() // 2))
+        vp = w.view.mapFromScene(merkez.x(), merkez.y())
+        A.QApplication.sendEvent(w.view.viewport(),
+                                 QHelpEvent(QEvent.ToolTip, vp, w.view.viewport().mapToGlobal(vp)))
+        QTest.qWait(50)
+        assert QToolTip.isVisible() and QToolTip.text() == k.toolTip(), "ustunde beklenince aciklama acilmadi"
+    finally:
+        QToolTip.hideText()
+        w.close()
+
+
 def test_lazer_kutucugu_sure_ve_nisangah(w):
     """25.09 kullanici istegi: (1) otonom lazer suresi lazer kutucugundaki (ATEŞ'in ⚙'i)
     kaydiricidan; (2) nisangah — otonom takibin lazer noktasi — oklarla PIKSEL PIKSEL
@@ -1788,6 +1824,7 @@ TAKIP_TESTLERI = [
     test_balon_nisan_kapisi_kanitla_acilir,
     test_balon_parcali_yakma,
     test_balon_surekli_yakma,
+    test_ayar_bilgi_kutusu_ipucu,
     test_surekli_takip_konum_kipi,
     test_surekli_takip_yorunge_kipi,
     test_surekli_takip_bosluk_buyuk_sanilirsa,

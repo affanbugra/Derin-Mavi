@@ -8,6 +8,7 @@ kamera secimi arayuzden yapilir, DERINMAVI_CAM env override desteklenir.
 Calistir:  python app/arayuz_qt.py   (veya kokteki Baslat.bat)
 """
 import glob
+import html
 import json
 import math
 import os
@@ -24,13 +25,13 @@ from ultralytics import YOLO
 
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRectF, QEvent, QPoint, QRect, QPointF
 from PySide6.QtGui import (QImage, QPixmap, QFont, QColor, QPainter, QPen, QLinearGradient,
-                           QRadialGradient, QPainterPath)
+                           QRadialGradient, QPainterPath, QCursor)
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel, QPushButton, QComboBox,
     QHBoxLayout, QVBoxLayout, QGridLayout, QFrame,
     QButtonGroup,
     QGraphicsView, QGraphicsScene, QStackedWidget,
-    QSlider, QSpinBox, QScrollArea, QMessageBox,
+    QSlider, QSpinBox, QScrollArea, QMessageBox, QToolTip,
 )
 
 import algi
@@ -518,6 +519,21 @@ class _TiklanirKapsul(QFrame):
         if e.button() == Qt.LeftButton:
             self._geri_cagri()
         super().mousePressEvent(e)
+
+
+class BilgiKutusu(QLabel):
+    """Ayarlardaki "i" kutusu: fareyle ustunde beklenince VE tiklaninca aciklamayi gosterir.
+    27.09 saha: "info box'lar calismiyor" — imlec "?" oldugu icin tiklaniyordu, kutu yalniz
+    ~1 sn beklemeyle aciliyordu (tiklama hicbir sey yapmiyordu)."""
+
+    def mousePressEvent(self, e):
+        e.accept()
+
+    def mouseReleaseEvent(self, e):
+        # BIRAKINCA: Qt ipucunu fare basma/birakmada kapatir; basmada acilan ipucu hemen sonerdi.
+        if self.toolTip():
+            QToolTip.showText(QCursor.pos(), self.toolTip(), self, QRect(), 20000)
+        e.accept()
 
 
 class AppleSwitch(QWidget):
@@ -2011,13 +2027,16 @@ class MainWindow(QMainWindow):
         ust.setSpacing(7)
         lab = QLabel(baslik)
         lab.setObjectName("ayarlbl")
-        info = QLabel("i")
+        info = BilgiKutusu("i")
         info.setObjectName("ayarinfo")
         info.setFixedSize(16, 16)
         info.setAlignment(Qt.AlignCenter)
         info.setCursor(Qt.WhatsThisCursor)
         # Uzerine gelince aciklama (tooltip) — ekstra popup yok. Satirlar <br> ile sarilir.
-        ipucu = f"<div style='max-width:300px; white-space:normal'>{aciklama.replace(chr(10), '<br>')}</div>"
+        # Qt zengin metni max-width'i tanimaz: uzun aciklama ekrandan tasan TEK satir oluyordu.
+        # Genislik verilen tablo satirlari 320 px'te sarar.
+        ipucu = (f"<table width='320'><tr><td>"
+                 f"{html.escape(aciklama).replace(chr(10), '<br>')}</td></tr></table>")
         info.setToolTip(ipucu)
         lab.setToolTip(ipucu)
         deger = QLabel()
