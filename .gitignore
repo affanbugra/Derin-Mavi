@@ -69,7 +69,5 @@ app/loglar/
 ws_motor_test/tests/*.exe
 ws_motor_test/tests/*.obj
 
-# Buzzer sarkilari (muzik.h): notalar YEREL kalir, repoya / GitHub'a girmez.
-ws_motor_test/esp32_ws_test/sarkilar.h
 # arduino-cli derleme ciktisi
 ws_motor_test/esp32_ws_test/build/

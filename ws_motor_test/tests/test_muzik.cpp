@@ -3,7 +3,7 @@
 // nabiz surer), TILT YORUNGESINI KESMEZ (bilinmeyen komut keserdi), lazer cikisina
 // dokunmaz, ACIL DURDUR'da susar, acil kilitliyken calmaz, lazerle ayni LEDC
 // zamanlayicisina dusecekse hic kurulmaz. Sarkilar test sarkilaridir (stubs/test_sarkilari.h);
-// gercek notalar yerel sarkilar.h'de, repoda yok.
+// gercek notalar sarkilar.h'de.
 #include "stubs/Arduino.h"
 #include <assert.h>
 #include <cstdlib>

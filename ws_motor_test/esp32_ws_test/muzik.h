@@ -3,7 +3,7 @@
 //  PC "MZ<n>" ile n. sarkiyi calar, "MZ0" susturur (bkz. esp32_ws_test.ino muzikKomutu).
 //  Durum yayini: MZK1,<calan sarki (0 = sus)>,<sarki adedi>,<buzzer hazir>.
 //
-//  SARKI NOTALARI REPODA DEGIL: `sarkilar.h` (yerel, .gitignore'da). Dosya yoksa firmware
+//  SARKI NOTALARI AYRI DOSYADA: `sarkilar.h` (27.09 itibariyla repoda). Dosya yoksa firmware
 //  yine derlenir, sarki adedi 0 olur (MZK1,0,0,..) ve PC "Sarki" dugmesini pasif gosterir.
 //  sarkilar.h iki sey tanimlar:
 //    constexpr int SARKI_ADEDI;

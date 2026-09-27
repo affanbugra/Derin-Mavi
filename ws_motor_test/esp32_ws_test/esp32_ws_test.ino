@@ -3,7 +3,7 @@
 #include "motion_core.h"
 #include "pan_core.h"
 #include "yorunge_core.h"
-#include "muzik.h"        // GPIO12 buzzer sarkilari (notalar yerel sarkilar.h, repoda yok)
+#include "muzik.h"        // GPIO12 buzzer sarkilari (notalar sarkilar.h)
 #if !ARDUINO_USB_CDC_ON_BOOT
 #error "Enable USB CDC On Boot (CDCOnBoot=cdc); firmware supports both native USB and UART0."
 #endif
