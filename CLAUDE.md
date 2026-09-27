@@ -153,7 +153,8 @@ Bir sayıyı değiştireceksen **iki tarafı birden** (Python + firmware) günce
 | Sürücü çözünürlüğü | 6400 step/tur | `protokol.STEP_TUR` |
 | Pan redüksiyon | 83/15 ≈ 5.53 (98.37 step/°) | `protokol.PAN_DISLI` |
 | Hız kademeleri | `tilt_surucu.HIZ_TABLO` / `PAN_HIZ_TABLO` | ölçümle ayarlanır |
-| Lazer gücü varsayılan | **%40** | `protokol.LAZER_GUC_VARSAYILAN` (firmware ile aynı) |
+| Lazer gücü varsayılan | **%70** (27.09; 40'tan) | `protokol.LAZER_GUC_VARSAYILAN` (firmware ile aynı) |
+| Otonom hedefsiz merkeze dönüş | **5 sn** hiç gerçek tespit yoksa kademeli merkez (A2/A3, kör dönemde 1 kez) | `arayuz_qt.OTONOM_HEDEFSIZ_MERKEZ_S` |
 | Tek kart pinleri (S3) | Lazer **GPIO 18** (PWM 1 kHz, 8 bit) · Acil buton **GPIO 15** (NO, GND'ye çeker, dahili pull-up; 27.09 bağlandı, çalışıyor) · tilt 4/5 · pan 10/11/16 · buzzer 12 — **şema: `ws_motor_test/esp32s3_baglanti_semasi.png`** | `ws_motor_test/esp32_ws_test.ino` |
 | Ateş tazeleme / zaman aşımı | 250 ms / 1 sn | `protokol.ATES_*` |
 | Tespit/PD ayarları | `app/ayarlar.json` | **repoda ortak**; kendi denemenden sonra `git checkout app/ayarlar.json` |

@@ -218,6 +218,17 @@ def test_kare_arayuze_ulasir(w):
             "fps": 0.0, "kamera_fps": 30.0, "a3": False}
     w._kare_geldi(img, data)
     assert w.video.pixmap() is not None
+    # Her kare hedefsiz-merkeze-donus kapisindan gecer (mantigi: kapi_testleri_arayuz).
+    eski = (w.mod, w.asama, w.pan_ham)
+    w.mod, w.asama, w.pan_ham = "Otonom", "Aşama 2", 30.0
+    w._hedef_son_t, w._oto_merkez_yapildi = time.time() - A.OTONOM_HEDEFSIZ_MERKEZ_S - 1, False
+    w._kare_geldi(img, data)
+    try:
+        assert w._merkez_timer.isActive(), "kare geldi ama 5 sn hedefsiz namlu merkeze alinmadi"
+    finally:
+        w._merkez_durdur()
+        w.mod, w.asama, w.pan_ham = eski
+        w._oto_merkez_suruyor = False
 
 
 # =====================================================================================

@@ -135,6 +135,7 @@ class SahtePencere:
     _aci_reset = A.MainWindow._aci_reset               # [R] / MERKEZ — kademeli merkeze al
     _merkez_tik = A.MainWindow._merkez_tik
     _merkez_durdur = A.MainWindow._merkez_durdur
+    _hedefsizse_merkeze = A.MainWindow._hedefsizse_merkeze
     TEKRAR_PERIYOT_MS = A.MainWindow.TEKRAR_PERIYOT_MS
     _acilis_hizala = A.MainWindow._acilis_hizala          # birlesik surumde eklendi
     _acilis_yukselisini_dene = A.MainWindow._acilis_yukselisini_dene
@@ -782,14 +783,14 @@ def test_lazer_gucu_arayuzden_karta_gider():
     w = SahtePencere()
     assert w.lazer_guc == w.kontrol.mock.lazer_guc == P.LAZER_GUC_VARSAYILAN
 
-    w._lazer_guc_degisti(70)
-    assert w.lazer_guc == 70 and w.kontrol.mock.lazer_guc == 70
-    assert w.lazer_sl.value() == 70, "kaydırıcı kademe butonunu izlemedi"
-    assert w.kontrol.mock.kayit[-1] == "G70", w.kontrol.mock.kayit[-1]
+    w._lazer_guc_degisti(85)                     # varsayilandan FARKLI bir deger
+    assert w.lazer_guc == 85 and w.kontrol.mock.lazer_guc == 85
+    assert w.lazer_sl.value() == 85, "kaydırıcı kademe butonunu izlemedi"
+    assert w.kontrol.mock.kayit[-1] == "G85", w.kontrol.mock.kayit[-1]
 
     # Aynı değer tekrar seçilirse hatta boş komut dolaşmamalı.
     n = len(w.kontrol.mock.kayit)
-    w._lazer_guc_degisti(70)
+    w._lazer_guc_degisti(85)
     assert len(w.kontrol.mock.kayit) == n, w.kontrol.mock.kayit[n:]
 
     # Sınır dışı değer kırpılır (kart da kırpar; tek tarafa güvenilmez).
@@ -907,6 +908,57 @@ def test_merkeze_alma_kademeli_ve_kesilebilir():
     assert not w._merkez_timer.isActive(), "E-Stop merkeze almayi durdurmadi"
 
 
+def test_hedefsiz_otonom_merkeze_doner():
+    """Otonom A2/A3: OTONOM_HEDEFSIZ_MERKEZ_S (5 sn) ekranda hicbir GERCEK tespit yoksa namlu
+    KADEMELI merkeze doner (27.09 takim istegi: yana donup kalan namlu parkuru goremez).
+    Tek kapidan gider, hedef gorulunce birakilir, her kor donemde BIR KEZ; E-Stop'ta, ates
+    surerken, Hazirlik'ta ve Asama 1'de hic tetiklenmez."""
+    S = A.OTONOM_HEDEFSIZ_MERKEZ_S
+    bos, hayalet = {"dets": []}, {"dets": [{"hayalet": True, "balon": True}]}
+    hedef = {"dets": [{"hayalet": False, "balon": True}]}
+    t = 1000.0
+    w = SahtePencere()
+    w._aci_hareket(40.0, 10.0)
+    w.mod, w.asama = "Otonom", "Aşama 2"
+    w._hedefsizse_merkeze(bos, simdi=t)
+    w._hedefsizse_merkeze(hayalet, simdi=t + S - 0.1)
+    assert not w._merkez_timer.isActive(), "5 sn dolmadan merkeze alindi"
+    w._hedefsizse_merkeze(hayalet, simdi=t + S + 0.1)     # hayalet kutu hedef SAYILMAZ
+    assert w._merkez_timer.isActive(), "5 sn hedefsiz kaldi, merkeze alinmadi"
+    w._merkez_son_t -= 0.05
+    w._merkez_tik()
+    assert 0.0 < w.pan_ham < 40.0, "merkeze alma kademeli degil"
+    _merkeze_yurut(w)
+    assert abs(w.pan_ham) < 0.1 and abs(w.tilt_aci) < 0.1
+    assert abs(w.kontrol.mock.pan_hedef - w.pan_ham) < 0.01, "kart hedefi ekrandan koptu"
+    # Ayni kor donemde ikinci kez tetiklenmez
+    w._aci_hareket(20.0, 0.0)
+    w._hedefsizse_merkeze(bos, simdi=t + 3 * S)
+    assert not w._merkez_timer.isActive(), "ayni kor donemde ikinci kez merkeze alindi"
+    # Hedef gorulunce sayac sifirlanir; yeni kor donemde yine doner, yolda hedef gorulunce birakir
+    w._hedefsizse_merkeze(hedef, simdi=t + 3 * S + 0.1)
+    w._hedefsizse_merkeze(bos, simdi=t + 4 * S + 0.3)
+    assert w._merkez_timer.isActive(), "yeni kor donemde merkeze alinmadi"
+    w._hedefsizse_merkeze(hedef, simdi=t + 4 * S + 0.4)
+    assert not w._merkez_timer.isActive(), "hedef goruldu ama merkeze alma surdu"
+    # E-Stop, ates, Hazirlik, Asama 1: hic tetiklenmez
+    for kosul in ("estop", "ates", "hazirlik", "asama1"):
+        v = SahtePencere()
+        v._aci_hareket(30.0, 0.0)
+        v.mod, v.asama = "Otonom", "Aşama 3"
+        if kosul == "estop":
+            v.kontrol.estop(True)
+        elif kosul == "ates":
+            v._otonom_ates_aktif = True
+        elif kosul == "hazirlik":
+            v.mod = v.HAZIRLIK
+        else:
+            v.mod, v.asama = "Manuel", "Aşama 1"
+        v._hedefsizse_merkeze(bos, simdi=t)
+        v._hedefsizse_merkeze(bos, simdi=t + 2 * S)
+        assert not v._merkez_timer.isActive(), f"{kosul}: hedefsiz merkeze alma calisti"
+
+
 def test_estopta_r_merkeze_almaz():
     """[R] (ve gamepad Y) E-Stop'ta HICBIR sey yapmamali.
 
@@ -997,10 +1049,10 @@ def test_lazer_gucu_onaysiz_degismez():
     HICBIR SEY gondermez; yalniz onay ('Değiştir') gonderir. ✕ taslagi atar."""
     w = SahtePencere()
     w.lazer_sl = SahteKaydirici(P.LAZER_GUC_VARSAYILAN)
-    w._lazer_taslak_ayarla(70)
+    w._lazer_taslak_ayarla(85)                              # varsayilandan FARKLI
     assert w.lazer_guc == P.LAZER_GUC_VARSAYILAN == w.kontrol.mock.lazer_guc, "taslak karta gitti"
     w._lazer_guc_degisti(w.lazer_taslak)                    # 'Değiştir' = tek uygulama kapisi
-    assert w.lazer_guc == 70 == w.kontrol.mock.lazer_guc
+    assert w.lazer_guc == 85 == w.kontrol.mock.lazer_guc
 
 
 def test_odunc_kapilar_gercek_pencerede_de_metot():
@@ -1393,6 +1445,7 @@ if __name__ == "__main__":
     test_basili_tutma_estopta_kesilir()
     test_estopta_r_merkeze_almaz()
     test_merkeze_alma_kademeli_ve_kesilebilir()
+    test_hedefsiz_otonom_merkeze_doner()
     test_lazer_isigi_yalniz_gercek_lazer_acikken_yanar()
     test_dikey_hareket_penceresi_kullanici_ornegi()
     test_yatay_pencere_arkadan_dolanilamaz()
@@ -1409,4 +1462,5 @@ if __name__ == "__main__":
     print("kapi testleri OK — ekran/kart hedefi, sarmasiz azimut, ates sirasinda yasak "
           "alan, harekete yasak alan, E-Stop, hiz duzeyi, kart disaridan durdurma, "
           "donanim acil stop butonu, ENABLE kesilmez, iki eksen donar, referans korunur, basili tutma, "
-          "Space+B/ESC klavye atesi, gamepad, lazer gucu, ates olu adam anahtari")
+          "Space+B/ESC klavye atesi, gamepad, lazer gucu, ates olu adam anahtari, "
+          "otonomda 5 sn hedefsiz merkeze donus")

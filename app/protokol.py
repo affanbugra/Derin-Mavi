@@ -91,7 +91,7 @@ TILT_MIN, TILT_MAX = 0.0, 180.0
 #   surer. Sure yarismada puana bagli (Asama 1 bonus suresi, Asama 2-3 tur sureleri),
 #   bu yuzden gercek patlama suresi OLCULUP bu deger yeniden degerlendirilmelidir.
 LAZER_GUC_MIN, LAZER_GUC_MAX = 0, 100
-LAZER_GUC_VARSAYILAN = 40
+LAZER_GUC_VARSAYILAN = 70          # 27.09 takim karari: 40 -> 70
 
 # ---- ATES OLU ADAM ANAHTARI ----
 # Lazer acik kalmak icin karta duzenli "L1" tazelemesi gitmelidir; gitmezse kart lazeri
@@ -281,4 +281,19 @@ if __name__ == "__main__":
     assert satir_estop_mu("SISTEM DURDURULDU! Motorlar kilitli.")
     assert not satir_estop_mu("PAN Merkez: 45.00")
     assert not satir_estop_mu("LAZER KAPALI (%40)")           # ates kesme E-Stop sayilmaz
-    print("protokol testleri OK — ESP32 metin komutlari + 3 kademe hiz + lazer gucu")
+
+    # Lazer gucu varsayilani DORT yerde ayni olmali (CLAUDE.md §4: iki tarafi birden
+    # guncelle): burasi, tilt surucusunun ilk istegi, S3 firmware'i, eski kart firmware'i.
+    import os
+    import re
+    _kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for _yol, _desen in (("app/tilt_surucu.py", r"self\.lazer_guc_istek = (\d+)"),
+                         ("ws_motor_test/esp32_ws_test/esp32_ws_test.ino", r"int lazerYuzde=(\d+);"),
+                         ("esp32/derin_mavi_esp32/derin_mavi_esp32.ino",
+                          r"LAZER_GUC_VARSAYILAN = (\d+);")):
+        with open(os.path.join(_kok, _yol), encoding="utf-8") as _f:
+            _bulunan = re.search(_desen, _f.read())
+        assert _bulunan and int(_bulunan.group(1)) == LAZER_GUC_VARSAYILAN, \
+            (_yol, _bulunan and _bulunan.group(1), LAZER_GUC_VARSAYILAN)
+    print("protokol testleri OK — ESP32 metin komutlari + 3 kademe hiz + lazer gucu "
+          "(varsayilan 4 yerde ayni)")

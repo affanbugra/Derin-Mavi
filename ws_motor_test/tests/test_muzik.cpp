@@ -19,7 +19,7 @@ Stream Serial,Serial0;
 #define MUZIK_SARKI_DOSYASI "test_sarkilari.h"
 #include "../esp32_ws_test/esp32_ws_test.ino"
 
-void reset(){motion=MotionCore{};owner=-1;inputs[0]=PortInput{};inputs[1]=PortInput{};Serial=Stream{};Serial0=Stream{};prefs.fail=false;prefs.clear();fakeUs=0;physicalPulses=0;pan=PanCore{};yorTilt=Yorunge{};yorPan=Yorunge{};panEnable=-1;panPulses=0;panDirLevel=-1;panEnLevel=-1;lazerYuzde=40;lazerAcik=false;lazerPwmHazir=true;acilKilit=false;estopButon=false;sonAtesMs=0;lazerCikis=0;estopSeviye=HIGH;ledcBasarili=true;
+void reset(){motion=MotionCore{};owner=-1;inputs[0]=PortInput{};inputs[1]=PortInput{};Serial=Stream{};Serial0=Stream{};prefs.fail=false;prefs.clear();fakeUs=0;physicalPulses=0;pan=PanCore{};yorTilt=Yorunge{};yorPan=Yorunge{};panEnable=-1;panPulses=0;panDirLevel=-1;panEnLevel=-1;lazerYuzde=70;lazerAcik=false;lazerPwmHazir=true;acilKilit=false;estopButon=false;sonAtesMs=0;lazerCikis=0;estopSeviye=HIGH;ledcBasarili=true;
   buzzerFrek=0;buzzerZamanlayici=1;tonDegisimi=0;muzik::hazir=false;muzik::sira=-1;muzik::calan=0;}
 void command(Stream& port,const char* s){port.incoming+=s;port.incoming+='\n';while(port.available())readSerial(&port==&Serial?0:1);}
 

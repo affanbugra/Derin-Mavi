@@ -993,7 +993,7 @@ class TiltSurucu:
         # LAZER (yeni firmware LZR1 yayinlar). Eski firmware'de hep None -> lazer yok.
         self.lazer_durum = None
         self.lazer_son_t = 0.0
-        self.lazer_guc_istek = 40
+        self.lazer_guc_istek = 70          # = protokol.LAZER_GUC_VARSAYILAN (firmware ile ayni)
         self._lazer_guc_gonderim_t = 0.0
         # BUZZER SARKILARI (yeni firmware MZK1 yayinlar). Eski firmware'de None -> sarki yok.
         self.muzik_durum = None

@@ -231,11 +231,11 @@ if __name__ == "__main__":
 
     # LAZER GUCU: ayri komut, kirpilir, ates ac/kes gucu SIFIRLAMAZ
     m5 = MockESP32()
-    assert m5.lazer_guc == P.LAZER_GUC_VARSAYILAN == 40
-    m5.islet(P.lazer_guc(70))
-    assert m5.lazer_guc == 70
+    assert m5.lazer_guc == P.LAZER_GUC_VARSAYILAN
+    m5.islet(P.lazer_guc(85))                 # varsayilandan FARKLI bir deger
+    assert m5.lazer_guc == 85
     m5.islet(P.lazer(True)); m5.islet(P.lazer(False))
-    assert m5.lazer_guc == 70, "ates ac/kes guc ayarini bozmamali"
+    assert m5.lazer_guc == 85, "ates ac/kes guc ayarini bozmamali"
     m5.islet("G500"); assert m5.lazer_guc == P.LAZER_GUC_MAX
     m5.islet("G-5"); assert m5.lazer_guc == P.LAZER_GUC_MIN
     # E-Stop atesi keser ama guc ayari KALICI (kart da oyle: yalniz duty 0 yazilir)

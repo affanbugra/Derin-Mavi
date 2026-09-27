@@ -29,7 +29,7 @@ Kullanim (arayuz):
     k = Kontrol()
     k.hiz_ayarla(P.H_HIZLI)     # motor hiz duzeyi (1=Yavas 2=Normal 3=Hizli)
     k.aci(pan_der, tilt_der)    # MUTLAK hedef aci (pan sarmasiz/birikimli verilir)
-    k.guc_ayarla(40)            # lazer gucu % (kalici; varsayilan %40, tam guc DEGIL)
+    k.guc_ayarla(40)            # lazer gucu % (kalici; varsayilan %70, tam guc DEGIL)
     k.ates(True/False)          # lazer ac/kes (ayarli gucte)
     k.estop(True/False)         # acil durdur / devam
     k.oku()                     # ESP'nin yazdigi bekleyen metin satirlari
@@ -534,7 +534,7 @@ class Kontrol:
     def guc_ayarla(self, yuzde):
         """Lazer gucu (%). Kalicidir: sonraki her ates bu gucte olur.
 
-        Tam guc kullanilmiyor (varsayilan %40). ⚠ Dusuk guc dwell suresini uzatir —
+        Tam guc kullanilmiyor (varsayilan %70). ⚠ Dusuk guc dwell suresini uzatir —
         gercek patlama suresi olculup bu deger yeniden degerlendirilmelidir."""
         self.lazer_guc = P.guc_kirp(yuzde)
         self.tilt.lazer_guc_ayarla(self.lazer_guc)     # S3 lazeri (varsa) ayni guce esitlenir
@@ -612,8 +612,8 @@ if __name__ == "__main__":
     d = k.ates(True)
     assert d["lazer"] and k.mock.lazer and d["durum_ad"] == "ATEŞ", d
     assert d["lazer_guc"] == P.LAZER_GUC_VARSAYILAN, d
-    k.guc_ayarla(70)                        # ates SIRASINDA guc degisebilir
-    assert k.mock.lazer_guc == 70 and k.mock.lazer, "guc degisimi atesi kesmemeli"
+    k.guc_ayarla(85)                        # ates SIRASINDA guc degisebilir (varsayilandan farkli)
+    assert k.mock.lazer_guc == 85 and k.mock.lazer, "guc degisimi atesi kesmemeli"
     assert k.guc_ayarla(500)["lazer_guc"] == P.LAZER_GUC_MAX
     k.ates(False); k.guc_ayarla(P.LAZER_GUC_VARSAYILAN)
     d = k.estop(True)

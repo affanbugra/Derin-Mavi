@@ -144,7 +144,7 @@ Firmware AccelStepper kullanır ve ASCII satır komutları konuşur:
 |---|---|
 | `P<derece>` / `T<derece>` | pan / tilt **mutlak** hedef açısı (`P45.00`) |
 | `S<derece/sn>` / `A<derece/sn²>` | tavan hız / ivme — hız düzeyi |
-| `G<yüzde>` | lazer **gücü** (%0–100, kalıcı) — varsayılan %40, tam güç kullanılmıyor |
+| `G<yüzde>` | lazer **gücü** (%0–100, kalıcı) — varsayılan %70, tam güç kullanılmıyor |
 | `L1` / `L0` | lazer aç / kes (ayarlı güçte) — `L1` **250 ms'de bir tazelenir**, aşağıya bak |
 | `STOP` / `START` | acil durdur (lazer + sürücü ENABLE kesilir) / devam |
 
@@ -168,7 +168,7 @@ manuel panelde durduğu için Otonom modda görünmez, ama lazeri kesme yolu mod
 E-Stop'ta buton kilitliyse `L` de geçmez — kısayolun butondan fazla yetkisi yoktur.
 
 **Lazer gücü:** arayüzdeki *LAZER* kartından ayarlanır (hem Manuel hem Otonom modda) —
-kaydırıcı %0–100 veya hızlı kademeler (%20/%40/%70/%100). Varsayılan **%40**; tam güç
+kaydırıcı %0–100 veya hızlı kademeler (%20/%40/%70/%100). Varsayılan **%70**; tam güç
 kullanılmıyor. Güç ile ateş ayrı şeylerdir: kart `G<yüzde>` ile "ne kadar"ı, ATEŞ butonu
 `L1/L0` ile "ne zaman"ı söyler — bu yüzden **ateş sürerken güç değiştirilebilir.**
 ⚠ Düşük güç *dwell* süresini uzatır (%40'ta balon ~2,5 kat geç patlar) ve süre puana bağlıdır.

@@ -898,6 +898,12 @@ LAZER_KUTUCUK_AYARLARI = ("otonom_ates_sure", "ates_parcali", "ates_parca_sure",
 # ⚠ Yalniz O HEDEF yasaklanir; diger hedeflere hemen kilitlenilir (algi.hedef_vuruldu).
 # Eskiden bu sure boyunca HICBIR hedefe kilitlenilmiyordu — Asama 2'de tur basina 3 hedef.
 OTONOM_BEKLEME_SURE = 10.0
+# HEDEFSIZ MERKEZE DONUS (27.09 takim istegi): otonom A2/A3'te ekranda bu kadar sure HICBIR
+# gercek tespit (balon ya da arac, dost dahil; hayalet sayilmaz) yoksa namlu KADEMELI merkeze
+# doner. Takip bir hedefi kovalarken yana donup kalirsa parkur kadraj disinda kalir ve yeni
+# hedef hic gorulmez. Tek kapidan gider (_aci_reset -> _merkez_tik -> _aci_hareket: E-Stop,
+# yasak alan); hedef gorulunce birakilir, takip devralir. Her kor donemde BIR KEZ.
+OTONOM_HEDEFSIZ_MERKEZ_S = 5.0
 # =====================================================================
 #  Ortak Veri (Kamera ve Algi threadleri arasi)
 # =====================================================================
@@ -2673,6 +2679,11 @@ class MainWindow(QMainWindow):
         self._merkez_timer = QTimer(self)
         self._merkez_timer.setInterval(self.TEKRAR_PERIYOT_MS)
         self._merkez_timer.timeout.connect(self._merkez_tik)
+        # Otonom hedefsiz merkeze donus (_hedefsizse_merkeze): son gercek tespit ani,
+        # bu kor donemde yapildi mi, su an o mu surduruyor
+        self._hedef_son_t = None
+        self._oto_merkez_yapildi = False
+        self._oto_merkez_suruyor = False
         self._gp_ates_basili = False               # kolun iki tetigi su an basili mi
         self._zoom = 1.0                           # goruntu zoom'u (sag cubuk; otonomda yok)
         self._zoom_tuslar = set()                  # basili Z/X (klavye zoom'u)
@@ -4278,6 +4289,35 @@ class MainWindow(QMainWindow):
                 self.sb_msg.setText(f'<span style="color:{AMB}">●</span>&nbsp;'
                                     f'Merkeze alma durduruldu — {sebep}')
 
+    def _hedefsizse_merkeze(self, data, simdi=None):
+        """Otonom A2/A3: OTONOM_HEDEFSIZ_MERKEZ_S boyunca ekranda hicbir gercek tespit yoksa
+        namlu kademeli merkeze doner (bkz. sabitin yorumu). E-Stop'ta ve ates surerken sayac
+        sifirlanir; namlu zaten merkezdeyse bir sey yapilmaz. Hedef gorulunce ya da otonom
+        bitince bu fonksiyonun baslattigi merkeze alma birakilir."""
+        simdi = time.time() if simdi is None else simdi
+        otonom = self.mod == "Otonom" and self.asama in ("Aşama 2", "Aşama 3")
+        goruldu = any(not d.get("hayalet") for d in data.get("dets", []))
+        bekle = (data.get("estop") or self._hareket_kilitli()
+                 or getattr(self, "_otonom_ates_aktif", False))
+        if not otonom or goruldu or bekle:
+            if getattr(self, "_oto_merkez_suruyor", False) and (goruldu or not otonom):
+                self._merkez_durdur("hedef görüldü" if goruldu else "otonom durdu")
+            self._oto_merkez_suruyor = False
+            self._oto_merkez_yapildi = False
+            self._hedef_son_t = simdi
+            return
+        if getattr(self, "_hedef_son_t", None) is None:
+            self._hedef_son_t = simdi
+        if getattr(self, "_oto_merkez_suruyor", False) and not self._merkez_timer.isActive():
+            self._oto_merkez_suruyor = False             # merkeze varildi / engellendi
+        if (getattr(self, "_oto_merkez_yapildi", False)
+                or simdi - self._hedef_son_t < OTONOM_HEDEFSIZ_MERKEZ_S):
+            return
+        self._oto_merkez_yapildi = True                  # bu kor donemde bir kez
+        if abs(B.pan_isaretli(self.pan_ham)) < 0.5 and abs(self.tilt_aci) < 0.5:
+            return                                       # zaten merkezde
+        self._oto_merkez_suruyor = bool(self._aci_reset())
+
     def _merkez_tik(self):
         """Bir adim merkeze. Adim = motorun tavan hizi x gecen sure (bkz. `_tekrar_tik`)."""
         simdi = time.time()
@@ -5325,6 +5365,7 @@ class MainWindow(QMainWindow):
         a = data.get("active")
         self._hedef_liste_guncelle(data.get("hedefler", []), a3)
         # Otonom paneli guncelle (her karede)
+        self._hedefsizse_merkeze(data)
         self._otonom_ates_kontrol(data, estop)
         self._otonom_panel_guncelle(a, data, estop)
 
@@ -5602,7 +5643,15 @@ class MainWindow(QMainWindow):
             self.oto_durum_dot.setStyleSheet(T.nokta(T.SARI, 10))
             self.oto_durum_baslik.setText("Hedef Aranıyor...")
             self.oto_durum_baslik.setStyleSheet(T.yazi(T.BASLIK3, T.SARI, "background: transparent;"))
-            self.oto_durum_alt.setText("Görüş alanında hedef yok")
+            son = getattr(self, "_hedef_son_t", None)
+            if getattr(self, "_oto_merkez_suruyor", False):
+                self.oto_durum_alt.setText(
+                    f"{OTONOM_HEDEFSIZ_MERKEZ_S:.0f} sn hedef yok — merkeze dönülüyor")
+            elif self.mod == "Otonom" and son is not None and not getattr(self, "_oto_merkez_yapildi", False):
+                kalan = max(0.0, OTONOM_HEDEFSIZ_MERKEZ_S - (time.time() - son))
+                self.oto_durum_alt.setText(f"Görüş alanında hedef yok · merkeze dönüş {kalan:.0f} sn")
+            else:
+                self.oto_durum_alt.setText("Görüş alanında hedef yok")
 
         # 2. Bolge Durumu
         if hasattr(self, "bolge_status"):

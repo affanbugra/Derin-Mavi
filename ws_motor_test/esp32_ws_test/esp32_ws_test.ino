@@ -21,7 +21,7 @@ constexpr uint32_t STEP_HIGH_US=20, DIR_SETUP_US=20;
 // Confirm electrical interface and pulse polarity with your exact driver.
 // EVERY RESET assumes the arm is physically at the lower 0-degree position.
 // ---- LAZER + ACIL DURDURMA (24.09: tek kart — eski ESP32 kartindaki kurallar aynen) ----
-// Lazer GPIO 18 PWM tetik (1 kHz, 8 bit), guc %0-100 (varsayilan %40, app/protokol.py ile ayni).
+// Lazer GPIO 18 PWM tetik (1 kHz, 8 bit), guc %0-100 (varsayilan %70, app/protokol.py ile ayni).
 // ⚠ DONANIM SARTI: GPIO 18 <-> GND 10 kOhm pull-down. Reset/yukleme sirasinda pin ROM
 //   bootloader boyunca bostadir; lazer surucusunun girisi kacak tetiklenmesin. Lazer
 //   pinden BESLENMEZ: pin yalniz surucu modulunun TTL/PWM girisini surer.
@@ -43,7 +43,7 @@ constexpr uint32_t STEP_HIGH_US=20, DIR_SETUP_US=20;
 constexpr int LAZER_PIN=18, ESTOP_PIN=15;
 constexpr int LAZER_PWM_FREK=1000, LAZER_PWM_COZ=8;
 constexpr uint32_t ATES_ZAMAN_ASIMI_MS=1000, ESTOP_DEBOUNCE_MS=30;
-int lazerYuzde=40;
+int lazerYuzde=70;
 bool lazerAcik=false, lazerPwmHazir=false, acilKilit=false, estopButon=false;
 uint32_t sonAtesMs=0;
 MotionCore motion;

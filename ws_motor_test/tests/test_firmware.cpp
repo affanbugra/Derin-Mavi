@@ -10,7 +10,7 @@ bool ledcBasarili=true;
 int buzzerFrek=0,buzzerZamanlayici=1,tonDegisimi=0;   // buzzer (muzik.h) taklidi
 Stream Serial,Serial0;
 #include "../esp32_ws_test/esp32_ws_test.ino"
-void reset(){motion=MotionCore{};owner=-1;inputs[0]=PortInput{};inputs[1]=PortInput{};Serial=Stream{};Serial0=Stream{};prefs.fail=false;prefs.clear();fakeUs=0;physicalPulses=0;pan=PanCore{};yorTilt=Yorunge{};yorPan=Yorunge{};panEnable=-1;panPulses=0;panDirLevel=-1;panEnLevel=-1;lazerYuzde=40;lazerAcik=false;lazerPwmHazir=true;acilKilit=false;estopButon=false;sonAtesMs=0;lazerCikis=0;estopSeviye=HIGH;ledcBasarili=true;}
+void reset(){motion=MotionCore{};owner=-1;inputs[0]=PortInput{};inputs[1]=PortInput{};Serial=Stream{};Serial0=Stream{};prefs.fail=false;prefs.clear();fakeUs=0;physicalPulses=0;pan=PanCore{};yorTilt=Yorunge{};yorPan=Yorunge{};panEnable=-1;panPulses=0;panDirLevel=-1;panEnLevel=-1;lazerYuzde=70;lazerAcik=false;lazerPwmHazir=true;acilKilit=false;estopButon=false;sonAtesMs=0;lazerCikis=0;estopSeviye=HIGH;ledcBasarili=true;}
 void command(Stream& port,const char* s){port.incoming+=s;port.incoming+='\n';while(port.available())readSerial(&port==&Serial?0:1);}
 int main(){
   reset();command(Serial,"E");command(Serial,"K");assert(motion.calibrating);assert(Serial.out.find("OK,K")!=std::string::npos);
@@ -131,7 +131,7 @@ int main(){
     auto kos=[](uint32_t us,bool nabiz=true,const char* tazele=nullptr){uint32_t bit=fakeUs+us,h=fakeUs,l=fakeUs;
       while(fakeUs<bit){if(nabiz&&fakeUs-h>=100000){command(Serial,"H");h=fakeUs;}
         if(tazele&&fakeUs-l>=250000){command(Serial,tazele);l=fakeUs;} loop(); fakeUs+=100;}};
-    const int D40=(40*256)/100;
+    const int D70=(70*256)/100;          // acilis varsayilani (27.09: %40 -> %70)
     // Acilis: pin sonuk; PWM kurulamazsa L1 reddedilir ve pin yine sonuk.
     reset(); lazerCikis=123; setup(); assert(lazerCikis==0 && lazerPwmHazir && !acilKilit);
     reset(); ledcBasarili=false; setup(); assert(!lazerPwmHazir && Serial.out.find("ERR,LASER_PWM")!=std::string::npos);
@@ -141,16 +141,16 @@ int main(){
 
     // Kontrol acilmadan (E) ates yok; E + L1 ayarli gucte yakar; L1 tazelemesi sessiz.
     reset(); command(Serial,"L1"); assert(lazerCikis==0 && Serial.out.find("ERR,L1,DISARMED")!=std::string::npos);
-    command(Serial,"E"); command(Serial,"L1"); assert(lazerAcik && lazerCikis==D40 && Serial.out.find("OK,L1")!=std::string::npos);
+    command(Serial,"E"); command(Serial,"L1"); assert(lazerAcik && lazerCikis==D70 && Serial.out.find("OK,L1")!=std::string::npos);
     size_t n=Serial.out.size(); command(Serial,"L1"); assert(Serial.out.find("OK,L1",n)==std::string::npos);
     command(Serial,"LP100"); assert(lazerCikis==256); command(Serial,"LP0"); assert(lazerCikis==0 && lazerAcik);
     command(Serial,"LP101"); assert(Serial.out.find("ERR,LP101,BAD_POWER")!=std::string::npos && lazerYuzde==0);
     command(Serial,"LP40"); command(Serial,"L0"); assert(!lazerAcik && lazerCikis==0);
-    std::cout<<"Lazer: E sarti, %40 guc, LP aninda uygulanir, L0 keser: passed\n";
+    std::cout<<"Lazer: E sarti, %70 guc, LP aninda uygulanir, L0 keser: passed\n";
 
     // OLU ADAM ANAHTARI: nabiz surse bile L1 tazelemesi 1 sn kesilirse lazer soner;
     // tazeleme suruyorsa yanik kalir.
-    reset(); command(Serial,"E"); command(Serial,"L1"); kos(3000000,true,"L1"); assert(lazerAcik && lazerCikis==D40);
+    reset(); command(Serial,"E"); command(Serial,"L1"); kos(3000000,true,"L1"); assert(lazerAcik && lazerCikis==D70);
     kos(1200000); assert(!lazerAcik && lazerCikis==0 && motion.armed);
     assert(Serial.out.find("olu adam")!=std::string::npos);
     // Nabiz (H) kesilirse kart 350 ms'de kilitlenir, lazer de soner (tazeleme olsa bile).
@@ -193,7 +193,7 @@ int main(){
 
     // LZR1 yayini: PC lazer destegini/durumunu buradan okur.
     reset(); command(Serial,"E"); command(Serial,"L1"); kos(30000);
-    assert(Serial.out.find("LZR1,1,40,0,0,1")!=std::string::npos);
+    assert(Serial.out.find("LZR1,1,70,0,0,1")!=std::string::npos);   // acilis gucu %70
     std::cout<<"LZR1 durum yayini: passed\n";
   }
 }

@@ -81,13 +81,13 @@ AccelStepper panMotor(AccelStepper::DRIVER, PAN_STEP_PIN, PAN_DIR_PIN);
 
 // ---- LAZER GUCU (PWM) ----
 // Lazer surucusunun PWM/TTL girisi duty oraniyla gucu belirler: %40 duty ≈ %40 ortalama
-// optik guc. Tam guc istemiyoruz — G komutuyla ayarlanir, varsayilan %40.
+// optik guc. Tam guc istemiyoruz — G komutuyla ayarlanir, varsayilan %70.
 // ⚠ FREKANS [VARSAYIM]: CNC lazer surucileri tipik olarak ~1 kHz PWM ile surulur (GRBL
 //   varsayilani da budur). Modul tepki vermezse ONCE bu degeri deneyin (200 Hz / 5 kHz /
 //   20 kHz); yanlis frekansta surucu sinyali hic gormeyebilir ya da titresim yapar.
 const int LAZER_PWM_FREK = 1000;                      // Hz
 const int LAZER_PWM_COZ  = 8;                         // bit -> 0..256 duty
-const int LAZER_GUC_VARSAYILAN = 40;                  // % (app/protokol.py ile AYNI)
+const int LAZER_GUC_VARSAYILAN = 70;                  // % (app/protokol.py ile AYNI)
 int lazerYuzde = LAZER_GUC_VARSAYILAN;
 
 // ---- ATES OLU ADAM ANAHTARI (dead-man switch) ----
