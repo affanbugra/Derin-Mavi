@@ -853,6 +853,18 @@ ELLE_KESME_BEKLE_S = 1.5
 # balon ustunde yakma 1.35 -> ~1.47 sn, 'patladi' %30 -> %35; yanarken balonda oran degismedi (%54).
 NISAN_DISARI_KARE = 5
 NISAN_DISARI_ORAN = 1.5
+# TOLERANSLI TUTMA (lazer kutucugundaki anahtar, ayar "ates_tolerans", varsayilan KAPALI).
+# 27.09 20:30 saha, A3 hareketli 16 px balon: 16 yakma 0.2-1.5 sn, nisan balonun kenarinda
+# gidip gelirken lazer kesilip ancak yeni nisan kanitiyla yeniden aciliyordu; balon hic
+# isinamadi. Acikken YANAN lazer yalniz su kosullarda kesilir (acma kurali ayni):
+TOLERANS_KAYIP_KARE = 8          # balon bu kadar ardisik karede gorulmezse (~0.35 sn; eski 2)
+TOLERANS_DISARI_KARE = 12        # nisan bu kadar ardisik karede ...            (~0.5 sn; eski 5)
+TOLERANS_DISARI_ORAN = 2.0       # ... balon yaricapinin bu katindan uzaksa             (eski 1.5)
+
+
+def ates_toleransli():
+    """Yanan lazer icin toleransli tutma acik mi (ayar "ates_tolerans"; varsayilan 0 = eski)."""
+    return bool(int(algi.AYAR.get("ates_tolerans", algi.VARSAYILAN_AYAR["ates_tolerans"])))
 
 
 def ates_parca_suresi():
@@ -893,7 +905,7 @@ def otonom_ates_suresi():
 # HEMEN yazilir. Goruntu isleme panelinin "Sıfırla"si bunlara dokunmaz — resim ayarlarini
 # sifirlayan operator lazer kalibrasyonunu kaybetmesin.
 LAZER_KUTUCUK_AYARLARI = ("otonom_ates_sure", "ates_parcali", "ates_parca_sure", "lazer_ofset_x",
-                          "lazer_ofset_y")
+                          "lazer_ofset_y", "ates_tolerans")
 # Atisi tamamlanan hedef bu sure YENIDEN secilmez (maket balonu patlasa da rayda gorunur).
 # ⚠ Yalniz O HEDEF yasaklanir; diger hedeflere hemen kilitlenilir (algi.hedef_vuruldu).
 # Eskiden bu sure boyunca HICBIR hedefe kilitlenilmiyordu — Asama 2'de tur basina 3 hedef.
@@ -2918,6 +2930,21 @@ class MainWindow(QMainWindow):
         self.parcali_sw.toggled.connect(self._parcali_ayarla)
         bas.addWidget(self.parcali_sw, 0, Qt.AlignBottom)
         v.addLayout(bas)
+        tb = QHBoxLayout()
+        gt = QLabel("TOLERANSLI TUTMA (BALON)")
+        gt.setObjectName("ayargrup")
+        gt.setToolTip("KAPALI (varsayılan): eski davranış — lazer yandıktan sonra balon 2 karede "
+                      "görünmezse ya da nişan 5 karede balon yarıçapının 1.5 katından uzaklaşırsa "
+                      "söner. AÇIK: yanan lazer daha toleranslı tutulur — balon 8 karede "
+                      "görünmezse ya da nişan 12 karede yarıçapın 2 katından uzaklaşırsa söner. "
+                      "Hareketli balonda nişan kenarda gidip gelirken lazer kesilmez. Lazeri "
+                      "AÇMA kuralı ve güvenlik kesmeleri (acil durdur, atışa yasak açı, dost "
+                      "engeli, kilit değişimi) her iki durumda da aynıdır.")
+        tb.addWidget(gt, 1)
+        self.tolerans_sw = AppleSwitch(checked=ates_toleransli(), kucuk=True)
+        self.tolerans_sw.toggled.connect(self._tolerans_ayarla)
+        tb.addWidget(self.tolerans_sw, 0, Qt.AlignBottom)
+        v.addLayout(tb)
         gb = QLabel("PARÇA SÜRESİ (BALON)")
         gb.setObjectName("ayargrup")
         gb.setToolTip("Balonda lazer en fazla bu kadar yanar, söner; aynı balon yeniden görülüp "
@@ -2951,6 +2978,12 @@ class MainWindow(QMainWindow):
         self._parca_suresi_yaz()
         self._lazer_kayit_iste()
 
+    def _tolerans_ayarla(self, acik):
+        """Anahtar -> ayar (hemen gecerli, ayarlar.json'a yazilir)."""
+        algi.ayar_guncelle(ates_tolerans=1 if acik else 0)
+        self._parca_suresi_yaz()
+        self._lazer_kayit_iste()
+
     def _parca_suresi_ayarla(self, onda):
         """Kaydirici (0.1 sn birim) -> ayar. Yanan parcayi degistirmez (parca basinda okunur)."""
         algi.ayar_guncelle(ates_parca_sure=onda / 10.0)
@@ -2976,6 +3009,11 @@ class MainWindow(QMainWindow):
             sw.blockSignals(True)
             sw.setChecked(ates_parcali())
             sw.blockSignals(False)
+        tsw = getattr(self, "tolerans_sw", None)
+        if tsw is not None and tsw.isChecked() != ates_toleransli():
+            tsw.blockSignals(True)
+            tsw.setChecked(ates_toleransli())
+            tsw.blockSignals(False)
 
     def _ates_suresi_ayarla(self, onda):
         """Kaydirici (0.1 sn birim) -> ayar. Suren atis turunu degistirmez (tur basinda okunur)."""
@@ -3976,7 +4014,8 @@ class MainWindow(QMainWindow):
                 and d.get("ey") is not None):
             yaricap = max(1.0, 0.25 * (abs(kutu[2] - kutu[0]) + abs(kutu[3] - kutu[1])))
             u = math.hypot(float(d["ex"]), float(d["ey"])) / yaricap
-            self._parca_disarida = self._parca_disarida + 1 if u > NISAN_DISARI_ORAN else 0
+            oran = TOLERANS_DISARI_ORAN if ates_toleransli() else NISAN_DISARI_ORAN
+            self._parca_disarida = self._parca_disarida + 1 if u > oran else 0
 
     def _nisan_kapisini_besle(self, d, simdi):
         """ATES KAPISI (HK.AtesKapisi) icin kanit: yalniz modelin o karede GERCEKTEN gordugu
@@ -4002,8 +4041,12 @@ class MainWindow(QMainWindow):
             ht = self._tilt_takip.simdiki_hata(simdi, None if tilt is None else TS.kamera_acisi(tilt))
             if hp is not None and ht is not None:
                 simdiki = (hp * ppd, ht * ppd)
+        # Takipcinin olu bolgesi: nisan bunun icindeyse namlu artik oynamaz; kapi da o
+        # nisani (balon icinde kaldikca) kabul etmeli — yoksa ikisi birbirini bekler (27.09).
+        olu = ((d["olu_x"], d["olu_y"]) if d.get("olu_x") is not None
+               and d.get("olu_y") is not None else None)
         self._ates_kapisi.kare(d["t"], simdi, d.get("id"), d["ex"], d["ey"], yaricap,
-                               simdiki, takipli=takipli)
+                               simdiki, takipli=takipli, olu_px=olu)
 
     def _takip_olcum_geldi(self, d):
         """SUREKLI TAKIP — iki eksen de konumunu bildiriyorsa otonom yolun sahibi.
@@ -5596,9 +5639,12 @@ class MainWindow(QMainWindow):
             return
         if self._parca_acik:
             gecen = simdi - self._parca_bas_t
-            kayip = (ates_kayipta_kes() and self._parca_kayip >= PARCA_KAYIP_KARE
+            tol = ates_toleransli()        # kapaliyken eski esikler birebir (varsayilan)
+            kayip = (ates_kayipta_kes()
+                     and self._parca_kayip >= (TOLERANS_KAYIP_KARE if tol else PARCA_KAYIP_KARE)
                      and gecen >= PARCA_EN_AZ_S)
-            disari = self._parca_disarida >= NISAN_DISARI_KARE and gecen >= PARCA_EN_AZ_S
+            disari = (self._parca_disarida >= (TOLERANS_DISARI_KARE if tol else NISAN_DISARI_KARE)
+                      and gecen >= PARCA_EN_AZ_S)
             if simdi >= self._otonom_ates_bitis_t or kayip or disari:
                 self._balon_parca_bitir(simdi, "Balon lazer altında görünmüyor — lazer kesildi"
                                         if kayip else "Nişan balondan çıktı — lazer kesildi"

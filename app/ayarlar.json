@@ -45,5 +45,6 @@
   "kamera_pozlama": 0,
   "sahi": 0,
   "sahi_dilim": 640,
-  "sahi_ortusme": 0.2
+  "sahi_ortusme": 0.2,
+  "ates_tolerans": 1
 }

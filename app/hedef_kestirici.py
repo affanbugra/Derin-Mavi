@@ -1220,6 +1220,13 @@ class AtesKapisi:
     DIS_ORAN = 1.0
     SIMDI_ORAN = 0.6
     TAZE_S = 0.2           # karar bu kadar eskiyse gecmez (yeni kare gelmediyse)
+    # OLU BOLGE KILITLENMESI (27.09 20:20 saha, uzak balon 13 px, R ~6.25 px): takipci
+    # nisan olu bolgedeyken (nisan.TABAN_OLU_BOLGE_PX = 4 px) namluyu OYNATMAZ; kalan hata
+    # 3.0/1.5 px (u = 0.54 > IC_ORAN) oldugu icin kapi da ACILMADI — 17 sn kilitli, ates yok.
+    # Olu bolgedeki kare (takipcinin artik duzeltmedigi nisan) balonun ICINDE kaldikca, en
+    # fazla yaricapin TUTMA_AZAMI'si, iyi sayilir. Yalniz kucuk balonu etkiler: 4 px olu
+    # bolge R >= 8 px'te (~16 px balon) zaten IC_ORAN'in icinde.
+    TUTMA_AZAMI = 0.75
 
     def __init__(self):
         self.sifirla()
@@ -1230,13 +1237,16 @@ class AtesKapisi:
         self._hazir_t = None
         self.durum = None      # son degerlendirme (arayuzdeki "neden ates yok" satiri)
 
-    def kare(self, t_kare, simdi, hedef_id, ex, ey, yaricap, simdiki=None, takipli=None):
+    def kare(self, t_kare, simdi, hedef_id, ex, ey, yaricap, simdiki=None, takipli=None,
+             olu_px=None):
         """Modelin gordugu bir kare: nisan hatasi (ex, ey) px, balon yaricapi px,
         `simdiki` = takipcilerin su an icin kestirdigi hata (px, px). `takipli`: surekli
         takip var mi (konum bildiren kart). Takip varken kestirim HAZIR DEGILSE (kilit yeni
         kuruldu / sifirlandi, namlu henuz donuyor olabilir) kapi KAPALI; benzetimde bu
         durumda kare kanitina dusmek ates BASLARKEN lazeri balon disinda %4 -> %8 yapti.
-        Konum bildirmeyen eski kartta (takipli False) yalniz kare kaniti. Doner: kapi acik mi."""
+        Konum bildirmeyen eski kartta (takipli False) yalniz kare kaniti. `olu_px`: o karede
+        takipcinin olu bolgesi (px, px); nisan bunun icindeyse esik TUTMA_AZAMI (bkz. sabit).
+        Doner: kapi acik mi."""
         if takipli is None:
             takipli = simdiki is not None
         if hedef_id != self._hedef:
@@ -1244,19 +1254,24 @@ class AtesKapisi:
             self._hedef = hedef_id
         R = max(1.0, float(yaricap))
         u = math.hypot(float(ex), float(ey)) / R
+        tutma = bool(olu_px is not None and abs(float(ex)) <= float(olu_px[0])
+                     and abs(float(ey)) <= float(olu_px[1]))
+        ic = max(self.IC_ORAN, self.TUTMA_AZAMI) if tutma else self.IC_ORAN
         t_kare = float(t_kare)
-        self._kareler.append((t_kare, u))
-        self._kareler = [(t, v) for t, v in self._kareler if t >= t_kare - self.PENCERE_S]
-        iyi = sum(1 for _, v in self._kareler if v <= self.IC_ORAN)
-        disarida = any(v > self.DIS_ORAN for _, v in self._kareler)
+        self._kareler.append((t_kare, u, u <= ic))
+        self._kareler = [k for k in self._kareler if k[0] >= t_kare - self.PENCERE_S]
+        iyi = sum(1 for _, _, ok in self._kareler if ok)
+        disarida = any(v > self.DIS_ORAN for _, v, _ in self._kareler)
         su_an = None if simdiki is None else math.hypot(*simdiki) / R
         if takipli:
-            su_an_iyi = su_an is not None and su_an <= self.SIMDI_ORAN
+            su_an_iyi = su_an is not None and su_an <= (max(self.SIMDI_ORAN, ic) if tutma
+                                                        else self.SIMDI_ORAN)
         else:
             su_an_iyi = True
         acik = iyi >= self.EN_AZ_KARE and not disarida and su_an_iyi
         self._hazir_t = float(simdi) if acik else None
-        self.durum = dict(iyi=iyi, gerek=self.EN_AZ_KARE, disarida=disarida, u=u, su_an=su_an)
+        self.durum = dict(iyi=iyi, gerek=self.EN_AZ_KARE, disarida=disarida, u=u, su_an=su_an,
+                          tutma=tutma)
         return acik
 
     def hazir(self, simdi, hedef_id):
@@ -1837,6 +1852,25 @@ if __name__ == "__main__":
     kp = AtesKapisi()                                     # balonun ic yarisi degil (u=0.7)
     kp.kare(0.00, 0.13, "B1", 5.6, 0.0, R, (0.0, 0.0))
     assert not kp.kare(0.06, 0.19, "B1", 0.0, 5.6, R, (0.0, 0.0)), "kenardaki nisanla ates"
+    # 16b. OLU BOLGE KILITLENMESI (27.09 20:20 kaydi): uzak balon R=6.25, hata 3.0/1.5 px
+    #      (u=0.54), takipci olu bolgede (4 px) namluyu oynatmiyor. Eskiden kapi 17 sn hic
+    #      acilmadi. Olu bolgedeki nisan balonun icindeyse (<= TUTMA_AZAMI) kabul edilir.
+    Ru, olu4 = 6.25, (4.0, 4.0)
+    kp = AtesKapisi()
+    kp.kare(0.00, 0.13, "B6", 3.0, 1.5, Ru, (3.0, 1.5), olu_px=olu4)
+    assert kp.kare(0.06, 0.19, "B6", 3.0, 1.5, Ru, (3.0, 1.5), olu_px=olu4), \
+        "olu bolgede duran nisan balonun icinde ama kapi acilmadi (kilitlenme)"
+    kp = AtesKapisi()                                     # ayni kareler, olu bolge bilinmiyor
+    kp.kare(0.00, 0.13, "B6", 3.0, 1.5, Ru, (3.0, 1.5))
+    assert not kp.kare(0.06, 0.19, "B6", 3.0, 1.5, Ru, (3.0, 1.5)), "olu bolgesiz eski esik degisti"
+    kp = AtesKapisi()                                     # olu bolgede ama balon kenarinda (u=0.9)
+    kp.kare(0.00, 0.13, "B6", 4.0, 3.8, Ru, (4.0, 3.8), olu_px=olu4)
+    assert not kp.kare(0.06, 0.19, "B6", 4.0, 3.8, Ru, (4.0, 3.8), olu_px=olu4), \
+        "balon kenarindaki nisanla ates (TUTMA_AZAMI asildi)"
+    kp = AtesKapisi()                                     # buyuk balon: olu bolge kapiyi gevsetmez
+    kp.kare(0.00, 0.13, "B7", 5.6, 0.0, R, (5.6, 0.0), olu_px=olu4)
+    assert not kp.kare(0.06, 0.19, "B7", 0.0, 5.6, R, (0.0, 5.6), olu_px=olu4), \
+        "olu bolge disindaki nisan gevsek esikle kabul edildi"
     kp = AtesKapisi()                                     # SU AN balon disi (hareketli hedef)
     kp.kare(0.00, 0.13, "B1", 1.0, 1.0, R, (6.0, 0.0))
     assert not kp.kare(0.06, 0.19, "B1", 1.0, 1.0, R, (6.0, 0.0)), "su anki kestirim balonun disinda, ates"

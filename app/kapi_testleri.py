@@ -371,6 +371,23 @@ def _dwell_doldu(w, bid=None):
         w._ates_kapisi.kare(t - geri, t, bid, 0.0, 0.0, 10.0, (0.0, 0.0), takipli=True)
 
 
+def test_ates_kapisi_olu_bolgeyi_alir(w):
+    """27.09 20:20 saha: uzak balonda (13 px) takipci olu bolgede (4 px) namluyu durdurdu,
+    kalan hata 3.0/1.5 px kapinin esiginin disindaydi -> 17 sn kilitli ama ates yok. Kapi
+    takipcinin olu bolgesini BILMELI (HK.AtesKapisi.TUTMA_AZAMI); arayuz iletmezse duzeltme
+    kagit ustunde kalir."""
+    alinan = {}
+    eski = w._ates_kapisi.kare
+    w._ates_kapisi.kare = lambda *a, **k: alinan.update(k) or False
+    try:
+        w._nisan_kapisini_besle({"var": True, "kaynak": "balon_uzak", "box": (100, 100, 112, 113),
+                                 "ex": 3.0, "ey": 1.5, "olu_x": 4.0, "olu_y": 4.0, "t": 1.0,
+                                 "id": "B6", "w": 1280}, 1.0)
+    finally:
+        w._ates_kapisi.kare = eski
+    assert alinan.get("olu_px") == (4.0, 4.0), ("olu bolge ates kapisina iletilmedi", alinan)
+
+
 def _parca_bitir(w, yakilan):
     """Yanan balon parcasini `yakilan` sn yanmis olarak bitirmeye hazirla (gercek saat):
     bir sonraki _otonom_ates_kontrol parcayi bitirir ve turun yakilan suresine ekler."""
@@ -1696,6 +1713,94 @@ def test_balon_surekli_yakma():
             w.close()
 
 
+def test_balon_toleransli_tutma():
+    """27.09 20:30 saha (A3, hareketli 16 px balon): lazer 16 kez 0.2-1.5 sn yanip kesildi, balon
+    isinamadi. Lazer kutucugundaki TOLERANSLI TUTMA anahtari (ayar "ates_tolerans", varsayilan
+    KAPALI = eski davranis, test_balon_surekli_yakma) acikken YANAN lazer: nisan 1.5-2.0
+    yaricapta kalsa da, TOLERANS_DISARI_KARE-1 karede 2 yaricaptan uzakta kalsa da, balon 2-7
+    karede gorulmese de SONMEZ; TOLERANS_DISARI_KARE / TOLERANS_KAYIP_KARE'de soner."""
+    import balon_takip
+    saat = _SahteZaman.simdi
+    gercek = A.time
+    A.time = _SahteZaman
+    w = None
+    eski_bt = (balon_takip.ates_basladi, balon_takip.ates_bitti, balon_takip.ates_tamamlandi)
+    eski_ayar = {k: algi.AYAR[k] for k in ("otonom_ates_sure", "ates_parca_sure", "ates_kayipta_kes",
+                                           "ates_parcali", "ates_tolerans")}
+    try:
+        balon_takip.ates_basladi = lambda g, simdi=None, sure=None: None
+        balon_takip.ates_bitti = lambda simdi=None: None
+        balon_takip.ates_tamamlandi = lambda g, simdi=None: None
+        assert algi.VARSAYILAN_AYAR["ates_tolerans"] == 0, "toleransli tutma varsayilan olarak acik"
+        w = pencere()
+        algi.ayar_guncelle(otonom_ates_sure=5.0, ates_parca_sure=0.5, ates_kayipta_kes=1,
+                           ates_parcali=0, ates_tolerans=1)
+        k = kontrol_mod.Kontrol("mock", tilt_kaynak="mock")
+        k.tilt._saat = lambda: saat[0]
+        k.tilt.mock.t = k.tilt.mock.son_canli = saat[0]
+        k.tilt.mock.lazer_destek = False
+        w.kontrol = k
+        for _ in range(26):
+            saat[0] += 0.05
+            k.oku()
+        w._acilis_yukselisi_bekliyor = False
+        w._acilis_hizala()
+        w.mod, w.asama = "Otonom", "Aşama 3"
+
+        def olc(var=True, ex=0.0):
+            saat[0] += 1 / 16.0
+            k.oku()
+            d = {"var": var, "t": saat[0]}
+            if var:
+                d.update({"ex": ex, "ey": 0.0, "olu_x": 5.0, "olu_y": 5.0, "w": 1280, "id": "B1",
+                          "kaynak": "balon_pencere", "box": (630, 350, 650, 370)})   # yaricap 10 px
+            w._takip_olcum_geldi(d)
+
+        def kontrol(hayalet=False):
+            w._otonom_ates_kontrol(_balon_veri(id="B1", tip="Düşman", hayalet=hayalet), False)
+            return k.mock.lazer is True
+
+        def yak():
+            for _ in range(12):
+                olc()
+                if kontrol():
+                    return
+            raise AssertionError("kurulum: nisan kapisi acildi, ates baslamadi")
+
+        yak()
+        # 1) nisan 1.8 yaricapta (eski esik 1.5 -> 5 karede sonerdi): yanmaya devam
+        for _ in range(A.NISAN_DISARI_KARE + 3):
+            olc(ex=18.0)
+            assert kontrol(), "toleransli tutmada 1.8 yaricaptaki nisan lazeri sondurdu"
+        # 2) 2.5 yaricapta N-1 kare surer, N'de soner
+        olc(ex=3.0); kontrol()
+        for _ in range(A.TOLERANS_DISARI_KARE - 1):
+            olc(ex=25.0)
+            assert kontrol(), "TOLERANS_DISARI_KARE dolmadan lazer sondu"
+        olc(ex=25.0)
+        assert not kontrol(), "nisan uzun sure balondan uzak, lazer SONMEDI"
+        # 3) balon 2 karede gorulmedi (eski esik): surer; TOLERANS_KAYIP_KARE'de soner
+        yak()
+        olc(var=False); olc(var=False)
+        assert kontrol(hayalet=True), "toleransli tutmada 2 kare kayip lazeri sondurdu"
+        for _ in range(A.TOLERANS_KAYIP_KARE - 2):
+            olc(var=False)
+        assert not kontrol(hayalet=True), "balon uzun sure gorulmedi, lazer SONMEDI"
+        # 4) anahtar KAPALI: eski davranis (2 kare kayipta soner)
+        w._otonom_turu_kes("test")
+        algi.ayar_guncelle(ates_tolerans=0)
+        yak()
+        olc(var=False); olc(var=False); olc(var=False)
+        assert not kontrol(hayalet=True), "anahtar kapaliyken eski kayip kurali calismadi"
+        w._otonom_turu_kes("test")
+    finally:
+        balon_takip.ates_basladi, balon_takip.ates_bitti, balon_takip.ates_tamamlandi = eski_bt
+        algi.ayar_guncelle(**eski_ayar)
+        A.time = gercek
+        if w is not None:
+            w.close()
+
+
 def test_ayar_bilgi_kutusu_ipucu():
     """27.09 saha: ayarlardaki "i" kutulari "calismiyor". Kutu TIKLANINCA ve fareyle ustunde
     beklenince (gorunum -> sahne yolu; arayuz QGraphicsView icinde) aciklamayi gostermeli;
@@ -1803,6 +1908,7 @@ def test_lazer_kutucugu_sure_ve_nisangah(w):
 
 
 GERCEK_KART_TESTLERI = [
+    test_ates_kapisi_olu_bolgeyi_alir,
     test_estop_hareketi_keser,
     test_estop_atesi_keser,
     test_donanim_butonu_yazilimdan_kaldirilamaz,
@@ -1835,6 +1941,7 @@ TAKIP_TESTLERI = [
     test_balon_nisan_kapisi_kanitla_acilir,
     test_balon_parcali_yakma,
     test_balon_surekli_yakma,
+    test_balon_toleransli_tutma,
     test_ayar_bilgi_kutusu_ipucu,
     test_surekli_takip_konum_kipi,
     test_surekli_takip_yorunge_kipi,

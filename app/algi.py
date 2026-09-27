@@ -182,6 +182,11 @@ VARSAYILAN_AYAR = {
     # balon lazer altinda da goruluyor) — nisan balondayken yanar, balon gorulmezse (patladi)
     # ya da nisan balondan cikinca kesilir. 1 = eski parcali yakma (ates_parca_sure'lik parcalar).
     "ates_parcali": 0,
+    # TOLERANSLI TUTMA (27.09 saha, BALON; lazer kutucugundaki anahtar): 1 = lazer YANDIKTAN
+    # sonra "balon gorulmuyor" ve "nisan balondan cikti" kesmeleri gevser (arayuz_qt
+    # TOLERANS_*). Acma kurali ve guvenlik kesmeleri (E-Stop, yasak aci, dost engeli, kilit
+    # degisimi, mod) AYNEN. 0 = eski davranisin birebir aynisi.
+    "ates_tolerans": 0,
     # Balon nisan ofseti: nisan noktasi kutunun ALT KENARINDAN bu kadar asagi kayar,
     # birim = HEDEF KUTUSUNUN YUKSEKLIGI. Model balonu goremedigi icin (best.pt 4
     # sinif, balon YOK) balonun yeri maketten GEOMETRIK olarak kestirilir.
@@ -330,7 +335,7 @@ AYAR_SINIR = {
     "fov": (20.0, 140.0),
     "kp": (0.05, 1.50), "kd": (0.0, 0.50), "olu_bolge": (0.0, 0.10),
     "lazer_ofset_x": (-0.15, 0.15), "lazer_ofset_y": (-0.15, 0.15),
-    "otonom_ates_sure": (0.5, 5.0), "ates_parca_sure": (0.2, 5.0), "ates_kayipta_kes": (0, 1), "ates_parcali": (0, 1),
+    "otonom_ates_sure": (0.5, 5.0), "ates_parca_sure": (0.2, 5.0), "ates_kayipta_kes": (0, 1), "ates_parcali": (0, 1), "ates_tolerans": (0, 1),
     "balon_ofset": (0.0, 2.0), "olu_bolge_kutu": (0.02, 0.60), "nisan_govde": (0, 1),
     "takip_ppd_pan": (4.0, 60.0), "takip_bosluk": (0.0, 4.0), "kamera_gecikme": (0.0, 0.3),
     "takip_ekf": (0, 1),
